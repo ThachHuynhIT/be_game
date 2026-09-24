@@ -1,0 +1,27 @@
+{
+  "name": "be_game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend for the Tiến Lên Miền Nam online game: WebSocket server on Vercel Functions (or any Node host), rooms in Redis",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/local.ts",
+    "start": "tsx src/local.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.9.9",
+    "ioredis": "^5.11.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  }
+}
