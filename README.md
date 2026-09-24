@@ -1,5 +1,7 @@
 # be_game
 
+> Hai game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`) và **Mèo Nổ** (`/api/meono/ws`, `/api/meono/rooms`, `/api/meono/leaderboard`), cùng chung hạ tầng hub / Redis. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`); Mèo Nổ ở `src/meono/`, gồm bộ cơ bản và 2 gói mở rộng do chủ phòng chọn (Mèo Tự Huỷ, Hỗn Loạn).
+
 Backend cho game **Tiến Lên Miền Nam online**, gồm luật chơi, phòng chơi và WebSocket realtime. Phần giao diện nằm trong repo [portfolio](https://github.com/ThachHuynhIT/portfolio) (`/tien-len`) và kết nối tới backend này qua `NEXT_PUBLIC_TIENLEN_SERVER_URL`.
 
 ```

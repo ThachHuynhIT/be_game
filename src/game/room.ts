@@ -79,6 +79,13 @@ export interface Spectator {
   lastSeen: number;
 }
 
+/** The part of a room that spectators and emoji need — shared by every game. */
+export interface SocialRoom {
+  seats: ({ id: string; token: string; name: string } | null)[];
+  spectators?: Spectator[];
+  reactions?: Reaction[];
+}
+
 export const MAX_SPECTATORS = 30;
 /** Reactions older than this are dropped from the room state. */
 export const REACTION_TTL_MS = 6_000;
@@ -158,10 +165,10 @@ export function leaveRoom(room: RoomState, player: RoomPlayer, now: number) {
   tick(room, now);
 }
 
-export const findSpectator = (room: RoomState, token: string) => room.spectators?.find((x) => x.token === token) ?? null;
+export const findSpectator = (room: SocialRoom, token: string) => room.spectators?.find((x) => x.token === token) ?? null;
 
 /** Watch a room without a seat. */
-export function watchRoom(room: RoomState, token: string, name: string, now: number): { ok: true } | { ok: false; error: string } {
+export function watchRoom(room: SocialRoom, token: string, name: string, now: number): { ok: true } | { ok: false; error: string } {
   if (typeof token !== "string" || token.length < 8 || token.length > 128) return { ok: false, error: "Phiên không hợp lệ" };
   pruneSpectators(room, now);
   const existing = findSpectator(room, token);
@@ -181,18 +188,18 @@ export function spectatorHeartbeat(spectator: Spectator, now: number): boolean {
   return true;
 }
 
-export function unwatch(room: RoomState, token: string) {
+export function unwatch(room: SocialRoom, token: string) {
   room.spectators = (room.spectators ?? []).filter((x) => x.token !== token);
 }
 
-function pruneSpectators(room: RoomState, now: number): boolean {
+export function pruneSpectators(room: SocialRoom, now: number): boolean {
   const before = room.spectators?.length ?? 0;
   if (!before) return false;
   room.spectators = room.spectators!.filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS);
   return room.spectators.length !== before;
 }
 
-function pruneReactions(room: RoomState, now: number): boolean {
+export function pruneReactions(room: SocialRoom, now: number): boolean {
   const before = room.reactions?.length ?? 0;
   if (!before) return false;
   room.reactions = room.reactions!.filter((r) => now - r.at < REACTION_TTL_MS);
@@ -200,9 +207,9 @@ function pruneReactions(room: RoomState, now: number): boolean {
 }
 
 /** Send an emoji to everyone in the room (players and spectators). */
-export function react(room: RoomState, token: string, emoji: unknown, now: number): { ok: true } | { ok: false; error: string } {
+export function react(room: SocialRoom, token: string, emoji: unknown, now: number): { ok: true } | { ok: false; error: string } {
   if (typeof emoji !== "string" || !(EMOJIS as readonly string[]).includes(emoji)) return { ok: false, error: "Emoji không hợp lệ" };
-  const player = findByToken(room, token);
+  const player = room.seats.find((p) => p?.token === token) ?? null;
   const spectator = player ? null : findSpectator(room, token);
   if (!player && !spectator) return { ok: false, error: "Bạn chưa vào phòng" };
   pruneReactions(room, now);

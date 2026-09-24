@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 import type { GameRecord, LeaderboardEntry } from "../game/protocol";
-import type { RoomState } from "../game/room";
 
 /**
  * Where rooms live. On Vercel a room must be shared by every function instance
@@ -9,27 +8,35 @@ import type { RoomState } from "../game/room";
  * (a single local process) an in-memory store does the same job.
  *
  * The store also keeps the all-time leaderboard and an index of recently
- * active rooms for the lobby.
+ * active rooms for the lobby. Each game has its own key namespace.
  */
-export interface StoredRoom {
-  state: RoomState;
+
+/** Anything with a room code can be stored (Tiến Lên and Mèo Nổ rooms). */
+export interface CodedRoom {
+  code: string;
+}
+
+export type GameKind = "tienlen" | "meono";
+
+export interface StoredRoom<S extends CodedRoom = CodedRoom> {
+  state: S;
   version: number;
 }
 
-export interface RoomStore {
+export interface RoomStore<S extends CodedRoom = CodedRoom> {
   readonly kind: "redis" | "memory";
   /** Create a room; false if the code is taken. */
-  create(state: RoomState): Promise<boolean>;
-  load(code: string): Promise<StoredRoom | null>;
+  create(state: S): Promise<boolean>;
+  load(code: string): Promise<StoredRoom<S> | null>;
   /** Compare-and-swap: saves only if the stored version still equals `expectedVersion`, then notifies subscribers. */
-  save(state: RoomState, expectedVersion: number): Promise<boolean>;
+  save(state: S, expectedVersion: number): Promise<boolean>;
   /** Called after every successful save of this room (from any instance). Returns an unsubscribe function. */
   subscribe(code: string, listener: () => void): Promise<() => void>;
   /** Add a finished game to the leaderboard. Idempotent per `record.id`. */
   recordGame(record: GameRecord): Promise<void>;
   leaderboard(limit: number): Promise<LeaderboardEntry[]>;
   /** Most recently updated rooms, newest first. */
-  recentRooms(limit: number): Promise<RoomState[]>;
+  recentRooms(limit: number): Promise<S[]>;
 }
 
 /** Rooms expire after this long without any change. */
@@ -39,12 +46,18 @@ const ROOM_INDEX_WINDOW_MS = 60 * 60 * 1000;
 /** How long a recorded game id is remembered (dedupes retries). */
 const RECORD_DEDUPE_SECONDS = 30 * 24 * 60 * 60;
 
-const roomKey = (code: string) => `tienlen:room:${code}`;
-const roomChannel = (code: string) => `tienlen:room:${code}:changed`;
-const ROOM_INDEX = "tienlen:rooms";
-const LB_POINTS = "tienlen:lb:points";
-const lbPlayerKey = (key: string) => `tienlen:lb:p:${key}`;
-const recordKey = (id: string) => `tienlen:lb:done:${id}`;
+/** Redis key layout per game; Tiến Lên keeps its original `tienlen:` keys. */
+function keysFor(game: GameKind) {
+  return {
+    room: (code: string) => `${game}:room:${code}`,
+    channel: (code: string) => `${game}:room:${code}:changed`,
+    channelPrefix: `${game}:room:`,
+    index: `${game}:rooms`,
+    lbPoints: `${game}:lb:points`,
+    lbPlayer: (key: string) => `${game}:lb:p:${key}`,
+    record: (id: string) => `${game}:lb:done:${id}`,
+  };
+}
 
 /** Leaderboard identity: the display name, case/space-insensitive (there are no accounts). */
 export const nameKey = (name: string) => name.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
@@ -59,7 +72,7 @@ interface LbRow {
 const toRows = (record: GameRecord): LbRow[] =>
   record.results.map((r) => ({ key: nameKey(r.name), name: r.name, delta: r.delta, win: r.rank === 0 ? 1 : 0 }));
 
-class MemoryRoomStore implements RoomStore {
+class MemoryRoomStore<S extends CodedRoom> implements RoomStore<S> {
   readonly kind = "memory" as const;
   private rooms = new Map<string, { json: string; version: number; expires: number; touched: number }>();
   private events = new EventEmitter().setMaxListeners(0);
@@ -75,12 +88,12 @@ class MemoryRoomStore implements RoomStore {
     return r;
   }
 
-  private put(state: RoomState, version: number) {
+  private put(state: S, version: number) {
     const now = Date.now();
     this.rooms.set(state.code, { json: JSON.stringify(state), version, expires: now + ROOM_TTL_SECONDS * 1000, touched: now });
   }
 
-  async create(state: RoomState) {
+  async create(state: S) {
     if (this.live(state.code)) return false;
     this.put(state, 1);
     return true;
@@ -88,10 +101,10 @@ class MemoryRoomStore implements RoomStore {
 
   async load(code: string) {
     const r = this.live(code);
-    return r ? { state: JSON.parse(r.json) as RoomState, version: r.version } : null;
+    return r ? { state: JSON.parse(r.json) as S, version: r.version } : null;
   }
 
-  async save(state: RoomState, expectedVersion: number) {
+  async save(state: S, expectedVersion: number) {
     const r = this.live(state.code);
     if (!r || r.version !== expectedVersion) return false;
     this.put(state, expectedVersion + 1);
@@ -132,7 +145,7 @@ class MemoryRoomStore implements RoomStore {
       .filter(([code, r]) => r.touched >= since && this.live(code))
       .sort((a, b) => b[1].touched - a[1].touched)
       .slice(0, limit)
-      .map(([, r]) => JSON.parse(r.json) as RoomState);
+      .map(([, r]) => JSON.parse(r.json) as S);
   }
 }
 
@@ -170,42 +183,39 @@ return 1`;
 
 type Redis = import("ioredis").Redis;
 
-class RedisRoomStore implements RoomStore {
+class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
   readonly kind = "redis" as const;
   private sub: Redis | null = null;
   private listeners = new Map<string, Set<() => void>>();
+  private k: ReturnType<typeof keysFor>;
 
-  constructor(private redis: Redis) {}
+  constructor(
+    private redis: Redis,
+    game: GameKind,
+  ) {
+    this.k = keysFor(game);
+  }
 
-  async create(state: RoomState) {
-    const res = await this.redis.eval(
-      CREATE_SCRIPT,
-      2,
-      roomKey(state.code),
-      ROOM_INDEX,
-      JSON.stringify(state),
-      ROOM_TTL_SECONDS,
-      Date.now(),
-      state.code,
-    );
+  async create(state: S) {
+    const res = await this.redis.eval(CREATE_SCRIPT, 2, this.k.room(state.code), this.k.index, JSON.stringify(state), ROOM_TTL_SECONDS, Date.now(), state.code);
     return res === 1;
   }
 
   async load(code: string) {
-    const [json, version] = await this.redis.hmget(roomKey(code), "state", "version");
-    return json && version ? { state: JSON.parse(json) as RoomState, version: Number(version) } : null;
+    const [json, version] = await this.redis.hmget(this.k.room(code), "state", "version");
+    return json && version ? { state: JSON.parse(json) as S, version: Number(version) } : null;
   }
 
-  async save(state: RoomState, expectedVersion: number) {
+  async save(state: S, expectedVersion: number) {
     const res = await this.redis.eval(
       SAVE_SCRIPT,
       2,
-      roomKey(state.code),
-      ROOM_INDEX,
+      this.k.room(state.code),
+      this.k.index,
       expectedVersion,
       JSON.stringify(state),
       ROOM_TTL_SECONDS,
-      roomChannel(state.code),
+      this.k.channel(state.code),
       Date.now(),
       state.code,
     );
@@ -217,7 +227,8 @@ class RedisRoomStore implements RoomStore {
       // A connection in subscriber mode cannot run other commands, so use a dedicated one.
       this.sub = this.redis.duplicate();
       this.sub.on("message", (channel: string) => {
-        const c = channel.slice("tienlen:room:".length, -":changed".length);
+        if (!channel.startsWith(this.k.channelPrefix)) return;
+        const c = channel.slice(this.k.channelPrefix.length, -":changed".length);
         this.listeners.get(c)?.forEach((fn) => fn());
       });
     }
@@ -225,14 +236,14 @@ class RedisRoomStore implements RoomStore {
     if (!set) {
       set = new Set();
       this.listeners.set(code, set);
-      await this.sub.subscribe(roomChannel(code));
+      await this.sub.subscribe(this.k.channel(code));
     }
     set.add(listener);
     return () => {
       set.delete(listener);
       if (set.size === 0 && this.listeners.get(code) === set) {
         this.listeners.delete(code);
-        void this.sub?.unsubscribe(roomChannel(code));
+        void this.sub?.unsubscribe(this.k.channel(code));
       }
     };
   }
@@ -241,20 +252,20 @@ class RedisRoomStore implements RoomStore {
     await this.redis.eval(
       RECORD_SCRIPT,
       2,
-      recordKey(record.id),
-      LB_POINTS,
+      this.k.record(record.id),
+      this.k.lbPoints,
       JSON.stringify(toRows(record)),
       record.at,
       RECORD_DEDUPE_SECONDS,
-      lbPlayerKey(""),
+      this.k.lbPlayer(""),
     );
   }
 
   async leaderboard(limit: number) {
-    const keys = await this.redis.zrevrange(LB_POINTS, 0, limit - 1);
-    if (!keys.length) return [];
+    const members = await this.redis.zrevrange(this.k.lbPoints, 0, limit - 1);
+    if (!members.length) return [];
     const pipe = this.redis.pipeline();
-    for (const k of keys) pipe.hmget(lbPlayerKey(k), "name", "points", "games", "wins", "last");
+    for (const m of members) pipe.hmget(this.k.lbPlayer(m), "name", "points", "games", "wins", "last");
     const rows = (await pipe.exec()) ?? [];
     return rows
       .map(([, v]) => v as (string | null)[])
@@ -271,39 +282,57 @@ class RedisRoomStore implements RoomStore {
   async recentRooms(limit: number) {
     const now = Date.now();
     // Drop index entries for rooms that have certainly expired.
-    await this.redis.zremrangebyscore(ROOM_INDEX, 0, now - ROOM_TTL_SECONDS * 1000);
-    const codes = await this.redis.zrevrangebyscore(ROOM_INDEX, "+inf", now - ROOM_INDEX_WINDOW_MS, "LIMIT", 0, limit);
+    await this.redis.zremrangebyscore(this.k.index, 0, now - ROOM_TTL_SECONDS * 1000);
+    const codes = await this.redis.zrevrangebyscore(this.k.index, "+inf", now - ROOM_INDEX_WINDOW_MS, "LIMIT", 0, limit);
     if (!codes.length) return [];
     const pipe = this.redis.pipeline();
-    for (const c of codes) pipe.hget(roomKey(c), "state");
+    for (const c of codes) pipe.hget(this.k.room(c), "state");
     const rows = (await pipe.exec()) ?? [];
-    return rows.map(([, v]) => v as string | null).filter((v): v is string => !!v).map((v) => JSON.parse(v) as RoomState);
+    return rows
+      .map(([, v]) => v as string | null)
+      .filter((v): v is string => !!v)
+      .map((v) => JSON.parse(v) as S);
   }
 }
 
 /** Redis URL from the usual Vercel Marketplace / Upstash variable names. */
 export const redisUrl = () => process.env.REDIS_URL || process.env.KV_URL || process.env.UPSTASH_REDIS_URL || "";
 
-type StoreGlobal = typeof globalThis & { __tienlenStore?: Promise<RoomStore> };
+type StoreGlobal = typeof globalThis & {
+  __gameRedis?: Promise<Redis | null>;
+  __gameStores?: Map<GameKind, Promise<RoomStore>>;
+};
 
-/** Process-wide store singleton (Redis when configured, memory otherwise). */
-export function getRoomStore(): Promise<RoomStore> {
+/** One Redis connection per process, shared by every game (null = no Redis configured). */
+function getRedis(): Promise<Redis | null> {
   const g = globalThis as StoreGlobal;
-  g.__tienlenStore ??= (async () => {
+  g.__gameRedis ??= (async () => {
     const url = redisUrl();
     if (!url) {
       if (process.env.VERCEL) {
-        console.error("[tienlen] REDIS_URL is not set — rooms will not be shared between function instances.");
+        console.error("[be_game] REDIS_URL is not set — rooms will not be shared between function instances.");
       }
-      return new MemoryRoomStore();
+      return null;
     }
     const { default: IORedis } = await import("ioredis");
     const redis = new IORedis(url, { maxRetriesPerRequest: 3, enableAutoPipelining: true });
-    redis.on("error", (err) => console.error("[tienlen] redis:", err.message));
-    return new RedisRoomStore(redis);
+    redis.on("error", (err) => console.error("[be_game] redis:", err.message));
+    return redis;
   })();
-  return g.__tienlenStore;
+  return g.__gameRedis;
+}
+
+/** Process-wide store for a game (Redis when configured, memory otherwise). */
+export function getRoomStore<S extends CodedRoom = CodedRoom>(game: GameKind = "tienlen"): Promise<RoomStore<S>> {
+  const g = globalThis as StoreGlobal;
+  g.__gameStores ??= new Map();
+  let store = g.__gameStores.get(game);
+  if (!store) {
+    store = getRedis().then((redis): RoomStore => (redis ? new RedisRoomStore(redis, game) : new MemoryRoomStore()));
+    g.__gameStores.set(game, store);
+  }
+  return store as Promise<RoomStore<S>>;
 }
 
 /** For tests. */
-export const createMemoryRoomStore = (): RoomStore => new MemoryRoomStore();
+export const createMemoryRoomStore = <S extends CodedRoom = CodedRoom>(): RoomStore<S> => new MemoryRoomStore<S>();

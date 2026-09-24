@@ -1,18 +1,29 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
-import { WS_PATH } from "../game/protocol";
-import { isRoomActive, newRoom, randomCode, roomSummary } from "../game/room";
+import { newRoom, randomCode } from "../game/room";
+import { ADAPTERS } from "./adapters";
 import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
-import { getRoomStore, redisUrl } from "./store";
+import { type GameKind, getRoomStore, redisUrl } from "./store";
 
 /**
- * The whole backend as a plain Node `http.Server`:
- *   GET  /api/ws      (Upgrade: websocket) → game connection
- *   GET  /api/health  → store diagnostics
- * On Vercel, `api/ws.ts` and `api/health.ts` export it as the function's server;
- * locally, `src/local.ts` calls `listen()` on it.
+ * The whole backend as a plain Node `http.Server`. Per game (Tiến Lên keeps
+ * its original unprefixed paths):
+ *   GET /api/ws              · /api/meono/ws            (Upgrade: websocket)
+ *   GET /api/rooms           · /api/meono/rooms         open tables for the lobby
+ *   GET /api/leaderboard     · /api/meono/leaderboard   all-time points
+ *   GET /api/health                                     store diagnostics
+ * On Vercel each `api/**.ts` file exports this server; locally `src/local.ts` listens on it.
  */
+const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboard" }> = {
+  "/api/ws": { game: "tienlen", kind: "ws" },
+  "/api/rooms": { game: "tienlen", kind: "rooms" },
+  "/api/leaderboard": { game: "tienlen", kind: "leaderboard" },
+  "/api/meono/ws": { game: "meono", kind: "ws" },
+  "/api/meono/rooms": { game: "meono", kind: "rooms" },
+  "/api/meono/leaderboard": { game: "meono", kind: "leaderboard" },
+};
+
 export function createGameServer(): Server {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
@@ -21,15 +32,17 @@ export function createGameServer(): Server {
     cors(req, res);
     if (req.method === "OPTIONS") return void res.writeHead(204).end();
     if (path === "/api/health") return void health(res);
-    if (path === "/api/rooms") return void listRooms(res);
-    if (path === "/api/leaderboard") return void leaderboard(req, res);
-    if (path === WS_PATH) return json(res, 426, { ok: false, error: "Expected a WebSocket connection" });
-    if (path === "/" || path === "/api") return json(res, 200, { ok: true, service: "be_game", ws: WS_PATH, endpoints: ["/api/health", "/api/rooms", "/api/leaderboard"] });
+    const route = ROUTES[path];
+    if (route?.kind === "rooms") return void listRooms(route.game, res);
+    if (route?.kind === "leaderboard") return void leaderboard(route.game, req, res);
+    if (route?.kind === "ws") return json(res, 426, { ok: false, error: "Expected a WebSocket connection" });
+    if (path === "/" || path === "/api") return json(res, 200, { ok: true, service: "be_game", routes: [...Object.keys(ROUTES), "/api/health"] });
     json(res, 404, { ok: false, error: "Not found" });
   });
 
   server.on("upgrade", (req, socket, head) => {
-    if (pathOf(req) !== WS_PATH) {
+    const route = ROUTES[pathOf(req)];
+    if (route?.kind !== "ws") {
       socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
       return;
     }
@@ -44,13 +57,13 @@ export function createGameServer(): Server {
     } catch {
       deadline = undefined;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => attachConnection(ws, { deadline }));
+    wss.handleUpgrade(req, socket, head, (ws) => attachConnection(ws, { deadline, game: route.game }));
   });
 
   return server;
 }
 
-const pathOf = (req: IncomingMessage) => new URL(req.url ?? "/", "http://localhost").pathname;
+const pathOf = (req: IncomingMessage) => new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/$/, "") || "/";
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(body));
@@ -68,21 +81,25 @@ const withTimeout = <T>(p: Promise<T>, ms: number, label: string) =>
   Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))]);
 
 /** Rooms someone is still in, for the lobby. */
-async function listRooms(res: ServerResponse) {
+async function listRooms(game: GameKind, res: ServerResponse) {
   try {
-    const store = await getRoomStore();
+    const adapter = ADAPTERS[game];
+    const store = await getRoomStore(game);
     const now = Date.now();
-    const rooms = (await store.recentRooms(60)).filter((r) => isRoomActive(r, now)).slice(0, 30).map((r) => roomSummary(r, now));
+    const rooms = (await store.recentRooms(60))
+      .filter((r) => adapter.isActive(r, now))
+      .slice(0, 30)
+      .map((r) => adapter.summary(r, now));
     json(res, 200, { ok: true, rooms });
   } catch (err) {
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
-async function leaderboard(req: IncomingMessage, res: ServerResponse) {
+async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResponse) {
   try {
     const limit = Math.min(Math.max(Number(new URL(req.url ?? "/", "http://x").searchParams.get("limit")) || 20, 1), 100);
-    const store = await getRoomStore();
+    const store = await getRoomStore(game);
     json(res, 200, { ok: true, players: await store.leaderboard(limit) });
   } catch (err) {
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -102,9 +119,10 @@ async function health(res: ServerResponse) {
     region: process.env.VERCEL_REGION ?? "local",
     redisConfigured: !!url,
     redisHost: url ? new URL(url).hostname : null,
+    games: Object.keys(ADAPTERS),
   };
   try {
-    const store = await withTimeout(getRoomStore(), 5000, "connect");
+    const store = await withTimeout(getRoomStore("tienlen"), 5000, "connect");
     mark("init");
     const code = "HC" + randomCode(6);
     await withTimeout(store.create(newRoom(code)), 5000, "create");

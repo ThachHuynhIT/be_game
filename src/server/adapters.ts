@@ -1,0 +1,135 @@
+import type { GameRecord } from "../game/protocol";
+import {
+  type RoomState,
+  findByToken,
+  findSpectator,
+  heartbeat,
+  isRoomActive,
+  joinRoom,
+  kickPlayer,
+  leaveRoom,
+  newRoom,
+  nextTickAt,
+  passTurn,
+  playCards,
+  react,
+  roomSummary,
+  roomView,
+  spectatorHeartbeat,
+  startGame,
+  tick,
+  unwatch,
+  watchRoom,
+} from "../game/room";
+import {
+  type MeoRoom,
+  findByToken as findMeoByToken,
+  isMeoActive,
+  joinMeo,
+  leaveMeo,
+  meoCommand,
+  meoHeartbeat,
+  meoSummary,
+  meoView,
+  newMeoRoom,
+  nextMeoTickAt,
+  tickMeo,
+} from "../meono/room";
+import type { MeoCommand } from "../meono/protocol";
+import type { CodedRoom, GameKind } from "./store";
+
+export type Result = { ok: true } | { ok: false; error: string };
+
+/**
+ * Everything the WebSocket hub needs to know about one game. The hub owns
+ * connections, storage, fan-out and timers; the adapter owns the rules.
+ * All functions mutate `room` in place and take the current time.
+ */
+export interface GameAdapter<S extends CodedRoom = CodedRoom> {
+  game: GameKind;
+  newRoom(code: string): S;
+  join(room: S, token: string, name: string, now: number, newId: () => string): Result;
+  watch(room: S, token: string, name: string, now: number): Result;
+  heartbeat(room: S, token: string, now: number): void;
+  leave(room: S, token: string, now: number): void;
+  react(room: S, token: string, emoji: unknown, now: number): Result;
+  /** Game commands from a seated player (start, moves, kick…). */
+  command(room: S, token: string, msg: Record<string, unknown>, now: number): Result;
+  /** This client's personalised view, or null if the token is not in the room. */
+  view(room: S, token: string, role: "player" | "spectator", now: number): unknown | null;
+  tick(room: S, now: number): boolean;
+  nextTickAt(room: S, now: number): number | null;
+  summary(room: S, now: number): unknown;
+  isActive(room: S, now: number): boolean;
+  lastRecord(room: S): GameRecord | undefined;
+}
+
+export const tienlenAdapter: GameAdapter<RoomState> = {
+  game: "tienlen",
+  newRoom,
+  join: (room, token, name, now, newId) => joinRoom(room, token, name, now, newId),
+  watch: watchRoom,
+  heartbeat(room, token, now) {
+    const p = findByToken(room, token);
+    if (p) heartbeat(room, p, now);
+    else {
+      const s = findSpectator(room, token);
+      if (s) spectatorHeartbeat(s, now);
+    }
+  },
+  leave(room, token, now) {
+    const p = findByToken(room, token);
+    if (p) leaveRoom(room, p, now);
+    else unwatch(room, token);
+  },
+  react,
+  command(room, token, msg, now) {
+    const p = findByToken(room, token);
+    if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
+    if (msg.type === "start") return startGame(room, p, now);
+    if (msg.type === "play") return playCards(room, p, msg.cards, now);
+    if (msg.type === "pass") return passTurn(room, p, now);
+    if (msg.type === "kick") return kickPlayer(room, p, msg.playerId, now);
+    return { ok: false, error: "Lệnh không hợp lệ" };
+  },
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findByToken(room, token);
+      return p ? roomView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? roomView(room, null, now) : null;
+  },
+  tick,
+  nextTickAt,
+  summary: roomSummary,
+  isActive: isRoomActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
+export const meonoAdapter: GameAdapter<MeoRoom> = {
+  game: "meono",
+  newRoom: newMeoRoom,
+  join: (room, token, name, now, newId) => joinMeo(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: meoHeartbeat,
+  leave: leaveMeo,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => meoCommand(room, token, msg as unknown as MeoCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findMeoByToken(room, token);
+      return p ? meoView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? meoView(room, null, now) : null;
+  },
+  tick: tickMeo,
+  nextTickAt: nextMeoTickAt,
+  summary: meoSummary,
+  isActive: isMeoActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
+export const ADAPTERS: Record<GameKind, GameAdapter> = {
+  tienlen: tienlenAdapter as unknown as GameAdapter,
+  meono: meonoAdapter as unknown as GameAdapter,
+};

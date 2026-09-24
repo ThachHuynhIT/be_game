@@ -4,6 +4,7 @@ import { forfeit, newGame, pass, play } from "../src/game/game";
 import {
   PRESENCE_TIMEOUT_MS,
   REACTION_TTL_MS,
+  type RoomState,
   joinRoom,
   kickPlayer,
   newRoom,
@@ -138,7 +139,7 @@ describe("kick / spectators / emoji / scoring (room)", () => {
 
 describe("leaderboard + room index (store via hub)", () => {
   it("records each finished game once, keyed by name", async () => {
-    const store = createMemoryRoomStore();
+    const store = createMemoryRoomStore<RoomState>();
     const hub = createRoomHub(store);
     const code = await hub.createRoom();
     await hub.mutate(code, (room, now) => {
