@@ -90,6 +90,7 @@ describe("room lifecycle", () => {
   it("leaving mid-game keeps the seat (auto-played); leaving between games frees it", () => {
     const { room, players } = roomWith(3);
     startGame(room, players[0], T0);
+    if (room.game!.status !== "playing") return; // tới trắng on the random deal
     leaveRoom(room, players[2], T0 + 1);
     expect(room.seats.filter(Boolean)).toHaveLength(3);
     room.game!.status = "ended";

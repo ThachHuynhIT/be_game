@@ -1,8 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    // Vercel compiles api/*.ts with this config; CommonJS output lets the
+    // extensionless relative imports resolve (ESM output would need ".js").
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
