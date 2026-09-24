@@ -1,25 +1,30 @@
 import { randomBytes } from "node:crypto";
-import type { AckResult, ClientMessage, ServerMessage } from "../game/protocol";
+import { type AckResult, type ClientMessage, EMOJI_COOLDOWN_MS, type GameRecord, type ServerMessage } from "../game/protocol";
 import {
   type RoomState,
   findByToken,
+  findSpectator,
   heartbeat,
   joinRoom,
+  kickPlayer,
   leaveRoom,
   newRoom,
   nextTickAt,
   passTurn,
   playCards,
   randomCode,
+  react,
   roomView,
+  spectatorHeartbeat,
   startGame,
   tick,
+  unwatch,
+  watchRoom,
 } from "../game/room";
 import { type RoomStore, getRoomStore } from "./store";
 
 /**
- * Transport-agnostic WebSocket handling, shared by the Vercel route handler
- * (`experimental_upgradeWebSocket`) and the self-hosted Node server.
+ * Transport-agnostic WebSocket handling for the Vercel function and the local server.
  *
  * Every change goes through `mutate()` (load → apply → compare-and-swap save).
  * A successful save notifies every instance subscribed to the room, and each
@@ -53,6 +58,7 @@ interface Conn {
   socket: HubSocket;
   code: string | null;
   token: string | null;
+  role: "player" | "spectator";
 }
 
 interface LocalRoom {
@@ -64,13 +70,17 @@ interface LocalRoom {
 }
 
 const newId = (len = 8) => randomBytes(len).toString("base64url").slice(0, len);
+const lastRecord = (room: RoomState): GameRecord | undefined => room.history?.[room.history.length - 1];
 
 export class RoomHub {
   private rooms = new Map<string, LocalRoom>();
 
-  constructor(private store: RoomStore) {}
+  constructor(readonly store: RoomStore) {}
 
-  /** Load → apply → compare-and-swap, retrying on conflicts. `fn` mutates the draft in place. */
+  /**
+   * Load → apply → compare-and-swap, retrying on conflicts. `fn` mutates the draft in place.
+   * A game that finished in the committed change is added to the leaderboard.
+   */
   async mutate<T>(code: string, fn: (room: RoomState, now: number) => T): Promise<{ found: false } | { found: true; result: T }> {
     for (let attempt = 0; attempt < 12; attempt++) {
       const cur = await this.store.load(code);
@@ -79,7 +89,13 @@ export class RoomHub {
       const draft = JSON.parse(before) as RoomState;
       const result = fn(draft, Date.now());
       if (JSON.stringify(draft) === before) return { found: true, result };
-      if (await this.store.save(draft, cur.version)) return { found: true, result };
+      if (await this.store.save(draft, cur.version)) {
+        const rec = lastRecord(draft);
+        if (rec && rec.id !== lastRecord(cur.state)?.id) {
+          await this.store.recordGame(rec).catch((err) => console.error("[tienlen] leaderboard:", err));
+        }
+        return { found: true, result };
+      }
       await new Promise((r) => setTimeout(r, 5 + Math.random() * 20 * (attempt + 1)));
     }
     throw new Error("Phòng đang bận, thử lại");
@@ -107,7 +123,7 @@ export class RoomHub {
     return r;
   }
 
-  async add(conn: Conn, code: string) {
+  add(conn: Conn, code: string) {
     this.local(code).conns.add(conn);
   }
 
@@ -138,8 +154,13 @@ export class RoomHub {
         if (!cur) break;
         const now = Date.now();
         for (const conn of r.conns) {
-          const player = conn.token ? findByToken(cur.state, conn.token) : null;
-          if (player) send(conn.socket, { type: "state", view: roomView(cur.state, player, now) });
+          if (!conn.token) continue;
+          if (conn.role === "player") {
+            const player = findByToken(cur.state, conn.token);
+            if (player) send(conn.socket, { type: "state", view: roomView(cur.state, player, now) });
+          } else if (findSpectator(cur.state, conn.token)) {
+            send(conn.socket, { type: "state", view: roomView(cur.state, null, now) });
+          }
         }
         this.arm(code, r, cur.state, now);
       } while (r.dirty);
@@ -149,7 +170,7 @@ export class RoomHub {
     return r.refreshing;
   }
 
-  /** Schedule the next `tick` for this room on this instance (every instance holding a player does; CAS dedupes). */
+  /** Schedule the next `tick` for this room on this instance (every instance holding a socket does; CAS dedupes). */
   private arm(code: string, r: LocalRoom, state: RoomState, now: number) {
     if (r.timer) clearTimeout(r.timer);
     r.timer = null;
@@ -170,7 +191,7 @@ type HubGlobal = typeof globalThis & { __tienlenHub?: Promise<RoomHub> };
 /** A hub over a given store — one per process normally; tests create several to mimic instances. */
 export const createRoomHub = (store: RoomStore) => new RoomHub(store);
 
-function getHub(): Promise<RoomHub> {
+export function getHub(): Promise<RoomHub> {
   const g = globalThis as HubGlobal;
   g.__tienlenHub ??= getRoomStore().then((s) => new RoomHub(s));
   return g.__tienlenHub;
@@ -189,6 +210,7 @@ const toText = (data: unknown): string | null => {
   if (data instanceof Buffer) return data.toString("utf8");
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
   if (Array.isArray(data)) return Buffer.concat(data as Buffer[]).toString("utf8");
+  if (data && typeof (data as { toString?: unknown }).toString === "function") return String(data);
   return null;
 };
 
@@ -203,13 +225,16 @@ function parse(data: unknown): ClientMessage | null {
   }
 }
 
+const cleanCode = (code: unknown) => String(code ?? "").toUpperCase().slice(0, 8);
+
 /** Wire a freshly upgraded WebSocket into the game. */
 export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
-  const conn: Conn = { socket, code: null, token: null };
+  const conn: Conn = { socket, code: null, token: null, role: "player" };
   const hubPromise = opts.hub ? Promise.resolve(opts.hub) : getHub();
   let closed = false;
   let windowStart = Date.now();
   let messagesInWindow = 0;
+  let lastEmojiAt = 0;
 
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   if (opts.deadline) {
@@ -219,6 +244,15 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
 
   const ack = (id: number, res: AckResult<{ code?: string }>) => send(socket, { type: "ack", id, ...res });
 
+  /** Point this socket at a room (after a successful join/watch) and push the current view. */
+  const enter = async (hub: RoomHub, code: string, token: string, role: Conn["role"]) => {
+    if (conn.code && conn.code !== code) hub.remove(conn);
+    conn.code = code;
+    conn.token = token;
+    conn.role = role;
+    hub.add(conn, code);
+  };
+
   const handle = async (hub: RoomHub, msg: ClientMessage) => {
     if (msg.type === "ping") {
       send(socket, { type: "pong" });
@@ -227,6 +261,10 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
         await hub.mutate(code, (room, now) => {
           const p = findByToken(room, token);
           if (p) heartbeat(room, p, now);
+          else {
+            const s = findSpectator(room, token);
+            if (s) spectatorHeartbeat(s, now);
+          }
         });
       }
       return;
@@ -237,16 +275,16 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       return ack(id, { ok: true, code: await hub.createRoom() });
     }
 
-    if (msg.type === "join") {
-      const code = String(msg.code ?? "").toUpperCase().slice(0, 8);
+    if (msg.type === "join" || msg.type === "watch") {
+      const code = cleanCode(msg.code);
       const token = String(msg.token ?? "");
-      const res = await hub.mutate(code, (room, now) => joinRoom(room, token, String(msg.name ?? ""), now, newId));
+      const name = String(msg.name ?? "");
+      const res = await hub.mutate(code, (room, now) =>
+        msg.type === "join" ? joinRoom(room, token, name, now, newId) : watchRoom(room, token, name, now),
+      );
       if (!res.found) return ack(id, { ok: false, error: "Không tìm thấy phòng" });
       if (!res.result.ok) return ack(id, res.result);
-      if (conn.code && conn.code !== code) hub.remove(conn);
-      conn.code = code;
-      conn.token = token;
-      await hub.add(conn, code);
+      await enter(hub, code, token, msg.type === "join" ? "player" : "spectator");
       ack(id, { ok: true });
       // The save above already notified subscribers, but this socket may have registered after it.
       return hub.refresh(code);
@@ -259,11 +297,22 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       await hub.mutate(code, (room, now) => {
         const p = findByToken(room, token);
         if (p) leaveRoom(room, p, now);
+        else unwatch(room, token);
       });
       hub.remove(conn);
       conn.code = conn.token = null;
       return ack(id, { ok: true });
     }
+
+    if (msg.type === "emoji") {
+      const now = Date.now();
+      if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return ack(id, { ok: false, error: "Chậm lại một chút" });
+      lastEmojiAt = now;
+      const res = await hub.mutate(code, (room, t) => react(room, token, msg.emoji, t));
+      return ack(id, res.found ? res.result : { ok: false, error: "Không tìm thấy phòng" });
+    }
+
+    if (conn.role === "spectator") return ack(id, { ok: false, error: "Khán giả không thể thao tác" });
 
     const res = await hub.mutate(code, (room, now) => {
       const p = findByToken(room, token);
@@ -271,6 +320,7 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       if (msg.type === "start") return startGame(room, p, now);
       if (msg.type === "play") return playCards(room, p, msg.cards, now);
       if (msg.type === "pass") return passTurn(room, p, now);
+      if (msg.type === "kick") return kickPlayer(room, p, msg.playerId, now);
       return { ok: false as const, error: "Lệnh không hợp lệ" };
     });
     ack(id, res.found ? res.result : { ok: false, error: "Không tìm thấy phòng" });

@@ -5,11 +5,21 @@ import {
   MAX_PLAYERS,
   MIN_PLAYERS,
   autoAction,
+  forfeit,
   newGame,
   pass,
   play,
 } from "./game";
-import { MAX_NAME_LENGTH, type RoomView, TURN_SECONDS } from "./protocol";
+import {
+  EMOJIS,
+  type GameRecord,
+  MAX_NAME_LENGTH,
+  type Reaction,
+  type RoomSummary,
+  type RoomView,
+  TURN_SECONDS,
+} from "./protocol";
+import { scoreGame } from "./scoring";
 
 /**
  * Room lifecycle as pure functions over JSON-serialisable state, so a room can
@@ -34,8 +44,16 @@ export interface RoomPlayer {
   lastSeen: number;
   /** Explicitly left (closed the tab / navigated away) — treated as offline immediately. */
   left?: boolean;
+  /** Kicked by the host mid-game; the seat is freed once the game ends. */
+  kicked?: boolean;
   wins: number;
+  /** Cumulative points in this room (see scoring.ts). Optional for rooms saved before scoring existed. */
+  points?: number;
+  games?: number;
 }
+
+/** How many finished games a room remembers. */
+export const HISTORY_LIMIT = 20;
 
 export interface RoomState {
   code: string;
@@ -45,7 +63,26 @@ export interface RoomState {
   turnDeadline: number | null;
   /** Winner of the last finished game leads the next one. */
   lastWinner: string | null;
+  /** Finished games, newest last. */
+  history?: GameRecord[];
+  /** Games finished in this room so far (used for record ids). */
+  gameSeq?: number;
+  /** People watching without a seat. */
+  spectators?: Spectator[];
+  /** Recent emoji reactions (short-lived). */
+  reactions?: Reaction[];
 }
+
+export interface Spectator {
+  token: string;
+  name: string;
+  lastSeen: number;
+}
+
+export const MAX_SPECTATORS = 30;
+/** Reactions older than this are dropped from the room state. */
+export const REACTION_TTL_MS = 6_000;
+const MAX_REACTIONS = 12;
 
 export function randomCode(length = 5, random: () => number = Math.random) {
   return Array.from({ length }, () => CODE_ALPHABET[Math.floor(random() * CODE_ALPHABET.length)]).join("");
@@ -82,6 +119,7 @@ export function joinRoom(
     return { ok: false, error: "Phiên không hợp lệ" };
   }
   let player = findByToken(room, token);
+  if (player?.kicked) return { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" };
   if (player) {
     if (!inPlayingGame(room, player.id)) player.name = cleanName(name);
     // Coming back to your own turn after being away gets a fresh timer.
@@ -90,7 +128,7 @@ export function joinRoom(
     dropGoneSeats(room, now);
     const free = room.seats.findIndex((s) => s === null);
     if (free < 0) return { ok: false, error: "Phòng đã đủ 4 người" };
-    player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0 };
+    player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0, points: 0, games: 0 };
     room.seats[free] = player;
   }
   player.lastSeen = now;
@@ -102,6 +140,7 @@ export function joinRoom(
 
 /** Record a heartbeat. Returns true if the state needs saving. */
 export function heartbeat(room: RoomState, player: RoomPlayer, now: number): boolean {
+  if (player.kicked) return false;
   if (now - player.lastSeen < HEARTBEAT_WRITE_MS && !player.left) return false;
   if (!isOnline(player, now) && room.game?.turn === player.id) freshTurnTimer(room, now);
   player.lastSeen = now;
@@ -117,6 +156,89 @@ export function leaveRoom(room: RoomState, player: RoomPlayer, now: number) {
     if (idx >= 0) room.seats[idx] = null;
   }
   tick(room, now);
+}
+
+export const findSpectator = (room: RoomState, token: string) => room.spectators?.find((x) => x.token === token) ?? null;
+
+/** Watch a room without a seat. */
+export function watchRoom(room: RoomState, token: string, name: string, now: number): { ok: true } | { ok: false; error: string } {
+  if (typeof token !== "string" || token.length < 8 || token.length > 128) return { ok: false, error: "Phiên không hợp lệ" };
+  pruneSpectators(room, now);
+  const existing = findSpectator(room, token);
+  if (existing) {
+    existing.lastSeen = now;
+    existing.name = cleanName(name);
+    return { ok: true };
+  }
+  if ((room.spectators?.length ?? 0) >= MAX_SPECTATORS) return { ok: false, error: "Phòng đã đủ khán giả" };
+  room.spectators = [...(room.spectators ?? []), { token, name: cleanName(name), lastSeen: now }];
+  return { ok: true };
+}
+
+export function spectatorHeartbeat(spectator: Spectator, now: number): boolean {
+  if (now - spectator.lastSeen < HEARTBEAT_WRITE_MS) return false;
+  spectator.lastSeen = now;
+  return true;
+}
+
+export function unwatch(room: RoomState, token: string) {
+  room.spectators = (room.spectators ?? []).filter((x) => x.token !== token);
+}
+
+function pruneSpectators(room: RoomState, now: number): boolean {
+  const before = room.spectators?.length ?? 0;
+  if (!before) return false;
+  room.spectators = room.spectators!.filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS);
+  return room.spectators.length !== before;
+}
+
+function pruneReactions(room: RoomState, now: number): boolean {
+  const before = room.reactions?.length ?? 0;
+  if (!before) return false;
+  room.reactions = room.reactions!.filter((r) => now - r.at < REACTION_TTL_MS);
+  return room.reactions.length !== before;
+}
+
+/** Send an emoji to everyone in the room (players and spectators). */
+export function react(room: RoomState, token: string, emoji: unknown, now: number): { ok: true } | { ok: false; error: string } {
+  if (typeof emoji !== "string" || !(EMOJIS as readonly string[]).includes(emoji)) return { ok: false, error: "Emoji không hợp lệ" };
+  const player = findByToken(room, token);
+  const spectator = player ? null : findSpectator(room, token);
+  if (!player && !spectator) return { ok: false, error: "Bạn chưa vào phòng" };
+  pruneReactions(room, now);
+  const reaction: Reaction = {
+    id: `${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    at: now,
+    emoji,
+    name: player?.name ?? spectator!.name,
+    playerId: player?.id ?? null,
+  };
+  room.reactions = [...(room.reactions ?? []), reaction].slice(-MAX_REACTIONS);
+  return { ok: true };
+}
+
+/** Host removes a disconnected player. Mid-game they forfeit (rank last); otherwise the seat is freed. */
+export function kickPlayer(room: RoomState, host: RoomPlayer, targetId: unknown, now: number): ActionResult {
+  if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới kích được người chơi" };
+  const target = typeof targetId === "string" ? findById(room, targetId) : null;
+  if (!target || target.kicked) return { ok: false, error: "Không tìm thấy người chơi" };
+  if (target.id === host.id) return { ok: false, error: "Không thể tự kích mình" };
+  if (isOnline(target, now)) return { ok: false, error: "Chỉ kích được người đã mất kết nối" };
+
+  const g = room.game;
+  if (g && inPlayingGame(room, target.id)) {
+    const turnBefore = g.turn;
+    const res = forfeit(g, target.id);
+    if (!res.ok) return res;
+    target.kicked = true;
+    target.left = true;
+    if (g.status === "ended") afterAction(room, now);
+    else if (g.turn !== turnBefore) freshTurnTimer(room, now);
+    return { ok: true };
+  }
+  const idx = room.seats.indexOf(target);
+  if (idx >= 0) room.seats[idx] = null;
+  return { ok: true };
 }
 
 export function startGame(room: RoomState, player: RoomPlayer, now: number): ActionResult {
@@ -182,6 +304,8 @@ export function tick(room: RoomState, now: number): boolean {
   }
 
   if (room.game?.status !== "playing" && dropGoneSeats(room, now)) changed = true;
+  if (pruneSpectators(room, now)) changed = true;
+  if (pruneReactions(room, now)) changed = true;
   return changed;
 }
 
@@ -195,6 +319,8 @@ export function nextTickAt(room: RoomState, now: number): number | null {
     if (isOnline(p, now)) times.push(p.lastSeen + PRESENCE_TIMEOUT_MS);
     else times.push(p.lastSeen + SEAT_GRACE_MS + 1);
   }
+  for (const x of room.spectators ?? []) times.push(x.lastSeen + PRESENCE_TIMEOUT_MS);
+  for (const r of room.reactions ?? []) times.push(r.at + REACTION_TTL_MS);
   return times.length ? Math.min(...times) : null;
 }
 
@@ -205,10 +331,33 @@ function afterAction(room: RoomState, now: number) {
     room.lastWinner = g.finished[0] ?? null;
     const winner = room.lastWinner ? findById(room, room.lastWinner) : null;
     if (winner) winner.wins++;
+    recordGame(room, now);
     return;
   }
   if (g?.turn) freshTurnTimer(room, now);
   else room.turnDeadline = null;
+}
+
+/** Apply the game's points to the players and append it to the room history. */
+function recordGame(room: RoomState, now: number) {
+  const g = room.game;
+  if (!g) return;
+  const deltas = scoreGame(g.finished, g.instantWin?.playerId ?? null);
+  room.gameSeq = (room.gameSeq ?? 0) + 1;
+  const record: GameRecord = {
+    id: `${room.code}-${room.gameSeq}`,
+    at: now,
+    instantWin: g.instantWin?.reason ?? null,
+    results: g.finished.map((id, rank) => {
+      const p = findById(room, id);
+      if (p) {
+        p.points = (p.points ?? 0) + deltas[id];
+        p.games = (p.games ?? 0) + 1;
+      }
+      return { id, name: p?.name ?? "?", rank, delta: deltas[id] };
+    }),
+  };
+  room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
 }
 
 /** Free seats of players who have been gone longer than the grace period (never mid-game). */
@@ -224,11 +373,13 @@ function dropGoneSeats(room: RoomState, now: number): boolean {
   return dropped;
 }
 
-export function roomView(room: RoomState, player: RoomPlayer, now: number): RoomView {
+/** What one client sees. `player` null = spectator (no hand). */
+export function roomView(room: RoomState, player: RoomPlayer | null, now: number): RoomView {
   const g = room.game;
   return {
     code: room.code,
-    meId: player.id,
+    meId: player?.id ?? "",
+    role: player ? "player" : "spectator",
     serverTime: now,
     seats: room.seats.map((p) =>
       p
@@ -241,6 +392,9 @@ export function roomView(room: RoomState, player: RoomPlayer, now: number): Room
             cardCount: g?.hands[p.id]?.length ?? 0,
             passed: !!g?.passed.includes(p.id),
             wins: p.wins,
+            points: p.points ?? 0,
+            kicked: !!p.kicked,
+            games: p.games ?? 0,
           }
         : null,
     ),
@@ -255,6 +409,25 @@ export function roomView(room: RoomState, player: RoomPlayer, now: number): Room
           instantWin: g.instantWin,
         }
       : null,
-    hand: g?.hands[player.id] ?? [],
+    hand: player ? (g?.hands[player.id] ?? []) : [],
+    history: (room.history ?? []).slice(-10),
+    spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),
+    reactions: (room.reactions ?? []).filter((r) => now - r.at < REACTION_TTL_MS),
   };
 }
+
+/** Public lobby listing: no hands, no tokens. */
+export function roomSummary(room: RoomState, now: number): RoomSummary {
+  const seated = room.seats.filter((p): p is RoomPlayer => !!p);
+  return {
+    code: room.code,
+    status: room.game?.status === "playing" ? "playing" : "waiting",
+    players: seated.map((p) => ({ name: p.name, connected: isOnline(p, now), points: p.points ?? 0 })),
+    spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).length,
+    games: room.gameSeq ?? 0,
+  };
+}
+
+/** A room is worth listing while someone is still around. */
+export const isRoomActive = (room: RoomState, now: number) =>
+  room.seats.some((p) => !!p && isOnline(p, now)) || (room.spectators ?? []).some((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS);

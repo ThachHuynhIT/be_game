@@ -6,6 +6,11 @@ export const MAX_NAME_LENGTH = 16;
 export const TURN_SECONDS = 30;
 /** Path of the WebSocket endpoint (Vercel function `api/ws.ts`, and the local dev server). */
 export const WS_PATH = "/api/ws";
+/** Emoji anyone in a room (players and spectators) can send. */
+export const EMOJIS = ["👍", "😂", "😮", "😭", "😡", "🔥", "👏", "🤔", "😎", "💩", "🐷", "🎉"] as const;
+/** Minimum gap between two emoji from one connection. */
+export const EMOJI_COOLDOWN_MS = 1_200;
+
 /** Clients ping this often; the ping doubles as the presence heartbeat. */
 export const PING_INTERVAL_MS = 10_000;
 
@@ -20,6 +25,47 @@ export interface SeatView {
   cardCount: number;
   passed: boolean;
   wins: number;
+  /** Cumulative points in this room. */
+  points: number;
+  /** Kicked by the host mid-game (forfeits the game). */
+  kicked: boolean;
+  games: number;
+}
+
+/** One finished game. `rank` 0 = Nhất; `delta` is the point change (see scoring.ts). */
+export interface GameRecord {
+  id: string;
+  at: number;
+  instantWin: InstantWinReason | null;
+  results: { id: string; name: string; rank: number; delta: number }[];
+}
+
+export interface Reaction {
+  id: string;
+  at: number;
+  emoji: string;
+  name: string;
+  /** Seat id when a player sent it; null for spectators. */
+  playerId: string | null;
+}
+
+/** One room in the lobby list. */
+export interface RoomSummary {
+  code: string;
+  status: "waiting" | "playing";
+  players: { name: string; connected: boolean; points: number }[];
+  spectators: number;
+  games: number;
+}
+
+/** A row of the all-time leaderboard (keyed by player name). */
+export interface LeaderboardEntry {
+  name: string;
+  points: number;
+  games: number;
+  /** Games finished first. */
+  wins: number;
+  lastPlayed: number;
 }
 
 export interface GameView {
@@ -36,13 +82,21 @@ export interface GameView {
 /** The full snapshot sent to one client after every change. */
 export interface RoomView {
   code: string;
+  /** Your seat id; empty for spectators. */
   meId: string;
+  role: "player" | "spectator";
   /** Server clock when the view was built — lets clients correct for clock skew. */
   serverTime: number;
   /** Up to 4 seats in turn order; null = empty seat. */
   seats: (SeatView | null)[];
   game: GameView | null;
   hand: Card[];
+  /** Recent finished games in this room, newest last. */
+  history: GameRecord[];
+  /** Names of people watching. */
+  spectators: string[];
+  /** Emoji sent in the last few seconds. */
+  reactions: Reaction[];
 }
 
 export type AckResult<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -55,6 +109,10 @@ export type ClientMessage =
   | { type: "play"; id: number; cards: Card[] }
   | { type: "pass"; id: number }
   | { type: "leave"; id: number }
+  | { type: "watch"; id: number; code: string; name: string; token: string }
+  | { type: "emoji"; id: number; emoji: string }
+  /** Host only: remove a disconnected player (they forfeit a running game). */
+  | { type: "kick"; id: number; playerId: string }
   | { type: "ping" };
 
 /** Server → client. */

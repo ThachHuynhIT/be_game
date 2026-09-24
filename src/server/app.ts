@@ -2,7 +2,7 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
 import { WS_PATH } from "../game/protocol";
-import { newRoom, randomCode } from "../game/room";
+import { isRoomActive, newRoom, randomCode, roomSummary } from "../game/room";
 import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
 import { getRoomStore, redisUrl } from "./store";
 
@@ -21,8 +21,10 @@ export function createGameServer(): Server {
     cors(req, res);
     if (req.method === "OPTIONS") return void res.writeHead(204).end();
     if (path === "/api/health") return void health(res);
+    if (path === "/api/rooms") return void listRooms(res);
+    if (path === "/api/leaderboard") return void leaderboard(req, res);
     if (path === WS_PATH) return json(res, 426, { ok: false, error: "Expected a WebSocket connection" });
-    if (path === "/" || path === "/api") return json(res, 200, { ok: true, service: "be_game", ws: WS_PATH, health: "/api/health" });
+    if (path === "/" || path === "/api") return json(res, 200, { ok: true, service: "be_game", ws: WS_PATH, endpoints: ["/api/health", "/api/rooms", "/api/leaderboard"] });
     json(res, 404, { ok: false, error: "Not found" });
   });
 
@@ -64,6 +66,28 @@ function cors(req: IncomingMessage, res: ServerResponse) {
 
 const withTimeout = <T>(p: Promise<T>, ms: number, label: string) =>
   Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))]);
+
+/** Rooms someone is still in, for the lobby. */
+async function listRooms(res: ServerResponse) {
+  try {
+    const store = await getRoomStore();
+    const now = Date.now();
+    const rooms = (await store.recentRooms(60)).filter((r) => isRoomActive(r, now)).slice(0, 30).map((r) => roomSummary(r, now));
+    json(res, 200, { ok: true, rooms });
+  } catch (err) {
+    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+async function leaderboard(req: IncomingMessage, res: ServerResponse) {
+  try {
+    const limit = Math.min(Math.max(Number(new URL(req.url ?? "/", "http://x").searchParams.get("limit")) || 20, 1), 100);
+    const store = await getRoomStore();
+    json(res, 200, { ok: true, players: await store.leaderboard(limit) });
+  } catch (err) {
+    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+}
 
 /** create → load → subscribe → save → pub/sub round trip, with timings. Never returns secrets. */
 async function health(res: ServerResponse) {

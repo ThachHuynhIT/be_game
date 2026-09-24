@@ -10,6 +10,8 @@ export interface LastPlay {
   playerId: string;
   combo: Combo;
   chop: boolean;
+  /** The combo this play chopped (chặt), e.g. a single 2 — null for a normal beat. */
+  chopped?: Combo | null;
 }
 
 export interface GameState {
@@ -27,6 +29,8 @@ export interface GameState {
   /** On the first game, the opening combo must contain this card (the lowest dealt card). */
   mustInclude: Card | null;
   status: "playing" | "ended";
+  /** Players removed mid-game (kicked while disconnected); they rank last. */
+  forfeited?: string[];
   instantWin: { playerId: string; reason: InstantWinReason } | null;
 }
 
@@ -94,7 +98,10 @@ export function newGame(players: string[], opts: NewGameOptions = {}): GameState
   return state;
 }
 
-export const activePlayers = (s: GameState) => s.players.filter((p) => !s.finished.includes(p));
+/** Finished normally, or forfeited (kicked while disconnected). */
+const isOut = (s: GameState, p: string) => s.finished.includes(p) || !!s.forfeited?.includes(p);
+
+export const activePlayers = (s: GameState) => s.players.filter((p) => !isOut(s, p));
 
 /** Next active player after `from` in seat order, optionally skipping those who passed this round. */
 function nextPlayer(s: GameState, from: string, skipPassed: boolean): string | null {
@@ -102,7 +109,7 @@ function nextPlayer(s: GameState, from: string, skipPassed: boolean): string | n
   const start = s.players.indexOf(from);
   for (let k = 1; k <= n; k++) {
     const p = s.players[(start + k) % n];
-    if (s.finished.includes(p)) continue;
+    if (isOut(s, p)) continue;
     if (skipPassed && s.passed.includes(p)) continue;
     return p;
   }
@@ -110,10 +117,11 @@ function nextPlayer(s: GameState, from: string, skipPassed: boolean): string | n
 }
 
 /** After any action, decide who moves next (possibly starting a new round). */
-function advance(s: GameState, actor: string) {
+function advance(s: GameState, actor: string | null) {
   const remaining = activePlayers(s);
   if (remaining.length <= 1) {
-    s.finished.push(...remaining);
+    // Forfeited players rank below everyone, the first one kicked last.
+    s.finished.push(...remaining, ...(s.forfeited ?? []).slice().reverse());
     s.status = "ended";
     s.turn = null;
     return;
@@ -122,13 +130,14 @@ function advance(s: GameState, actor: string) {
   const leader = s.lastPlay?.playerId;
   const contenders = remaining.filter((p) => !s.passed.includes(p) && p !== leader);
   if (leader && contenders.length === 0) {
-    // Everyone else passed: new round. If the leader already finished, the next player leads.
-    s.turn = s.finished.includes(leader) ? nextPlayer(s, leader, false) : leader;
+    // Everyone else passed: new round. If the leader is already out, the next player leads.
+    s.turn = isOut(s, leader) ? nextPlayer(s, leader, false) : leader;
     s.lastPlay = null;
     s.passed = [];
     return;
   }
-  s.turn = nextPlayer(s, actor, true);
+  // `actor` null = nobody acted (a forfeit off-turn): keep the current turn.
+  if (actor !== null) s.turn = nextPlayer(s, actor, true);
 }
 
 export function play(s: GameState, playerId: string, cards: Card[]): ActionResult {
@@ -148,7 +157,8 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
   if (!canBeat(prev, combo)) return { ok: false, error: "Bài không chặn được" };
 
   s.hands[playerId] = hand.filter((c) => !cards.includes(c));
-  s.lastPlay = { playerId, combo, chop: isChop(prev, combo) };
+  const chop = isChop(prev, combo);
+  s.lastPlay = { playerId, combo, chop, chopped: chop ? prev : null };
   s.mustInclude = null;
   if (s.hands[playerId].length === 0) s.finished.push(playerId);
   advance(s, playerId);
@@ -169,4 +179,15 @@ export function autoAction(s: GameState, playerId: string): ActionResult {
   if (s.lastPlay) return pass(s, playerId);
   const card = s.mustInclude ?? Math.min(...s.hands[playerId]);
   return play(s, playerId, [card]);
+}
+
+/** Remove a player from the running game; they rank below everyone still playing. */
+export function forfeit(s: GameState, playerId: string): ActionResult {
+  if (s.status !== "playing") return { ok: false, error: "Ván đã kết thúc" };
+  if (!s.players.includes(playerId) || isOut(s, playerId)) return { ok: false, error: "Người chơi không còn trong ván" };
+  s.forfeited = [...(s.forfeited ?? []), playerId];
+  s.passed = s.passed.filter((p) => p !== playerId);
+  if (s.mustInclude !== null && s.hands[playerId]?.includes(s.mustInclude)) s.mustInclude = null;
+  advance(s, s.turn === playerId ? playerId : null);
+  return { ok: true };
 }
