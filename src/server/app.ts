@@ -25,6 +25,9 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/typhu/ws": { game: "typhu", kind: "ws" },
   "/api/typhu/rooms": { game: "typhu", kind: "rooms" },
   "/api/typhu/leaderboard": { game: "typhu", kind: "leaderboard" },
+  "/api/splendor/ws": { game: "splendor", kind: "ws" },
+  "/api/splendor/rooms": { game: "splendor", kind: "rooms" },
+  "/api/splendor/leaderboard": { game: "splendor", kind: "leaderboard" },
 };
 
 export function createGameServer(): Server {

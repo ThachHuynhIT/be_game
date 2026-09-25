@@ -52,6 +52,21 @@ import {
   tpView,
 } from "../typhu/room";
 import type { TPCommand } from "../typhu/protocol";
+import {
+  type SPRoom,
+  findByToken as findSPByToken,
+  isSPActive,
+  joinSP,
+  leaveSP,
+  newSPRoom,
+  nextSPTickAt,
+  spCommand,
+  spHeartbeat,
+  spSummary,
+  spView,
+  tickSP,
+} from "../splendor/room";
+import type { SPCommand } from "../splendor/protocol";
 import type { CodedRoom, GameKind } from "./store";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -169,8 +184,32 @@ export const typhuAdapter: GameAdapter<TPRoom> = {
   lastRecord: (room) => room.history?.[room.history.length - 1],
 };
 
+export const splendorAdapter: GameAdapter<SPRoom> = {
+  game: "splendor",
+  newRoom: newSPRoom,
+  join: (room, token, name, now, newId) => joinSP(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: spHeartbeat,
+  leave: leaveSP,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => spCommand(room, token, msg as unknown as SPCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findSPByToken(room, token);
+      return p ? spView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? spView(room, null, now) : null;
+  },
+  tick: tickSP,
+  nextTickAt: nextSPTickAt,
+  summary: spSummary,
+  isActive: isSPActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
 export const ADAPTERS: Record<GameKind, GameAdapter> = {
   tienlen: tienlenAdapter as unknown as GameAdapter,
   meono: meonoAdapter as unknown as GameAdapter,
   typhu: typhuAdapter as unknown as GameAdapter,
+  splendor: splendorAdapter as unknown as GameAdapter,
 };

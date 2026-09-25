@@ -12,6 +12,9 @@
     },
     "api/typhu/ws.ts": {
       "maxDuration": 300
+    },
+    "api/splendor/ws.ts": {
+      "maxDuration": 300
     }
   }
 }
