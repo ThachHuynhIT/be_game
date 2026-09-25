@@ -200,3 +200,54 @@ describe("game flow", () => {
     expect(new Set(all).size).toBe(52);
   });
 });
+
+describe("room settings", () => {
+  it("auto-pass can be turned off", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: { A: c("3s 9d Kh"), B: c("4s 5d"), C: c("8s Ac") },
+      starter: "A",
+      autoPass: false,
+    });
+    play(g, "A", c("Kh"));
+    expect(g.turn).toBe("B");
+    expect(g.passed).toEqual([]);
+  });
+});
+
+describe("4 đôi thông chặt lúc nào cũng được", () => {
+  const hands = () => ({
+    A: c("3s 2h 9d Kc"),
+    B: c("5c 6d Jd"),
+    C: c("4s 4h 5s 5h 6c 6h 7s 7h Qd"),
+  });
+
+  it("chops a heo out of turn, even after passing", () => {
+    const g = newGame(["A", "B", "C"], { hands: hands(), starter: "A", autoPass: false });
+    play(g, "A", c("9d"));
+    play(g, "B", c("Jd"));
+    pass(g, "C");
+    expect(g.passed).toContain("C");
+    play(g, "A", c("2h")); // B's turn now
+    expect(g.turn).toBe("B");
+    expect(play(g, "C", c("4s 4h 5s 5h 6c 6h 7s 7h")).ok).toBe(true);
+    expect(g.chops).toEqual([{ from: "A", to: "C", points: 2 }]);
+    expect(g.passed).not.toContain("C");
+    expect(g.turn).toBe("A");
+  });
+
+  it("other bombs still wait for their turn", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: { A: c("3s 2h 9d"), B: c("5c 6d Jd"), C: c("4s 4h 5s 5h 6c 6h Qd") },
+      starter: "A",
+      autoPass: false,
+    });
+    play(g, "A", c("2h"));
+    expect(play(g, "C", c("4s 4h 5s 5h 6c 6h"))).toEqual({ ok: false, error: "Chưa đến lượt bạn" });
+  });
+
+  it("cannot be played out of turn on a normal single", () => {
+    const g = newGame(["A", "B", "C"], { hands: hands(), starter: "A", autoPass: false });
+    play(g, "A", c("9d"));
+    expect(play(g, "C", c("4s 4h 5s 5h 6c 6h 7s 7h")).ok).toBe(false);
+  });
+});

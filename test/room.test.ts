@@ -48,7 +48,8 @@ describe("room lifecycle", () => {
     expect(v1.hand).toHaveLength(13);
     expect(v0.hand.some((c) => v1.hand.includes(c))).toBe(false);
     expect(JSON.stringify(v0)).not.toContain("token-");
-    expect(v0.game?.turnDeadline).toBe(T0 + TURN_SECONDS * 1000);
+    // A random deal can be a tới trắng, which ends the game at once (no turn timer).
+    if (v0.game?.status === "playing") expect(v0.game.turnDeadline).toBe(T0 + TURN_SECONDS * 1000);
   });
 
   it("tick auto-plays an expired turn", () => {

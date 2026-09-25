@@ -117,6 +117,8 @@ export interface RoomView {
   /** Emoji sent in the last few seconds. */
   reactions: Reaction[];
   chat: ChatMessage[];
+  /** Host settings: auto-pass and Nhất / Nhì points. */
+  settings: { autoPass: boolean; first: number; second: number };
 }
 
 export type AckResult<T = object> = ({ ok: true } & T) | { ok: false; error: string };

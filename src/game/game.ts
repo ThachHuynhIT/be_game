@@ -43,6 +43,10 @@ export interface GameState {
   burned?: string[];
   /** Players the server passed for because they had nothing that could beat the table this round. */
   autoPassed?: string[];
+  /** Room setting: pass automatically for a player who cannot beat the table (default on). */
+  autoPass?: boolean;
+  /** Room setting: points for Nhất / Nhì this game (the rest is derived, see scoring.ts). */
+  points?: { first: number; second: number };
 }
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -53,6 +57,8 @@ export interface NewGameOptions {
   random?: () => number;
   /** Pre-dealt hands (tests). */
   hands?: Record<string, Card[]>;
+  autoPass?: boolean;
+  points?: { first: number; second: number };
 }
 
 export function newGame(players: string[], opts: NewGameOptions = {}): GameState {
@@ -79,6 +85,8 @@ export function newGame(players: string[], opts: NewGameOptions = {}): GameState
     mustInclude: null,
     status: "playing",
     instantWin: null,
+    autoPass: opts.autoPass ?? true,
+    ...(opts.points ? { points: opts.points } : {}),
   };
 
   // Tới trắng.
@@ -156,7 +164,7 @@ function advance(s: GameState, actor: string | null) {
 /** Nothing in hand can beat the table → pass for that player right away (tự bỏ lượt). */
 function autoPassHopeless(s: GameState) {
   const p = s.turn;
-  if (s.status !== "playing" || !p || !s.lastPlay || s.lastPlay.playerId === p) return;
+  if (s.autoPass === false || s.status !== "playing" || !p || !s.lastPlay || s.lastPlay.playerId === p) return;
   if (hasBeatingPlay(s.hands[p], s.lastPlay.combo)) return;
   s.autoPassed = [...(s.autoPassed ?? []), p];
   s.passed.push(p);
@@ -192,9 +200,16 @@ export function hasBeatingPlay(hand: Card[], prev: Combo): boolean {
   });
 }
 
+/** 4+ đôi thông may chop at any moment — out of turn, even after passing this round. */
+export const isAnytimeChop = (prev: Combo | null, next: Combo) =>
+  !!prev && next.type === "pairSeq" && next.length >= 8 && isChop(prev, next);
+
 export function play(s: GameState, playerId: string, cards: Card[]): ActionResult {
   if (s.status !== "playing") return { ok: false, error: "Ván đã kết thúc" };
-  if (s.turn !== playerId) return { ok: false, error: "Chưa đến lượt bạn" };
+  if (!s.players.includes(playerId) || isOut(s, playerId)) return { ok: false, error: "Bạn không còn trong ván" };
+  const early = detectCombo(Array.isArray(cards) ? cards : []);
+  const anytime = !!early && isAnytimeChop(s.lastPlay?.combo ?? null, early) && s.lastPlay?.playerId !== playerId;
+  if (s.turn !== playerId && !anytime) return { ok: false, error: "Chưa đến lượt bạn" };
   const hand = s.hands[playerId];
   if (!Array.isArray(cards) || !cards.every((c) => hand.includes(c))) {
     return { ok: false, error: "Bạn không có lá bài này" };
@@ -209,6 +224,8 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
   if (!canBeat(prev, combo)) return { ok: false, error: "Bài không chặn được" };
 
   s.hands[playerId] = hand.filter((c) => !cards.includes(c));
+  // An out-of-turn 4 đôi thông puts the chopper back in the round; play continues after them.
+  if (anytime) s.passed = s.passed.filter((p) => p !== playerId);
   const chop = isChop(prev, combo);
   const prevPlayer = s.lastPlay?.playerId;
   const prevChopPoints = s.lastPlay?.chop ? (s.lastPlay.chopPoints ?? 0) : 0;

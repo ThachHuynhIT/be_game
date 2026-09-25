@@ -19,6 +19,7 @@ import {
   startGame,
   tick,
   unwatch,
+  updateSettings,
   watchRoom,
 } from "../game/room";
 import {
@@ -105,6 +106,7 @@ export const tienlenAdapter: GameAdapter<RoomState> = {
     if (msg.type === "play") return playCards(room, p, msg.cards, now);
     if (msg.type === "pass") return passTurn(room, p, now);
     if (msg.type === "kick") return kickPlayer(room, p, msg.playerId, now);
+    if (msg.type === "settings") return updateSettings(room, p, msg);
     return { ok: false, error: "Lệnh không hợp lệ" };
   },
   view(room, token, role, now) {

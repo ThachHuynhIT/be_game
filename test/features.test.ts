@@ -192,3 +192,23 @@ describe("chat", () => {
     expect(roomView(room, room.seats[0], 3000).chat.at(-1)?.text).toBe("m49");
   });
 });
+
+describe("tiến lên settings (room)", () => {
+  it("host sets auto-pass and Nhất / Nhì points between games", async () => {
+    const { newRoom, joinRoom, updateSettings, roomView, startGame } = await import("../src/game/room");
+    const room = newRoom("SETTS");
+    let n = 0;
+    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`);
+    joinRoom(room, "token-bbbb", "Bình", 1000, () => `p${++n}`);
+    const [host, guest] = [room.seats[0]!, room.seats[1]!];
+    expect(roomView(room, host, 1000).settings).toEqual({ autoPass: true, first: 2, second: 1 });
+    expect(updateSettings(room, guest, { first: 5 }).ok).toBe(false);
+    expect(updateSettings(room, host, { first: 3, second: 4 }).ok).toBe(false);
+    expect(updateSettings(room, host, { first: 0 }).ok).toBe(false);
+    expect(updateSettings(room, host, { autoPass: false, first: 4, second: 2 }).ok).toBe(true);
+    startGame(room, host, 1000);
+    expect(room.game?.autoPass).toBe(false);
+    expect(room.game?.points).toEqual({ first: 4, second: 2 });
+    if (room.game?.status === "playing") expect(updateSettings(room, host, { first: 1 }).ok).toBe(false);
+  });
+});

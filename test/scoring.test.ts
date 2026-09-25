@@ -46,3 +46,15 @@ describe("scoreGame (Mèo Nổ, Cờ Tỷ Phú)", () => {
     expect(sum(scoreGame(["a", "b", "c", "d", "e", "f"], null))).toBe(0);
   });
 });
+
+describe("custom Nhất / Nhì points", () => {
+  it("derives the other ranks so every game sums to zero", () => {
+    const pts = { first: 5, second: 2 };
+    expect(scoreTienLen(["a", "b", "c", "d"], null, [], [], pts)).toEqual({ a: 5, b: 2, c: -2, d: -5 });
+    expect(scoreTienLen(["a", "b", "c"], null, [], [], pts)).toEqual({ a: 5, b: 2, c: -7 });
+    expect(scoreTienLen(["a", "b"], null, [], [], pts)).toEqual({ a: 5, b: -5 });
+    // Tới trắng = 2 × Nhất from each; chết cháy still doubles.
+    expect(scoreTienLen(["a", "b", "c"], "a", [], [], pts)).toEqual({ a: 20, b: -10, c: -10 });
+    expect(scoreTienLen(["a", "b", "c", "d"], null, [], ["d"], pts)).toEqual({ a: 10, b: 2, c: -2, d: -10 });
+  });
+});

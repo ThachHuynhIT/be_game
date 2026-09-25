@@ -2,20 +2,27 @@ import { type Card, RANK_TWO, isRed, rankOf } from "./cards";
 import type { Combo } from "./combos";
 
 /**
- * Tiến Lên points per finishing position (Nhất +2, Nhì +1). Every game sums to zero.
- *   4 players: +2, +1, −1, −2
- *   3 players: +2, +1, −3
- *   2 players: +2, −2
- *   Tới trắng: the winner takes +4 from every other player (double).
+ * Tiến Lên points per finishing position (default Nhất +2, Nhì +1; the host can change them). Every game sums to zero.
+ *   Tới trắng: the winner takes 2 × Nhất from every other player (double).
  *   Chết cháy (never played a card before the first player finished): the loss is doubled; the extra goes to Nhất.
  * On top of that, chặt heo moves points from the chopped player to the chopper (see chopPoints);
  * each chặt chồng doubles the previous chop.
  */
-const TIENLEN_POINTS: Record<number, number[]> = {
-  2: [2, -2],
-  3: [2, 1, -3],
-  4: [2, 1, -1, -2],
-};
+export const DEFAULT_TIENLEN_POINTS = { first: 2, second: 1 };
+
+/**
+ * Points by finishing position from the room's Nhất / Nhì setting, mirrored so the game sums to zero:
+ *   4 players: +first, +second, −second, −first
+ *   3 players: +first, +second, −(first + second)
+ *   2 players: +first, −first
+ */
+export function tienlenRankPoints(n: number, points = DEFAULT_TIENLEN_POINTS): number[] {
+  const { first, second } = points;
+  if (n === 2) return [first, -first];
+  if (n === 3) return [first, second, -(first + second)];
+  if (n === 4) return [first, second, -second, -first];
+  return [];
+}
 
 /** Mèo Nổ and Cờ Tỷ Phú: symmetric points by rank. */
 const RANK_POINTS: Record<number, number[]> = {
@@ -27,8 +34,6 @@ const RANK_POINTS: Record<number, number[]> = {
 };
 
 export const INSTANT_WIN_POINTS = 2;
-/** Tiến Lên tới trắng pays double. */
-export const TIENLEN_INSTANT_WIN_POINTS = 4;
 /** Chặt heo: heo đen (♠ ♣) 1 điểm, heo đỏ (♦ ♥) 2 điểm each. */
 export const BLACK_TWO_POINTS = 1;
 export const RED_TWO_POINTS = 2;
@@ -55,13 +60,15 @@ export function scoreTienLen(
   instantWinner: string | null,
   chops: ChopScore[] = [],
   burned: string[] = [],
+  points = DEFAULT_TIENLEN_POINTS,
 ): Record<string, number> {
   const n = finished.length;
   const deltas: Record<string, number> = {};
   if (instantWinner) {
-    for (const id of finished) deltas[id] = id === instantWinner ? TIENLEN_INSTANT_WIN_POINTS * (n - 1) : -TIENLEN_INSTANT_WIN_POINTS;
+    const each = points.first * 2;
+    for (const id of finished) deltas[id] = id === instantWinner ? each * (n - 1) : -each;
   } else {
-    const table = TIENLEN_POINTS[n] ?? [];
+    const table = tienlenRankPoints(n, points);
     finished.forEach((id, i) => {
       deltas[id] = table[i] ?? 0;
     });

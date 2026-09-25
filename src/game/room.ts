@@ -22,7 +22,7 @@ import {
   type RoomView,
   TURN_SECONDS,
 } from "./protocol";
-import { scoreTienLen } from "./scoring";
+import { DEFAULT_TIENLEN_POINTS, scoreTienLen } from "./scoring";
 
 /**
  * Room lifecycle as pure functions over JSON-serialisable state, so a room can
@@ -75,6 +75,35 @@ export interface RoomState {
   /** Recent emoji reactions (short-lived). */
   reactions?: Reaction[];
   chat?: ChatMessage[];
+  /** Host settings; missing on rooms saved before settings existed. */
+  settings?: TienLenSettings;
+}
+
+export interface TienLenSettings {
+  /** Pass automatically when nothing in hand can beat the table. */
+  autoPass: boolean;
+  /** Points for Nhất and Nhì; the others are derived (see scoring.ts). */
+  first: number;
+  second: number;
+}
+
+export const DEFAULT_SETTINGS: TienLenSettings = { autoPass: true, ...DEFAULT_TIENLEN_POINTS };
+export const MAX_RANK_POINTS = 20;
+export const settingsOf = (room: RoomState): TienLenSettings => ({ ...DEFAULT_SETTINGS, ...room.settings });
+
+/** Host changes the table rules between games. */
+export function updateSettings(room: RoomState, host: RoomPlayer, msg: Record<string, unknown>): ActionResult {
+  if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới đổi luật" };
+  if (room.game?.status === "playing") return { ok: false, error: "Đổi luật khi ván đã kết thúc" };
+  const next = settingsOf(room);
+  if (msg.autoPass !== undefined) next.autoPass = msg.autoPass === true;
+  if (msg.first !== undefined) next.first = msg.first as number;
+  if (msg.second !== undefined) next.second = msg.second as number;
+  const ok = (v: number) => Number.isInteger(v) && v >= 0 && v <= MAX_RANK_POINTS;
+  if (!ok(next.first) || next.first < 1) return { ok: false, error: `Điểm Nhất từ 1 đến ${MAX_RANK_POINTS}` };
+  if (!ok(next.second) || next.second > next.first) return { ok: false, error: "Điểm Nhì từ 0 đến điểm Nhất" };
+  room.settings = next;
+  return { ok: true };
 }
 
 export interface Spectator {
@@ -287,7 +316,8 @@ export function startGame(room: RoomState, player: RoomPlayer, now: number): Act
   if (players.length < MIN_PLAYERS) return { ok: false, error: `Cần ít nhất ${MIN_PLAYERS} người` };
   if (players.length > MAX_PLAYERS) return { ok: false, error: "Quá nhiều người" };
   const starter = room.lastWinner && players.includes(room.lastWinner) ? room.lastWinner : undefined;
-  room.game = newGame(players, { starter });
+  const settings = settingsOf(room);
+  room.game = newGame(players, { starter, autoPass: settings.autoPass, points: { first: settings.first, second: settings.second } });
   afterAction(room, now);
   return { ok: true };
 }
@@ -380,7 +410,7 @@ function afterAction(room: RoomState, now: number) {
 function recordGame(room: RoomState, now: number) {
   const g = room.game;
   if (!g) return;
-  const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops, g.burned);
+  const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops, g.burned, g.points);
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
@@ -454,6 +484,7 @@ export function roomView(room: RoomState, player: RoomPlayer | null, now: number
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),
     reactions: (room.reactions ?? []).filter((r) => now - r.at < REACTION_TTL_MS),
     chat: room.chat ?? [],
+    settings: settingsOf(room),
   };
 }
 
