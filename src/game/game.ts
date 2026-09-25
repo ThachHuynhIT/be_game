@@ -209,9 +209,11 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
   s.hands[playerId] = hand.filter((c) => !cards.includes(c));
   const chop = isChop(prev, combo);
   const prevPlayer = s.lastPlay?.playerId;
+  const prevChopPoints = s.lastPlay?.chop ? (s.lastPlay.chopPoints ?? 0) : 0;
   s.lastPlay = { playerId, combo, chop, chopped: chop ? prev : null };
   if (chop && prev && prevPlayer && prevPlayer !== playerId) {
-    const points = chopPoints(prev);
+    // Chặt chồng: chopping a chop doubles what that chop was worth, every time.
+    const points = prevChopPoints > 0 ? prevChopPoints * 2 : chopPoints(prev);
     s.lastPlay.chopPoints = points;
     s.lastPlay.choppedPlayer = prevPlayer;
     s.chops = [...(s.chops ?? []), { from: prevPlayer, to: playerId, points }];

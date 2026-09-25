@@ -7,7 +7,8 @@ import type { Combo } from "./combos";
  *   3 players: +2, +1, −3
  *   2 players: +2, −2
  *   Tới trắng: the winner takes +2 from every other player.
- * On top of that, chặt heo moves points from the chopped player to the chopper (see chopPoints).
+ * On top of that, chặt heo moves points from the chopped player to the chopper (see chopPoints);
+ * each chặt chồng doubles the previous chop.
  */
 const TIENLEN_POINTS: Record<number, number[]> = {
   2: [2, -2],
@@ -28,7 +29,7 @@ export const INSTANT_WIN_POINTS = 2;
 /** Chặt heo: heo đen (♠ ♣) 1 điểm, heo đỏ (♦ ♥) 2 điểm each. */
 export const BLACK_TWO_POINTS = 1;
 export const RED_TWO_POINTS = 2;
-/** Chặt chồng — chopping a 3 đôi thông or tứ quý that was on the table. */
+/** Chopping a 3 đôi thông or tứ quý that was played normally (not itself a chop). Chặt chồng doubles instead (see game.ts). */
 export const CHOP_BOMB_POINTS = 2;
 
 /** One chop: `from` (whose cards were chopped) pays `to` (the chopper). */

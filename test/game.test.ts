@@ -91,6 +91,27 @@ describe("game flow", () => {
     ]);
   });
 
+  it("chặt chồng doubles every time", () => {
+    const g = newGame(["A", "B", "C", "D"], {
+      hands: {
+        A: c("3s 2h 9d"),
+        B: c("4s 4h 5s 5h 6c 6d Kd"),
+        C: c("7s 7c 7d 7h Qd"),
+        D: c("8s 8c 9s 9c 10s 10c Js Jc Ad"),
+      },
+      starter: "A",
+    });
+    play(g, "A", c("2h")); // heo đỏ
+    play(g, "B", c("4s 4h 5s 5h 6c 6d")); // chặt: 2
+    play(g, "C", c("7s 7c 7d 7h")); // chặt chồng: 4
+    play(g, "D", c("8s 8c 9s 9c 10s 10c Js Jc")); // chặt chồng: 8
+    expect(g.chops?.map((x) => [x.from, x.to, x.points])).toEqual([
+      ["A", "B", 2],
+      ["B", "C", 4],
+      ["C", "D", 8],
+    ]);
+  });
+
   it("passes automatically for a player with nothing that beats the table", () => {
     const g = newGame(["A", "B", "C"], {
       hands: { A: c("3s 9d Kh"), B: c("4s 5d"), C: c("8s Ac") },
