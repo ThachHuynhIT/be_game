@@ -200,7 +200,7 @@ describe("expansion cards", () => {
   });
 
   it("Siêu bỏ lượt ends every remaining turn; Bom Mèo Nguyên Tử puts all kittens on top", () => {
-    const s = rig({ A: ["attack"], B: ["superskip", "catomic"], C: ["taco"] }, ["taco", "exploding", "melon", "exploding"], ["chaos"]);
+    const s = rig({ A: ["attack"], B: ["superskip", "catomic"], C: ["taco"] }, ["taco", "exploding", "melon", "exploding"], ["streaking"]);
     playCards(s, "A", ids(s, "A", "attack"), {}, T, names);
     settle(s);
     expect([s.turn, s.turnsLeft]).toEqual(["B", 2]);
@@ -262,11 +262,11 @@ describe("settings", () => {
     joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
     expect(meoCommand(room, "token-bbbb", { type: "settings", turnSeconds: 45 }, T).ok).toBe(false);
     expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 12 }, T).ok).toBe(false);
-    expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1, expansions: ["chaos"] }, T).ok).toBe(true);
+    expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1, expansions: ["streaking"] }, T).ok).toBe(true);
     meoCommand(room, "token-aaaa", { type: "start" }, T);
     expect(room.current?.turnDeadline).toBe(T + 45_000);
     expect(room.current?.nopeMs).toBe(5_000);
-    expect(room.current?.expansions).toEqual(["chaos"]);
+    expect(room.current?.expansions).toEqual(["streaking"]);
     expect(meoView(room, room.seats[0], T).settings).toEqual({ turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1 });
   });
 });
@@ -294,5 +294,135 @@ describe("hiding the kitten", () => {
     s.choice = { kind: "defuse", player: "A", kitten: card("exploding"), deadline: T + 1 };
     tickGame(s, T + 2, names, never, () => 0);
     expect(s.deck.findIndex((c) => c.type === "exploding")).toBe(3);
+  });
+});
+
+describe("Streaking Kittens pack", () => {
+  it("Mèo Chạy Rông lets you keep a drawn Mèo Nổ in your hand", () => {
+    const s = rig({ A: ["streaking"], B: ["skip"] }, ["exploding", "taco"], ["streaking"]);
+    drawCard(s, "A", T, names);
+    expect(s.out).toEqual([]);
+    expect(s.hands.A.map((c) => c.type).sort()).toEqual(["exploding", "streaking"]);
+    expect(s.choice).toBeNull();
+    expect(s.turn).toBe("B");
+  });
+
+  it("losing the Streaking Kitten means dealing with the held Mèo Nổ", () => {
+    const s = rig({ A: ["streaking", "exploding", "defuse"], B: ["taco", "taco"] }, ["taco"], ["streaking"]);
+    s.turn = "B";
+    // B's pair steals the first card of A's hand — the Streaking Kitten.
+    playCards(s, "B", ids(s, "B", "taco", "taco"), { target: "A" }, T, names);
+    tickGame(s, T + NOPE_WINDOW_MS * 2 + 500, names, never, () => 0);
+    expect(s.hands.B.some((c) => c.type === "streaking")).toBe(true);
+    expect(s.choice).toMatchObject({ kind: "defuse", player: "A", endsTurn: false });
+    insertKitten(s, "A", 0, T, names);
+    expect(s.turn).toBe("B"); // A's forced defuse doesn't touch B's turn
+  });
+
+  it("Xem tương lai ×5 shows five cards", () => {
+    const s = rig({ A: ["future5"], B: ["skip"] }, ["taco", "melon", "potato", "beard", "rainbow", "skip"], ["streaking"]);
+    playCards(s, "A", ids(s, "A", "future5"), {}, T, names);
+    settle(s);
+    expect(s.future?.cards.map((c) => c.type)).toEqual(["taco", "melon", "potato", "beard", "rainbow"]);
+  });
+
+  it("Dọn rác: everyone puts a card back, then the deck is shuffled", () => {
+    const s = rig({ A: ["garbage", "taco"], B: ["melon"] }, ["skip"], ["streaking"]);
+    playCards(s, "A", ids(s, "A", "garbage"), {}, T, names);
+    settle(s);
+    expect(s.choice).toMatchObject({ kind: "offer", mode: "garbage", player: "A" });
+    giveCard(s, "A", ids(s, "A", "taco")[0], T, names);
+    expect(s.choice).toMatchObject({ kind: "offer", player: "B" });
+    giveCard(s, "B", ids(s, "B", "melon")[0], T, names);
+    expect(s.choice).toBeNull();
+    expect(s.deck.map((c) => c.type).sort()).toEqual(["melon", "skip", "taco"]);
+  });
+
+  it("Đánh dấu reveals a card of the target; Lời nguyền makes their hand blind", () => {
+    let n = 0;
+    const room = newMeoRoom("MARKS");
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    meoCommand(room, "token-aaaa", { type: "settings", expansions: ["streaking"] }, T);
+    meoCommand(room, "token-aaaa", { type: "start" }, T);
+    const g = room.current!;
+    const [a, b] = ["p1", "p2"];
+    g.turn = a;
+    g.hands[a] = [card("mark"), card("curse")];
+    g.hands[b] = [card("taco"), card("melon")];
+    meoCommand(room, "token-aaaa", { type: "mplay", cards: [g.hands[a][0].id], target: b }, T);
+    tickMeo(room, T + 8_000);
+    const seenByA = meoView(room, room.seats[0], T + 8_000).seats.find((x) => x?.id === b)!;
+    expect(seenByA.marked).toHaveLength(1);
+    meoCommand(room, "token-aaaa", { type: "mplay", cards: [g.hands[a][0].id], target: b }, T + 8_000);
+    tickMeo(room, T + 16_000);
+    const bView = meoView(room, room.seats[1], T + 16_000);
+    expect(bView.hand.every((c) => (c.type as string) === "hidden" && c.id < 0)).toBe(true);
+    expect(bView.seats.find((x) => x?.id === b)?.cursed).toBe(true);
+    // A's turn ends → B's turn → B plays blind (a cat alone is refused, but the id is translated).
+    meoCommand(room, "token-aaaa", { type: "draw" }, T + 16_000);
+    expect(g.turn).toBe(b);
+    expect(meoCommand(room, "token-bbbb", { type: "mplay", cards: [-1] }, T + 16_000)).toEqual({ ok: false, error: "Lá mèo phải đánh theo đôi hoặc bộ ba" });
+    meoCommand(room, "token-bbbb", { type: "draw" }, T + 16_000);
+    expect(g.cursed).toEqual([]);
+  });
+});
+
+describe("Barking Kittens pack", () => {
+  it("Mèo Sủa: whoever holds the other one loses a defuse, or explodes", () => {
+    const s = rig({ A: ["barking"], B: ["barking", "defuse"], C: ["barking"] }, ["taco"], ["barking"]);
+    // Only two exist in a real deck; here B is found first.
+    playCards(s, "A", ids(s, "A", "barking"), {}, T, names);
+    settle(s);
+    expect(s.hands.B.map((c) => c.type)).toEqual([]);
+    expect(s.out).toEqual([]);
+    const t = rig({ A: ["barking"], B: ["barking"] }, ["taco"], ["barking"]);
+    playCards(t, "A", ids(t, "A", "barking"), {}, T, names);
+    settle(t);
+    expect(t.out).toEqual(["B"]);
+  });
+
+  it("Để đó cho tui: the target's next draw goes to you", () => {
+    const s = rig({ A: ["ilt"], B: ["skip"] }, ["taco", "melon"], ["barking"]);
+    playCards(s, "A", ids(s, "A", "ilt"), { target: "B" }, T, names);
+    settle(s);
+    drawCard(s, "A", T, names); // A draws taco normally
+    drawCard(s, "B", T, names); // B draws melon… for A
+    expect(s.hands.A.map((c) => c.type).sort()).toEqual(["melon", "taco"]);
+    expect(s.hands.B.map((c) => c.type)).toEqual(["skip"]);
+  });
+
+  it("Sửa tương lai ngay can be played on someone else's turn", () => {
+    const s = rig({ A: ["skip"], B: ["alternow"] }, ["taco", "melon", "potato", "beard"], ["barking"]);
+    expect(playCards(s, "B", ids(s, "B", "alternow"), {}, T, names).ok).toBe(true);
+    settle(s);
+    expect(s.choice).toMatchObject({ kind: "alter", player: "B" });
+    const order = (s.choice as { cards: MCard[] }).cards.map((c) => c.id).reverse();
+    alterFuture(s, "B", order, T, names);
+    expect(s.deck.slice(0, 3).map((c) => c.type)).toEqual(["potato", "melon", "taco"]);
+    expect(s.turn).toBe("A");
+  });
+
+  it("Chôn bài hides the top card anywhere and ends the turn", () => {
+    const s = rig({ A: ["bury"], B: ["skip"] }, ["exploding", "taco", "melon"], ["barking"]);
+    playCards(s, "A", ids(s, "A", "bury"), {}, T, names);
+    settle(s);
+    expect(s.choice?.kind).toBe("bury");
+    insertKitten(s, "A", 2, T, names);
+    expect(s.deck.map((c) => c.type)).toEqual(["taco", "melon", "exploding"]);
+    expect(s.turn).toBe("B");
+  });
+
+  it("Tự tấn công adds two turns; Chia sẻ tương lai shows the next player", () => {
+    const s = rig({ A: ["personal", "share"], B: ["skip"] }, ["taco", "melon", "potato", "beard"], ["barking"]);
+    playCards(s, "A", ids(s, "A", "personal"), {}, T, names);
+    settle(s);
+    expect(s.turnsLeft).toBe(3);
+    playCards(s, "A", ids(s, "A", "share"), {}, T, names);
+    tickGame(s, T + 2 * (NOPE_WINDOW_MS * 2 + 500), names, never, () => 0);
+    const c = s.choice as { kind: string; cards: MCard[] };
+    alterFuture(s, "A", c.cards.map((x) => x.id), T, names);
+    expect(s.shared?.player).toBe("B");
+    expect(s.shared?.cards.map((x) => x.type)).toEqual(["taco", "melon", "potato"]);
   });
 });

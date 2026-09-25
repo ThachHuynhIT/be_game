@@ -11,7 +11,7 @@ import {
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, type RankPointsSetting, checkRankPoints, scoreByRank } from "../game/scoring";
-import { type Expansion, MAX_SEATS, MIN_PLAYERS, cleanExpansions, maxPlayers } from "./cards";
+import { type Expansion, type MCard, MAX_SEATS, MIN_PLAYERS, cleanExpansions, maxPlayers } from "./cards";
 import {
   type MeoState,
   type Result,
@@ -25,7 +25,9 @@ import {
   nextGameTickAt,
   playCards,
   playNope,
+  syncCurse,
   tickGame,
+  unblind,
 } from "./game";
 import type { MeoCommand, MeoRoomSummary, MeoRoomView } from "./protocol";
 
@@ -142,7 +144,7 @@ function startMeo(room: MeoRoom, host: MeoPlayer, now: number): Result {
   const expansions = room.expansions ?? [];
   if (players.length < MIN_PLAYERS) return { ok: false, error: `Cần ít nhất ${MIN_PLAYERS} người` };
   if (players.length > maxPlayers(expansions)) {
-    return { ok: false, error: `Bàn cơ bản tối đa ${maxPlayers(expansions)} người — bật gói Mèo Tự Huỷ để chơi 6 người` };
+    return { ok: false, error: `Bàn cơ bản tối đa ${maxPlayers(expansions)} người — bật một gói mở rộng để chơi 6 người` };
   }
   const settings = meoSettingsOf(room);
   room.current = newMeoGame(players, now, expansions, Math.random, {
@@ -205,11 +207,14 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
   const names = nameOf(room);
   let res: Result;
   switch (msg.type) {
-    case "mplay":
-      res = playCards(g, p.id, msg.cards, { target: msg.target, named: msg.named }, now, names);
+    case "mplay": {
+      // Cursed players pick blind positions; map them back to real card ids.
+      const cards = Array.isArray(msg.cards) ? msg.cards.map((c) => unblind(g, p.id, c)) : msg.cards;
+      res = playCards(g, p.id, cards, { target: msg.target, named: msg.named }, now, names);
       break;
+    }
     case "nope":
-      res = playNope(g, p.id, msg.card, now, names);
+      res = playNope(g, p.id, unblind(g, p.id, msg.card), now, names);
       break;
     case "draw":
       res = drawCard(g, p.id, now, names);
@@ -218,7 +223,7 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
       res = insertKitten(g, p.id, msg.position, now, names);
       break;
     case "give":
-      res = giveCard(g, p.id, msg.card, now, names);
+      res = giveCard(g, p.id, unblind(g, p.id, msg.card), now, names);
       break;
     case "alter":
       res = alterFuture(g, p.id, msg.order, now, names);
@@ -226,6 +231,7 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
     default:
       return { ok: false, error: "Lệnh không hợp lệ" };
   }
+  syncCurse(g);
   if (res.ok) afterChange(room, now);
   return res;
 }
@@ -265,6 +271,7 @@ export function tickMeo(room: MeoRoom, now: number): boolean {
       return !p || !isOnline(p, now);
     };
     if (tickGame(g, now, nameOf(room), absent)) {
+      syncCurse(g);
       changed = true;
       afterChange(room, now);
     }
@@ -308,6 +315,14 @@ function dropGoneSeats(room: MeoRoom, now: number): boolean {
   return dropped;
 }
 
+/** Your hand — face down (blind positions) while you are cursed. */
+function handFor(g: MeoState, id: string): MCard[] {
+  const hand = g.hands[id] ?? [];
+  if (!g.cursed?.includes(id)) return hand;
+  const order = g.curseOrder?.[id] ?? hand.map((c) => c.id);
+  return order.map((_, i) => ({ id: -(i + 1), type: "hidden" as unknown as MCard["type"] }));
+}
+
 export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): MeoRoomView {
   const g = room.current;
   return {
@@ -330,6 +345,9 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
             out: !!g?.out.includes(p.id),
             kicked: !!p.kicked,
             cardCount: g?.hands[p.id]?.length ?? 0,
+            // Đánh dấu: marked cards are public.
+            marked: (g?.hands[p.id] ?? []).filter((c) => c.marked).map((c) => c.type),
+            cursed: !!g?.cursed?.includes(p.id),
             points: p.points,
             games: p.games,
             wins: p.wins,
@@ -353,14 +371,23 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
           choice: g.choice
             ? g.choice.kind === "favor"
               ? { kind: "favor", from: g.choice.from, to: g.choice.to, deadline: g.choice.deadline }
-              : { kind: g.choice.kind, player: g.choice.player, deadline: g.choice.deadline }
+              : g.choice.kind === "offer"
+                ? { kind: "offer", mode: g.choice.mode, player: g.choice.player, deadline: g.choice.deadline }
+                : { kind: g.choice.kind, player: g.choice.player, deadline: g.choice.deadline, ...(g.choice.kind === "alter" && g.choice.share ? { share: true } : {}) }
             : null,
+          claims: g.claims ?? [],
           finished: g.finished,
           log: g.log,
         }
       : null,
-    hand: player && g ? (g.hands[player.id] ?? []) : [],
-    future: player && g?.future?.player === player.id ? g.future.cards.map((c) => c.type) : null,
+    hand: player && g ? handFor(g, player.id) : [],
+    future:
+      player && g?.future?.player === player.id
+        ? g.future.cards.map((c) => c.type)
+        : player && g?.shared?.player === player.id
+          ? g.shared.cards.map((c) => c.type)
+          : null,
+    sharedBy: player && g?.shared?.player === player.id && !(g.future?.player === player.id) ? "shared" : null,
     alter: player && g?.choice?.kind === "alter" && g.choice.player === player.id ? g.choice.cards : null,
     history: (room.history ?? []).slice(-10),
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),

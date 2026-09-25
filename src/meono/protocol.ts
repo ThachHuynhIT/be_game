@@ -17,6 +17,10 @@ export interface MeoSeatView {
   out: boolean;
   kicked: boolean;
   cardCount: number;
+  /** Đánh dấu: cards of this hand everyone can see. */
+  marked?: CardType[];
+  /** Lời nguyền mông mèo: plays face down until their next turn ends. */
+  cursed?: boolean;
   points: number;
   games: number;
   wins: number;
@@ -46,9 +50,13 @@ export interface MeoGameView {
     deadline: number;
   } | null;
   choice:
-    | { kind: "defuse" | "implode" | "alter"; player: string; deadline: number }
+    | { kind: "defuse" | "implode" | "bury"; player: string; deadline: number }
+    | { kind: "alter"; player: string; deadline: number; share?: boolean }
+    | { kind: "offer"; mode: "garbage" | "potluck"; player: string; deadline: number }
     | { kind: "favor"; from: string; to: string; deadline: number }
     | null;
+  /** Để đó cho tui: whose next draw goes to whom. */
+  claims: { victim: string; by: string }[];
   finished: string[];
   log: { id: number; at: number; text: string; tone?: string }[];
 }
@@ -66,9 +74,12 @@ export interface MeoRoomView {
   maxPlayers: number;
   seats: (MeoSeatView | null)[];
   current: MeoGameView | null;
+  /** Your hand; while cursed every card is {id: -position, type: "hidden"}. */
   hand: MCard[];
   /** Top of the deck, if you just played See the Future (index 0 = next card). */
   future: CardType[] | null;
+  /** "shared" when `future` was shared with you by Chia sẻ tương lai. */
+  sharedBy?: string | null;
   /** Sửa tương lai: the cards you are reordering (send their ids back, first = top). */
   alter: MCard[] | null;
   history: GameRecord[];

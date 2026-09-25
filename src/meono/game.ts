@@ -7,6 +7,7 @@ import {
   KITTENS,
   type MCard,
   MIN_PLAYERS,
+  NOW_TYPES,
   WILD_CAT,
   deal,
   maxPlayers,
@@ -38,6 +39,17 @@ export type PendingKind =
   | "superskip"
   | "swap"
   | "catomic"
+  | "future5"
+  | "garbage"
+  | "mark"
+  | "curse"
+  | "barking"
+  | "potluck"
+  | "ilt"
+  | "alternow"
+  | "bury"
+  | "personal"
+  | "share"
   | "pair"
   | "triple"
   | "five";
@@ -55,10 +67,21 @@ export interface Pending {
 
 export type Choice =
   /** Hide a kitten back in the deck — after a Defuse, or the first draw of the Imploding Kitten (face up). */
-  | { kind: "defuse" | "implode"; player: string; kitten: MCard; deadline: number }
+  | {
+      kind: "defuse" | "implode";
+      player: string;
+      kitten: MCard;
+      deadline: number;
+      /** false when the kitten was not drawn on this player's turn (a held kitten, see settleHeld). */
+      endsTurn?: boolean;
+    }
   | { kind: "favor"; from: string; to: string; deadline: number }
-  /** Sửa tương lai: put the top cards back in a new order. */
-  | { kind: "alter"; player: string; cards: MCard[]; deadline: number };
+  /** Sửa tương lai (and Chia sẻ tương lai when `share`): put the top cards back in a new order. */
+  | { kind: "alter"; player: string; cards: MCard[]; deadline: number; share?: boolean }
+  /** Dọn rác / Góp nồi: each player in turn gives one card (shuffled in / put on top). */
+  | { kind: "offer"; mode: "garbage" | "potluck"; player: string; queue: string[]; deadline: number }
+  /** Chôn bài: put the (unseen) top card back anywhere; ends the turn. */
+  | { kind: "bury"; player: string; card: MCard; deadline: number };
 
 export interface LogEntry {
   id: number;
@@ -98,6 +121,14 @@ export interface MeoState {
   /** Room settings for this game (fall back to TURN_MS / NOPE_WINDOW_MS). */
   turnMs?: number;
   nopeMs?: number;
+  /** Để đó cho tui: the victim's next draw goes to `by` instead. */
+  claims?: { victim: string; by: string }[];
+  /** Lời nguyền mông mèo: these players see their hand face down until their next turn ends. */
+  cursed?: string[];
+  /** Blind order of a cursed player's hand (card ids); the client only sees positions. */
+  curseOrder?: Record<string, number[]>;
+  /** Chia sẻ tương lai: top cards shown to the next player too. */
+  shared?: { player: string; cards: MCard[] } | null;
 }
 
 export interface MeoOptions {
@@ -138,6 +169,18 @@ export const CARD_NAMES: Record<CardType, string> = {
   superskip: "Siêu bỏ lượt",
   swap: "Đổi đầu đuôi",
   catomic: "Bom Mèo Nguyên Tử",
+  streaking: "Mèo Chạy Rông",
+  future5: "Xem tương lai ×5",
+  garbage: "Dọn rác",
+  mark: "Đánh dấu",
+  curse: "Lời nguyền mông mèo",
+  barking: "Mèo Sủa",
+  potluck: "Góp nồi",
+  ilt: "Để đó cho tui",
+  alternow: "Sửa tương lai ngay",
+  bury: "Chôn bài",
+  personal: "Tự tấn công",
+  share: "Chia sẻ tương lai",
 };
 
 export function newMeoGame(
@@ -206,15 +249,26 @@ function endTurn(s: MeoState, now: number) {
   if (s.turn && s.turnsLeft > 1 && !s.out.includes(s.turn)) {
     s.turnsLeft -= 1;
   } else if (s.turn) {
+    leaveTurn(s, s.turn);
     s.turn = nextAlive(s, s.turn);
     s.turnsLeft = 1;
   }
   s.turnDeadline = now + turnMs(s);
 }
 
+/** The turn moves away from `player`: their curse lifts, a future shared with them expires. */
+function leaveTurn(s: MeoState, player: string) {
+  if (s.cursed?.includes(player)) {
+    s.cursed = s.cursed.filter((p) => p !== player);
+    if (s.curseOrder) delete s.curseOrder[player];
+  }
+  if (s.shared?.player === player) s.shared = null;
+}
+
 /** Hand the turn to `to` with `turns` turns (attacks). */
 function passTurnTo(s: MeoState, to: string, turns: number, now: number) {
   s.future = null;
+  if (s.turn && s.turn !== to) leaveTurn(s, s.turn);
   s.turn = to;
   s.turnsLeft = turns;
   s.turnDeadline = now + turnMs(s);
@@ -234,6 +288,37 @@ function checkEnd(s: MeoState) {
 
 const choiceOwner = (c: Choice) => (c.kind === "favor" ? c.from : c.player);
 
+const count = (hand: MCard[], type: CardType) => hand.filter((c) => c.type === type).length;
+/** Mèo Chạy Rông: each one lets you keep one Mèo Nổ in your hand. */
+const canHoldKitten = (hand: MCard[]) => count(hand, "exploding") < count(hand, "streaking");
+
+/**
+ * A player holding more Mèo Nổ than Mèo Chạy Rông (their Streaking Kitten was taken, or they
+ * received a kitten) must deal with one straight away: Gỡ bom, or explode.
+ * Only runs when nothing else is waiting, so choices never overlap.
+ */
+function settleHeld(s: MeoState, now: number, nameOf: NameOf) {
+  if (s.status !== "playing" || s.pending || s.choice) return;
+  for (const p of alive(s)) {
+    const hand = s.hands[p];
+    if (count(hand, "exploding") <= count(hand, "streaking")) continue;
+    const kitten = hand.find((c) => c.type === "exploding")!;
+    takeFromHand(s, p, [kitten.id]);
+    const defuse = s.hands[p].find((c) => c.type === "defuse");
+    if (defuse) {
+      takeFromHand(s, p, [defuse.id]);
+      s.discard.push(defuse);
+      s.choice = { kind: "defuse", player: p, kitten, deadline: now + CHOICE_MS, endsTurn: false };
+      log(s, now, `💣 ${nameOf(p)} không còn Mèo Chạy Rông che chở cho Mèo Nổ… và gỡ bom kịp! 🧯`, "defuse");
+      return;
+    }
+    log(s, now, `💥 ${nameOf(p)} không còn Mèo Chạy Rông che chở — Mèo Nổ phát nổ!`, "boom");
+    s.discard.push(kitten);
+    eliminate(s, p, now);
+    if (s.status !== "playing" || s.choice) return;
+  }
+}
+
 function eliminate(s: MeoState, player: string, now: number) {
   if (s.out.includes(player)) return;
   s.discard.push(...(s.hands[player] ?? []));
@@ -243,6 +328,14 @@ function eliminate(s: MeoState, player: string, now: number) {
     // A kitten waiting to be hidden goes back on top rather than vanishing.
     if (s.choice.kind === "defuse" || s.choice.kind === "implode") s.deck.unshift(s.choice.kitten);
     if (s.choice.kind === "alter") s.deck.unshift(...s.choice.cards);
+    if (s.choice.kind === "bury") s.deck.unshift(s.choice.card);
+    if (s.choice.kind === "offer") {
+      // Skip them; the rest of the queue still gives a card.
+      const c = s.choice;
+      s.choice = null;
+      startOffer(s, c.mode, c.queue, now);
+      if (s.choice) return void (checkEnd(s) || undefined);
+    }
     s.choice = null;
   }
   if (checkEnd(s)) return;
@@ -270,18 +363,23 @@ export interface PlayOptions {
   named?: unknown;
 }
 
-const TARGETED: PendingKind[] = ["favor", "pair", "triple", "targeted"];
+const TARGETED: PendingKind[] = ["favor", "pair", "triple", "targeted", "mark", "curse", "ilt"];
+/** Targeted cards that work even on a player with an empty hand. */
+const TARGET_ANY_HAND: PendingKind[] = ["targeted", "curse", "ilt"];
 
 /** Play card(s) on your turn: a single action card, a pair / triple, or five different cards. */
 export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayOptions, now: number, nameOf: NameOf): Result {
   const blocked = busy(s);
   if (blocked) return fail(blocked);
-  if (s.turn !== player) return fail("Chưa đến lượt bạn");
   if (!Array.isArray(ids) || ids.length === 0 || !ids.every((x) => Number.isInteger(x))) return fail("Chọn bài để đánh");
+  if (s.out.includes(player) || !s.players.includes(player)) return fail("Bạn đã bị loại");
   const hand = s.hands[player] ?? [];
   const chosen = (ids as number[]).map((id) => hand.find((c) => c.id === id));
   if (chosen.some((c) => !c)) return fail("Bạn không có lá bài này");
   const types = (chosen as MCard[]).map((c) => c.type);
+  const nowCard = types.length === 1 && NOW_TYPES.includes(types[0]);
+  if (s.turn !== player && !nowCard) return fail("Chưa đến lượt bạn");
+  if (types.includes("exploding")) return fail("Mèo Nổ không đánh ra được — nó chỉ nằm yên nhờ Mèo Chạy Rông");
 
   let kind: PendingKind;
   if (types.length === 1) {
@@ -289,6 +387,8 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
       return fail(
         types[0] === "nope"
           ? "Chỉ đánh “Không!” để chặn người khác"
+          : types[0] === "streaking"
+            ? "Mèo Chạy Rông chỉ cần giữ trong tay"
           : types[0] === "defuse"
             ? "Gỡ bom chỉ dùng khi rút phải Mèo Nổ"
             : "Lá mèo phải đánh theo đôi hoặc bộ ba",
@@ -304,13 +404,14 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
   const target = needsTarget ? (typeof opts.target === "string" ? opts.target : "") : null;
   if (needsTarget) {
     if (!target || target === player || !s.players.includes(target) || s.out.includes(target)) return fail("Chọn người chơi để nhắm tới");
-    if (kind !== "targeted" && (s.hands[target] ?? []).length === 0) return fail("Người đó không còn lá nào");
+    if (!TARGET_ANY_HAND.includes(kind) && (s.hands[target] ?? []).length === 0) return fail("Người đó không còn lá nào");
   }
   let named: CardType | null = null;
   if (kind === "triple" || kind === "five") {
     if (typeof opts.named !== "string" || !ALL_TYPES.includes(opts.named as CardType)) return fail("Chọn loại lá muốn lấy");
     named = opts.named as CardType;
     if (kind === "five" && !s.discard.some((c) => c.type === named)) return fail("Chồng bài đã đánh không có lá đó");
+    if (kind === "five" && KITTENS.includes(named)) return fail("Không nhặt Mèo Nổ từ chồng bài đã đánh");
   }
 
   const cards = takeFromHand(s, player, ids as number[])!;
@@ -347,6 +448,16 @@ export function playNope(s: MeoState, player: string, cardId: unknown, now: numb
 /** Resolve drawing `card` (from the top, or the bottom via Rút từ đáy). Ends the turn unless a kitten needs hiding. */
 function receiveDraw(s: MeoState, player: string, card: MCard | undefined, now: number, nameOf: NameOf) {
   s.future = null;
+  if (s.shared && s.shared.player !== player) s.shared = null;
+  // Để đó cho tui: someone claimed this player's next draw (kittens are still yours to face).
+  const claimIdx = card && !KITTENS.includes(card.type) ? (s.claims ?? []).findIndex((c) => c.victim === player && !s.out.includes(c.by)) : -1;
+  if (card && claimIdx >= 0) {
+    const [claim] = s.claims!.splice(claimIdx, 1);
+    s.hands[claim.by].push(card);
+    log(s, now, `🫳 ${nameOf(player)} rút 1 lá… nhưng ${nameOf(claim.by)} đã “để đó cho tui” và lấy mất!`, "steal");
+    endTurn(s, now);
+    return;
+  }
   if (!card) {
     // Cannot happen with kittens left in the deck, but never deadlock.
     endTurn(s, now);
@@ -365,6 +476,13 @@ function receiveDraw(s: MeoState, player: string, card: MCard | undefined, now: 
     return;
   }
   if (card.type !== "exploding") {
+    s.hands[player].push(card);
+    log(s, now, `${nameOf(player)} rút 1 lá`);
+    endTurn(s, now);
+    return;
+  }
+  if (canHoldKitten(s.hands[player])) {
+    // Mèo Chạy Rông: keep it secretly in hand.
     s.hands[player].push(card);
     log(s, now, `${nameOf(player)} rút 1 lá`);
     endTurn(s, now);
@@ -404,6 +522,15 @@ export function insertRange(deckLength: number): [number, number] {
 
 export function insertKitten(s: MeoState, player: string, position: unknown, now: number, nameOf: NameOf): Result {
   const c = s.choice;
+  if (c?.kind === "bury" && c.player === player) {
+    // Chôn bài: anywhere at all, and nobody (not even you) learns what it was.
+    const pos = Math.max(0, Math.min(s.deck.length, Math.floor(Number(position)) || 0));
+    s.deck.splice(pos, 0, c.card);
+    s.choice = null;
+    log(s, now, `⚰️ ${nameOf(player)} chôn lá trên cùng vào lại chồng bài`, "info");
+    endTurn(s, now);
+    return OK;
+  }
   if (!c || (c.kind !== "defuse" && c.kind !== "implode") || c.player !== player) return fail("Không có Mèo Nổ để nhét lại");
   const [min, max] = insertRange(s.deck.length);
   const wanted = Math.floor(Number(position));
@@ -421,12 +548,33 @@ export function insertKitten(s: MeoState, player: string, position: unknown, now
       : `${nameOf(player)} đã nhét Mèo Nổ vào lại chồng bài 🤫`,
     "defuse",
   );
-  endTurn(s, now);
+  if (c.endsTurn === false) s.turnDeadline = now + turnMs(s);
+  else endTurn(s, now);
+  settleHeld(s, now, nameOf);
   return OK;
 }
 
 /** Xin xỏ: the target hands over a card of their choice. */
-export function giveCard(s: MeoState, player: string, cardId: unknown, now: number, nameOf: NameOf): Result {
+export function giveCard(s: MeoState, player: string, cardId: unknown, now: number, nameOf: NameOf, random: () => number = Math.random): Result {
+  const oc = s.choice;
+  if (oc?.kind === "offer" && oc.player === player) {
+    const card = (s.hands[player] ?? []).find((c) => c.id === cardId);
+    if (!card) return fail("Bạn không có lá bài này");
+    takeFromHand(s, player, [card.id]);
+    delete card.marked;
+    if (oc.mode === "potluck") s.deck.unshift(card);
+    else s.deck.push(card);
+    log(s, now, `${nameOf(player)} ${oc.mode === "potluck" ? "góp 1 lá lên đầu chồng bài" : "bỏ 1 lá vào chồng bài"}`);
+    s.choice = null;
+    startOffer(s, oc.mode, oc.queue, now);
+    if (!s.choice && oc.mode === "garbage") {
+      s.deck = shuffle(s.deck, random);
+      log(s, now, `🗑️ Dọn rác xong — chồng bài đã được xáo`);
+    }
+    if (!s.choice) s.turnDeadline = now + turnMs(s);
+    settleHeld(s, now, nameOf);
+    return OK;
+  }
   if (s.choice?.kind !== "favor" || s.choice.from !== player) return fail("Không ai xin bài của bạn");
   const card = (s.hands[player] ?? []).find((c) => c.id === cardId);
   if (!card) return fail("Bạn không có lá bài này");
@@ -435,7 +583,24 @@ export function giveCard(s: MeoState, player: string, cardId: unknown, now: numb
   log(s, now, `${nameOf(player)} đưa 1 lá cho ${nameOf(s.choice.to)}`, "steal");
   s.choice = null;
   s.turnDeadline = now + turnMs(s);
+  settleHeld(s, now, nameOf);
   return OK;
+}
+
+/** Next player in `queue` with a card gives one (Dọn rác / Góp nồi). */
+function startOffer(s: MeoState, mode: "garbage" | "potluck", queue: string[], now: number) {
+  const rest = queue.filter((p) => !s.out.includes(p));
+  while (rest.length && !(s.hands[rest[0]] ?? []).length) rest.shift();
+  if (!rest.length) return;
+  const [player, ...more] = rest;
+  s.choice = { kind: "offer", mode, player, queue: more, deadline: now + CHOICE_MS };
+}
+
+/** Everyone still in, in turn order starting with `from`. */
+function roundFrom(s: MeoState, from: string): string[] {
+  const order = [from];
+  for (let p = nextAlive(s, from); p !== from && !order.includes(p); p = nextAlive(s, p)) order.push(p);
+  return order;
 }
 
 /** Sửa tương lai: put the top cards back in the given order (ids, first = top). */
@@ -449,7 +614,11 @@ export function alterFuture(s: MeoState, player: string, order: unknown, now: nu
   s.choice = null;
   s.future = { player, cards: sorted };
   s.turnDeadline = now + turnMs(s);
-  log(s, now, `${nameOf(player)} đã sắp xếp lại tương lai 🔮`);
+  if (c.share) {
+    const next = nextAlive(s, player);
+    s.shared = { player: next, cards: sorted };
+    log(s, now, `${nameOf(player)} sắp xếp lại tương lai và chia sẻ cho ${nameOf(next)} 🔮`);
+  } else log(s, now, `${nameOf(player)} đã sắp xếp lại tương lai 🔮`);
   return OK;
 }
 
@@ -533,6 +702,70 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
       endTurn(s, now);
       break;
     }
+    case "future5":
+      s.future = { player: p.by, cards: s.deck.slice(0, 5) };
+      break;
+    case "garbage":
+    case "potluck":
+      startOffer(s, p.kind, roundFrom(s, p.by), now);
+      log(s, now, p.kind === "garbage" ? `🗑️ Dọn rác: mỗi người bỏ 1 lá vào chồng bài` : `🍲 Góp nồi: mỗi người đặt 1 lá lên đầu chồng bài`);
+      break;
+    case "mark": {
+      const hand = p.target ? s.hands[p.target].filter((c) => !c.marked) : [];
+      const card = hand[Math.floor(random() * hand.length)];
+      if (card && p.target) {
+        card.marked = true;
+        log(s, now, `🔖 ${nameOf(p.by)} đánh dấu 1 lá của ${nameOf(p.target)}: ${CARD_NAMES[card.type]} — ai cũng thấy lá này`, "steal");
+      }
+      break;
+    }
+    case "curse":
+      if (p.target && !s.out.includes(p.target)) {
+        s.cursed = [...new Set([...(s.cursed ?? []), p.target])];
+        log(s, now, `🍑 ${nameOf(p.target)} dính Lời nguyền mông mèo: phải chơi bài úp đến hết lượt tới`, "nope");
+      }
+      break;
+    case "barking": {
+      const holder = alive(s).find((q) => q !== p.by && s.hands[q].some((c) => c.type === "barking"));
+      if (!holder) {
+        log(s, now, `🐶 Gâu gâu… không ai khác giữ Mèo Sủa còn lại`);
+        break;
+      }
+      const theirs = s.hands[holder].find((c) => c.type === "barking")!;
+      takeFromHand(s, holder, [theirs.id]);
+      s.discard.push(theirs);
+      const defuse = s.hands[holder].find((c) => c.type === "defuse");
+      if (defuse) {
+        takeFromHand(s, holder, [defuse.id]);
+        s.discard.push(defuse);
+        log(s, now, `🐶 GÂU! ${nameOf(holder)} đang giữ Mèo Sủa còn lại — mất 1 Gỡ bom 🧯`, "defuse");
+      } else {
+        log(s, now, `🐶 GÂU! ${nameOf(holder)} giữ Mèo Sủa còn lại mà không có Gỡ bom — nổ tung!`, "boom");
+        eliminate(s, holder, now);
+      }
+      break;
+    }
+    case "ilt":
+      if (p.target && !s.out.includes(p.target)) {
+        s.claims = [...(s.claims ?? []), { victim: p.target, by: p.by }];
+        log(s, now, `🫳 ${nameOf(p.by)}: “Để đó cho tui” — lá tiếp theo ${nameOf(p.target)} rút sẽ về tay ${nameOf(p.by)}`);
+      }
+      break;
+    case "alternow":
+    case "share": {
+      const top = s.deck.splice(0, 3);
+      if (top.length) s.choice = { kind: "alter", player: p.by, cards: top, deadline: now + CHOICE_MS, ...(p.kind === "share" ? { share: true } : {}) };
+      break;
+    }
+    case "bury": {
+      const top = s.deck.shift();
+      if (top) s.choice = { kind: "bury", player: p.by, card: top, deadline: now + CHOICE_MS };
+      break;
+    }
+    case "personal":
+      s.turnsLeft += 2;
+      log(s, now, `🥊 ${nameOf(p.by)} tự tấn công: phải chơi thêm 2 lượt (còn ${s.turnsLeft} lượt)`);
+      break;
     case "pair":
       if (p.target && stealRandom(s, p.target, p.by, random)) log(s, now, `${nameOf(p.by)} rút trộm 1 lá của ${nameOf(p.target)}`, "steal");
       break;
@@ -557,6 +790,7 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
       break;
     }
   }
+  settleHeld(s, now, nameOf);
 }
 
 /**
@@ -565,6 +799,9 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
  */
 export function tickGame(s: MeoState, now: number, nameOf: NameOf, absent: (id: string) => boolean, random: () => number = Math.random): boolean {
   let changed = false;
+  const before = s.logSeq;
+  settleHeld(s, now, nameOf);
+  if (s.logSeq !== before) changed = true;
   for (let guard = 0; guard < 20 && s.status === "playing"; guard++) {
     if (s.pending) {
       if (now < s.pending.deadline) break;
@@ -581,9 +818,10 @@ export function tickGame(s: MeoState, now: number, nameOf: NameOf, absent: (id: 
         insertKitten(s, owner, min + Math.floor(random() * (max - min + 1)), now, nameOf);
       }
       else if (c.kind === "alter") alterFuture(s, owner, c.cards.map((x) => x.id), now, nameOf);
+      else if (c.kind === "bury") insertKitten(s, owner, Math.floor(random() * (s.deck.length + 1)), now, nameOf);
       else {
         const hand = s.hands[owner];
-        giveCard(s, owner, hand[Math.floor(random() * hand.length)]?.id, now, nameOf);
+        giveCard(s, owner, hand[Math.floor(random() * hand.length)]?.id, now, nameOf, random);
       }
       changed = true;
       continue;
@@ -620,3 +858,26 @@ export const implodingAt = (s: MeoState) => {
   const i = s.deck.findIndex((c) => c.type === "imploding" && c.faceUp);
   return i >= 0 ? i : null;
 };
+
+
+// ─── Lời nguyền mông mèo: blind hands ──────────────────────────────
+
+/** Keep each cursed player's blind order in step with their hand (new cards slot in at random). */
+export function syncCurse(s: MeoState, random: () => number = Math.random) {
+  const cursed = (s.cursed ?? []).filter((p) => !s.out.includes(p));
+  const next: Record<string, number[]> = {};
+  for (const p of cursed) {
+    const ids = (s.hands[p] ?? []).map((c) => c.id);
+    const order = (s.curseOrder?.[p] ?? []).filter((id) => ids.includes(id));
+    for (const id of ids) if (!order.includes(id)) order.splice(Math.floor(random() * (order.length + 1)), 0, id);
+    next[p] = order;
+  }
+  s.cursed = cursed;
+  s.curseOrder = next;
+}
+
+/** A cursed player picks by blind position: -1 = first face-down card, -2 = second… */
+export function unblind(s: MeoState, player: string, id: unknown): unknown {
+  if (typeof id !== "number" || id >= 0 || !s.cursed?.includes(player)) return id;
+  return s.curseOrder?.[player]?.[-id - 1] ?? id;
+}

@@ -23,19 +23,34 @@ export type CardType =
   | "feral"
   | "alter"
   | "targeted"
-  // "Hỗn Loạn" pack
+  // "Streaking Kittens" pack (the old "Hỗn Loạn" cards are part of it)
   | "superskip"
   | "swap"
-  | "catomic";
+  | "catomic"
+  | "streaking"
+  | "future5"
+  | "garbage"
+  | "mark"
+  | "curse"
+  // "Barking Kittens" pack
+  | "barking"
+  | "potluck"
+  | "ilt"
+  | "alternow"
+  | "bury"
+  | "personal"
+  | "share";
 
-export type Expansion = "imploding" | "chaos";
-export const EXPANSIONS: Expansion[] = ["imploding", "chaos"];
+export type Expansion = "imploding" | "streaking" | "barking";
+export const EXPANSIONS: Expansion[] = ["imploding", "streaking", "barking"];
 
 export interface MCard {
   id: number;
   type: CardType;
   /** Mèo Tự Huỷ after its first draw: lies face up in the deck, visible to everyone. */
   faceUp?: boolean;
+  /** Đánh dấu: this card is shown to everyone while it stays in a hand. */
+  marked?: boolean;
 }
 
 export const CAT_TYPES: CardType[] = ["taco", "melon", "potato", "beard", "rainbow"];
@@ -57,7 +72,21 @@ export const ACTION_TYPES: CardType[] = [
   "superskip",
   "swap",
   "catomic",
+  "future5",
+  "garbage",
+  "mark",
+  "curse",
+  "barking",
+  "potluck",
+  "ilt",
+  "alternow",
+  "bury",
+  "personal",
+  "share",
 ];
+
+/** “Now” cards: playable at any moment, even on someone else's turn (like Không!). */
+export const NOW_TYPES: CardType[] = ["alternow"];
 
 export const BASE_COUNTS: Partial<Record<CardType, number>> = {
   exploding: 4,
@@ -77,19 +106,22 @@ export const BASE_COUNTS: Partial<Record<CardType, number>> = {
 
 export const PACK_COUNTS: Record<Expansion, Partial<Record<CardType, number>>> = {
   imploding: { imploding: 1, reverse: 4, bottom: 4, feral: 4, alter: 4, targeted: 3 },
-  chaos: { superskip: 2, swap: 3, catomic: 1 },
+  // Streaking also adds one extra Mèo Nổ to the deck (see deal()).
+  streaking: { streaking: 1, superskip: 1, future5: 1, swap: 3, garbage: 1, catomic: 1, mark: 3, curse: 2 },
+  barking: { barking: 2, potluck: 2, ilt: 3, alternow: 2, bury: 2, personal: 3, share: 2 },
 };
 
 export const ALL_TYPES = [...new Set([...Object.keys(BASE_COUNTS), ...Object.values(PACK_COUNTS).flatMap((c) => Object.keys(c))])] as CardType[];
 
 export const MIN_PLAYERS = 2;
-/** Seats in a Mèo Nổ room; the base game plays up to 5, the Mèo Tự Huỷ pack adds a 6th. */
+/** Seats in a Mèo Nổ room; the base game plays up to 5, any expansion pack adds a 6th. */
 export const MAX_SEATS = 6;
-export const maxPlayers = (expansions: Expansion[]) => (expansions.includes("imploding") ? 6 : 5);
+export const maxPlayers = (expansions: Expansion[]) => (expansions.length ? 6 : 5);
 export const HAND_SIZE = 7;
 
+/** "chaos" was the old name of (part of) the Streaking pack. */
 export const cleanExpansions = (raw: unknown): Expansion[] =>
-  Array.isArray(raw) ? EXPANSIONS.filter((e) => raw.includes(e)) : [];
+  Array.isArray(raw) ? EXPANSIONS.filter((e) => raw.includes(e) || (e === "streaking" && raw.includes("chaos"))) : [];
 
 export function shuffle<T>(items: T[], random: () => number = Math.random): T[] {
   const a = items.slice();
@@ -123,7 +155,7 @@ export function deal(
     random,
   );
   const defuses = make("defuse", Math.max(counts.defuse ?? 6, players.length));
-  const bombs = players.length - 1;
+  const bombs = players.length - 1 + (expansions.includes("streaking") ? 1 : 0);
   const implode = expansions.includes("imploding") ? 1 : 0;
   const kittens = [...make("exploding", Math.max(bombs - implode, 0)), ...make("imploding", implode)];
 
