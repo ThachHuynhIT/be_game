@@ -62,6 +62,18 @@ export interface MeoGameView {
   shuffleLocked: boolean;
   finished: string[];
   log: { id: number; at: number; text: string; tone?: string }[];
+  /** Card history, oldest first (see PlayRecord in game.ts). */
+  plays: {
+    id: number;
+    at: number;
+    by: string;
+    kind: string;
+    cards: CardType[];
+    target: string | null;
+    named: CardType | null;
+    nopes: string[];
+    result: "pending" | "done" | "blocked";
+  }[];
 }
 
 export interface MeoRoomView {

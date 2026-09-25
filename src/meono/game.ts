@@ -157,7 +157,25 @@ export interface MeoState {
   annoyed?: { player: string; card: number }[];
   /** Xáo bài is locked until this player's turn ends (Điểm danh mèo / Lời nguyền ngô pha lê). */
   noShuffle?: string | null;
+  /** Card history: every play (newest last), with who answered it with Không! and how it ended. */
+  plays?: PlayRecord[];
 }
+
+export interface PlayRecord {
+  id: number;
+  at: number;
+  by: string;
+  kind: string;
+  cards: CardType[];
+  target: string | null;
+  named: CardType | null;
+  /** Players who played Không!, in order. */
+  nopes: string[];
+  /** Filled in when the action resolves. */
+  result: "pending" | "done" | "blocked";
+}
+
+const PLAY_LIMIT = 60;
 
 export interface MeoOptions {
   turnMs?: number;
@@ -486,6 +504,11 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
   const cards = takeFromHand(s, player, ids as number[])!;
   s.discard.push(...cards);
   s.pending = { kind, by: player, target, named, cards, nopes: 0, deadline: now + nopeMs(s) };
+  const plays = s.plays ?? [];
+  s.plays = [
+    ...plays,
+    { id: (plays.at(-1)?.id ?? 0) + 1, at: now, by: player, kind, cards: cards.map((c) => c.type), target, named, nopes: [], result: "pending" as const },
+  ].slice(-PLAY_LIMIT);
   const main = types.find((t) => t !== WILD_CAT) ?? types[0];
   const label =
     kind === "pair"
@@ -513,6 +536,8 @@ export function playNope(s: MeoState, player: string, cardId: unknown, now: numb
   s.discard.push(card);
   s.pending.nopes += 1;
   s.pending.deadline = now + nopeMs(s);
+  const last = s.plays?.at(-1);
+  if (last?.result === "pending") last.nopes.push(player);
   log(s, now, `${nameOf(player)}: KHÔNG! ${s.pending.nopes % 2 ? "(chặn)" : "(chặn lại lần nữa)"}`, "nope");
   return OK;
 }
@@ -718,6 +743,8 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
   const p = s.pending!;
   s.pending = null;
   s.turnDeadline = now + turnMs(s);
+  const record = s.plays?.at(-1);
+  if (record?.result === "pending") record.result = p.nopes % 2 === 1 ? "blocked" : "done";
   if (p.nopes % 2 === 1) {
     log(s, now, `${CARD_NAMES[p.cards[0].type]} của ${nameOf(p.by)} đã bị chặn 🚫`, "nope");
     return;

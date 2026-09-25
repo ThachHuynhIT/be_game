@@ -411,6 +411,7 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
           shuffleLocked: !!g.noShuffle,
           finished: g.finished,
           log: g.log,
+          plays: g.plays ?? [],
         }
       : null,
     hand: player && g ? handFor(g, player.id) : [],

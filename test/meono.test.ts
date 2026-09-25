@@ -92,6 +92,21 @@ describe("turns, nope and kittens", () => {
     expect(s.turn).toBe("B"); // nope-noped → skip goes through
   });
 
+  it("keeps a card history with who noped and how each play ended", () => {
+    const s = rig({ A: ["skip", "skip"], B: ["nope", "nope"], C: ["nope"] }, ["taco", "taco", "exploding", "exploding"]);
+    playCards(s, "A", ids(s, "A", "skip"), {}, T, names);
+    playNope(s, "B", ids(s, "B", "nope")[0], T + 100, names);
+    settle(s);
+    playCards(s, "A", ids(s, "A", "skip"), {}, T + 5000, names);
+    playNope(s, "B", ids(s, "B", "nope")[0], T + 5100, names);
+    playNope(s, "C", ids(s, "C", "nope")[0], T + 5200, names);
+    tickGame(s, T + 5200 + NOPE_WINDOW_MS + 1, names, never);
+    expect(s.plays?.map((p) => [p.by, p.cards, p.nopes, p.result])).toEqual([
+      ["A", ["skip"], ["B"], "blocked"],
+      ["A", ["skip"], ["B", "C"], "done"],
+    ]);
+  });
+
   it("defuse lets you hide the kitten; without one you explode and the game can end", () => {
     const s = rig({ A: ["defuse"], B: ["taco"] }, ["exploding", "taco", "exploding"]);
     drawCard(s, "A", T, names);
