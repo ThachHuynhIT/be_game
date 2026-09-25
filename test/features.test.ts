@@ -64,8 +64,11 @@ describe("forfeit (game)", () => {
     pass(g, "B");
     play(g, "A", c("2h"));
     play(g, "B", c("4s 4h 5s 5h 6c 6d"));
-    expect(g.lastPlay?.chop).toBe(true);
-    expect(g.lastPlay?.chopped?.cards).toEqual(c("2h"));
+    // A cannot answer 3 đôi thông, so the server passes for A and B opens a new round.
+    expect(g.autoPassed).toEqual([]);
+    expect(g.turn).toBe("B");
+    expect(g.lastPlay).toBeNull();
+    expect(g.chops).toEqual([{ from: "A", to: "B", points: 2 }]);
   });
 });
 

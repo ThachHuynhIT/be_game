@@ -67,7 +67,40 @@ describe("game flow", () => {
     pass(g, "B");
     play(g, "A", c("2h"));
     expect(play(g, "B", c("4s 4h 5s 5h 6c 6d")).ok).toBe(true);
+    expect(g.chops).toEqual([{ from: "A", to: "B", points: 2 }]);
+  });
+
+  it("keeps the chop on the table while someone can still answer it", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: { A: c("3s 2s 9d"), B: c("4s 4h 5s 5h 6c 6d Kd"), C: c("7s 7c 7d 7h Qd") },
+    });
+    play(g, "A", c("3s"));
+    pass(g, "B");
+    pass(g, "C");
+    play(g, "A", c("2s"));
+    play(g, "B", c("4s 4h 5s 5h 6c 6d"));
     expect(g.lastPlay?.chop).toBe(true);
+    expect(g.lastPlay?.chopPoints).toBe(1);
+    expect(g.lastPlay?.choppedPlayer).toBe("A");
+    // C holds tứ quý and may chặt chồng; A has nothing and was passed automatically.
+    expect(g.turn).toBe("C");
+    play(g, "C", c("7s 7c 7d 7h"));
+    expect(g.chops).toEqual([
+      { from: "A", to: "B", points: 1 },
+      { from: "B", to: "C", points: 2 },
+    ]);
+  });
+
+  it("passes automatically for a player with nothing that beats the table", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: { A: c("3s 9d Kh"), B: c("4s 5d"), C: c("8s Ac") },
+      starter: "A",
+    });
+    play(g, "A", c("Kh"));
+    // B's best single is 5♦ → passed; C can beat with A♣.
+    expect(g.turn).toBe("C");
+    expect(g.passed).toEqual(["B"]);
+    expect(g.autoPassed).toEqual(["B"]);
   });
 
   it("game ends when one player is left; ranks follow finishing order", () => {

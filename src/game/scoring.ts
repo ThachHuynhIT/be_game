@@ -1,12 +1,21 @@
+import { type Card, RANK_TWO, isRed, rankOf } from "./cards";
+import type { Combo } from "./combos";
+
 /**
- * Points per finishing position. Every game sums to zero.
- *   4 players: Nhất +3, Nhì +1, Ba −1, Bét −3
- *   3 players: +2, 0, −2
- *   2 players: +1, −1
- *   5 players: +4, +2, 0, −2, −4
- *   6 players: +5, +3, +1, −1, −3, −5 (Mèo Nổ, Cờ Tỷ Phú)
+ * Tiến Lên points per finishing position (Nhất +2, Nhì +1). Every game sums to zero.
+ *   4 players: +2, +1, −1, −2
+ *   3 players: +2, +1, −3
+ *   2 players: +2, −2
  *   Tới trắng: the winner takes +2 from every other player.
+ * On top of that, chặt heo moves points from the chopped player to the chopper (see chopPoints).
  */
+const TIENLEN_POINTS: Record<number, number[]> = {
+  2: [2, -2],
+  3: [2, 1, -3],
+  4: [2, 1, -1, -2],
+};
+
+/** Mèo Nổ and Cờ Tỷ Phú: symmetric points by rank. */
 const RANK_POINTS: Record<number, number[]> = {
   2: [1, -1],
   3: [2, 0, -2],
@@ -16,8 +25,47 @@ const RANK_POINTS: Record<number, number[]> = {
 };
 
 export const INSTANT_WIN_POINTS = 2;
+/** Chặt heo: heo đen (♠ ♣) 1 điểm, heo đỏ (♦ ♥) 2 điểm each. */
+export const BLACK_TWO_POINTS = 1;
+export const RED_TWO_POINTS = 2;
+/** Chặt chồng — chopping a 3 đôi thông or tứ quý that was on the table. */
+export const CHOP_BOMB_POINTS = 2;
 
-/** Point change for each player id, given the finishing order. */
+/** One chop: `from` (whose cards were chopped) pays `to` (the chopper). */
+export interface ChopScore {
+  from: string;
+  to: string;
+  points: number;
+}
+
+/** Points a chop is worth, given the combo that got chopped. */
+export function chopPoints(chopped: Combo): number {
+  const twos = chopped.cards.filter((c: Card) => rankOf(c) === RANK_TWO);
+  if (twos.length) return twos.reduce((sum, c) => sum + (isRed(c) ? RED_TWO_POINTS : BLACK_TWO_POINTS), 0);
+  return CHOP_BOMB_POINTS;
+}
+
+/** Tiến Lên point change for each player id: finishing order + chặt heo transfers. */
+export function scoreTienLen(finished: string[], instantWinner: string | null, chops: ChopScore[] = []): Record<string, number> {
+  const n = finished.length;
+  const deltas: Record<string, number> = {};
+  if (instantWinner) {
+    for (const id of finished) deltas[id] = id === instantWinner ? INSTANT_WIN_POINTS * (n - 1) : -INSTANT_WIN_POINTS;
+  } else {
+    const table = TIENLEN_POINTS[n] ?? [];
+    finished.forEach((id, i) => {
+      deltas[id] = table[i] ?? 0;
+    });
+  }
+  for (const c of chops) {
+    if (!(c.from in deltas) || !(c.to in deltas)) continue;
+    deltas[c.from] -= c.points;
+    deltas[c.to] += c.points;
+  }
+  return deltas;
+}
+
+/** Point change for each player id by finishing order (Mèo Nổ, Cờ Tỷ Phú). */
 export function scoreGame(finished: string[], instantWinner: string | null): Record<string, number> {
   const n = finished.length;
   const deltas: Record<string, number> = {};

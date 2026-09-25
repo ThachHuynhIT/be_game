@@ -1,6 +1,7 @@
-import { type Card, newDeck, shuffle, sortCards } from "./cards";
+import { type Card, RANK_TWO, newDeck, rankOf, shuffle, sortCards } from "./cards";
 import { type Combo, canBeat, detectCombo, isChop } from "./combos";
 import { type InstantWinReason, detectInstantWin } from "./rules";
+import { type ChopScore, chopPoints } from "./scoring";
 
 export const HAND_SIZE = 13;
 export const MIN_PLAYERS = 2;
@@ -12,6 +13,10 @@ export interface LastPlay {
   chop: boolean;
   /** The combo this play chopped (chặt), e.g. a single 2 — null for a normal beat. */
   chopped?: Combo | null;
+  /** Points the chopper takes from the chopped player (chặt heo). */
+  chopPoints?: number;
+  /** Who got chopped. */
+  choppedPlayer?: string;
 }
 
 export interface GameState {
@@ -32,6 +37,10 @@ export interface GameState {
   /** Players removed mid-game (kicked while disconnected); they rank last. */
   forfeited?: string[];
   instantWin: { playerId: string; reason: InstantWinReason } | null;
+  /** Chặt heo point transfers so far, settled when the game ends. */
+  chops?: ChopScore[];
+  /** Players the server passed for because they had nothing that could beat the table this round. */
+  autoPassed?: string[];
 }
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -134,10 +143,51 @@ function advance(s: GameState, actor: string | null) {
     s.turn = isOut(s, leader) ? nextPlayer(s, leader, false) : leader;
     s.lastPlay = null;
     s.passed = [];
+    s.autoPassed = [];
     return;
   }
   // `actor` null = nobody acted (a forfeit off-turn): keep the current turn.
   if (actor !== null) s.turn = nextPlayer(s, actor, true);
+  autoPassHopeless(s);
+}
+
+/** Nothing in hand can beat the table → pass for that player right away (tự bỏ lượt). */
+function autoPassHopeless(s: GameState) {
+  const p = s.turn;
+  if (s.status !== "playing" || !p || !s.lastPlay || s.lastPlay.playerId === p) return;
+  if (hasBeatingPlay(s.hands[p], s.lastPlay.combo)) return;
+  s.autoPassed = [...(s.autoPassed ?? []), p];
+  s.passed.push(p);
+  advance(s, p);
+}
+
+/**
+ * Could any combination of `hand` be played on `prev`? `canBeat` only looks at a combo's
+ * type, length and top card, so trying the strongest set of each shape is enough.
+ */
+export function hasBeatingPlay(hand: Card[], prev: Combo): boolean {
+  const byRank = new Map<number, Card[]>();
+  for (const c of [...hand].sort((a, b) => b - a)) byRank.set(rankOf(c), [...(byRank.get(rankOf(c)) ?? []), c]);
+  const candidates: Card[][] = [];
+  for (const cards of byRank.values()) for (let k = 1; k <= cards.length; k++) candidates.push(cards.slice(0, k));
+  // Straights and đôi thông: runs of consecutive ranks (never containing a 2).
+  for (let end = RANK_TWO - 1; end >= 0; end--) {
+    const singles: Card[] = [];
+    const pairs: Card[] = [];
+    for (let r = end; r >= 0; r--) {
+      const cards = byRank.get(r);
+      if (!cards) break;
+      singles.push(cards[0]);
+      if (singles.length >= 3) candidates.push(singles.slice());
+      if (cards.length < 2 || pairs.length !== (end - r) * 2) continue;
+      pairs.push(cards[0], cards[1]);
+      if (pairs.length >= 6) candidates.push(pairs.slice());
+    }
+  }
+  return candidates.some((cards) => {
+    const combo = detectCombo(cards);
+    return !!combo && canBeat(prev, combo);
+  });
 }
 
 export function play(s: GameState, playerId: string, cards: Card[]): ActionResult {
@@ -158,7 +208,14 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
 
   s.hands[playerId] = hand.filter((c) => !cards.includes(c));
   const chop = isChop(prev, combo);
+  const prevPlayer = s.lastPlay?.playerId;
   s.lastPlay = { playerId, combo, chop, chopped: chop ? prev : null };
+  if (chop && prev && prevPlayer && prevPlayer !== playerId) {
+    const points = chopPoints(prev);
+    s.lastPlay.chopPoints = points;
+    s.lastPlay.choppedPlayer = prevPlayer;
+    s.chops = [...(s.chops ?? []), { from: prevPlayer, to: playerId, points }];
+  }
   s.mustInclude = null;
   if (s.hands[playerId].length === 0) s.finished.push(playerId);
   advance(s, playerId);

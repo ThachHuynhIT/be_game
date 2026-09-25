@@ -24,6 +24,8 @@ export interface SeatView {
   inGame: boolean;
   cardCount: number;
   passed: boolean;
+  /** The server passed for them: nothing in hand could beat the table. */
+  autoPassed?: boolean;
   wins: number;
   /** Cumulative points in this room. */
   points: number;

@@ -19,7 +19,7 @@ import {
   type RoomView,
   TURN_SECONDS,
 } from "./protocol";
-import { scoreGame } from "./scoring";
+import { scoreTienLen } from "./scoring";
 
 /**
  * Room lifecycle as pure functions over JSON-serialisable state, so a room can
@@ -349,7 +349,7 @@ function afterAction(room: RoomState, now: number) {
 function recordGame(room: RoomState, now: number) {
   const g = room.game;
   if (!g) return;
-  const deltas = scoreGame(g.finished, g.instantWin?.playerId ?? null);
+  const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops);
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
@@ -398,6 +398,7 @@ export function roomView(room: RoomState, player: RoomPlayer | null, now: number
             inGame: !!g?.players.includes(p.id),
             cardCount: g?.hands[p.id]?.length ?? 0,
             passed: !!g?.passed.includes(p.id),
+            autoPassed: !!g?.autoPassed?.includes(p.id),
             wins: p.wins,
             points: p.points ?? 0,
             kicked: !!p.kicked,
