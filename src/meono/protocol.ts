@@ -52,7 +52,8 @@ export interface MeoGameView {
   choice:
     | { kind: "defuse" | "implode" | "bury"; player: string; deadline: number }
     | { kind: "alter"; player: string; deadline: number; share?: boolean }
-    | { kind: "offer"; mode: "garbage" | "potluck"; player: string; deadline: number }
+    | { kind: "offer"; mode: "garbage" | "potluck" | "feed"; player: string; deadline: number }
+    | { kind: "dig"; player: string; deadline: number }
     | { kind: "favor"; from: string; to: string; deadline: number }
     | null;
   /** Để đó cho tui: whose next draw goes to whom. */
@@ -78,6 +79,10 @@ export interface MeoRoomView {
   hand: MCard[];
   /** Top of the deck, if you just played See the Future (index 0 = next card). */
   future: CardType[] | null;
+  /** Đào sâu: the top card you are looking at. */
+  dig?: CardType | null;
+  /** Thấu thị: where you saw the kitten go (recent). */
+  vision?: string | null;
   /** "shared" when `future` was shared with you by Chia sẻ tương lai. */
   sharedBy?: string | null;
   /** Sửa tương lai: the cards you are reordering (send their ids back, first = top). */
@@ -119,4 +124,6 @@ export type MeoCommand =
   | { type: "give"; card: number }
   | { type: "alter"; order: number[] }
   | { type: "settings"; expansions?: Expansion[]; turnSeconds?: number; nopeSeconds?: number; first?: number; second?: number }
-  | { type: "kick"; playerId: string };
+  | { type: "kick"; playerId: string }
+  | { type: "dig"; keep: boolean }
+  | { type: "see"; card: number };

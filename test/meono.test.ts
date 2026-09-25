@@ -15,6 +15,7 @@ import {
   playNope,
   tickGame,
 } from "../src/meono/game";
+import { digDeeper, forfeitPlayer, playClairvoyance } from "../src/meono/game";
 import { type MeoRoom, joinMeo, meoCommand, meoView, newMeoRoom, tickMeo } from "../src/meono/room";
 import { meonoAdapter } from "../src/server/adapters";
 import { createRoomHub } from "../src/server/hub";
@@ -424,5 +425,79 @@ describe("Barking Kittens pack", () => {
     alterFuture(s, "A", c.cards.map((x) => x.id), T, names);
     expect(s.shared?.player).toBe("B");
     expect(s.shared?.cards.map((x) => x.type)).toEqual(["taco", "melon", "potato"]);
+  });
+});
+
+describe("Zombie Kittens pack", () => {
+  it("Mèo Xác Sống brings an exploded player back with 2 cards from the discard pile", () => {
+    const s = rig({ A: ["zombie"], B: ["skip"], C: ["skip"] }, ["taco"], ["zombie"]);
+    s.out = ["C"];
+    s.hands.C = [];
+    s.discard = [card("melon"), card("exploding"), card("potato")];
+    expect(playCards(s, "A", ids(s, "A", "zombie"), { target: "B" }, T, names).ok).toBe(false);
+    expect(playCards(s, "A", ids(s, "A", "zombie"), { target: "C" }, T, names).ok).toBe(true);
+    settle(s);
+    expect(s.out).toEqual([]);
+    expect(s.hands.C.map((c) => c.type).sort()).toEqual(["melon", "potato"]);
+  });
+
+  it("kicked players can't be revived", () => {
+    const s = rig({ A: ["zombie"], B: ["skip"], C: ["skip"] }, ["taco"], ["zombie"]);
+    forfeitPlayer(s, "C", T, names);
+    expect(playCards(s, "A", ids(s, "A", "zombie"), { target: "C" }, T, names).ok).toBe(false);
+  });
+
+  it("Đào sâu: keep the top card, or skip it and take the next", () => {
+    const s = rig({ A: ["dig"], B: ["dig"] }, ["exploding", "taco", "melon"], ["zombie"]);
+    playCards(s, "A", ids(s, "A", "dig"), {}, T, names);
+    settle(s);
+    expect(s.choice?.kind).toBe("dig");
+    digDeeper(s, "A", false, T, names);
+    expect(s.hands.A.map((c) => c.type)).toEqual(["taco"]);
+    expect(s.deck[0].type).toBe("exploding");
+    expect(s.turn).toBe("B");
+  });
+
+  it("Nhân bản copies the action played just before", () => {
+    const s = rig({ A: ["personal", "clone"], B: ["skip"] }, ["taco"], ["zombie", "barking"]);
+    playCards(s, "A", ids(s, "A", "personal"), {}, T, names);
+    settle(s);
+    expect(s.turnsLeft).toBe(3);
+    playCards(s, "A", ids(s, "A", "clone"), {}, T, names);
+    tickGame(s, T + 2 * (NOPE_WINDOW_MS * 2 + 500), names, never, () => 0);
+    expect(s.turnsLeft).toBe(5);
+    const t = rig({ A: ["clone"], B: ["skip"] }, ["taco"], ["zombie"]);
+    expect(playCards(t, "A", ids(t, "A", "clone"), {}, T, names).ok).toBe(false);
+  });
+
+  it("Nuôi xác sống sends a card of each player to the discard pile; Đào mộ gives one back to each", () => {
+    const s = rig({ A: ["feed", "taco", "grave"], B: ["melon"] }, ["skip"], ["zombie"]);
+    playCards(s, "A", ids(s, "A", "feed"), {}, T, names);
+    settle(s);
+    giveCard(s, "A", ids(s, "A", "taco")[0], T, names);
+    giveCard(s, "B", ids(s, "B", "melon")[0], T, names);
+    expect(s.discard.map((c) => c.type)).toEqual(["feed", "taco", "melon"]);
+    playCards(s, "A", ids(s, "A", "grave"), {}, T, names);
+    tickGame(s, T + 2 * (NOPE_WINDOW_MS * 2 + 500), names, never, () => 0);
+    expect(s.hands.A).toHaveLength(1);
+    expect(s.hands.B).toHaveLength(1);
+  });
+
+  it("Xác sống tấn công adds a turn per eliminated player", () => {
+    const s = rig({ A: ["deadattack"], B: ["skip"], C: ["skip"], D: ["skip"] }, ["taco"], ["zombie"]);
+    s.out = ["C", "D"];
+    playCards(s, "A", ids(s, "A", "deadattack"), {}, T, names);
+    settle(s);
+    expect(s.turn).toBe("B");
+    expect(s.turnsLeft).toBe(4);
+  });
+
+  it("Thấu thị reveals where another player hides their kitten", () => {
+    const s = rig({ A: ["defuse"], B: ["clairvoyance"] }, ["exploding", "taco", "melon", "potato"], ["zombie"]);
+    drawCard(s, "A", T, names);
+    expect(s.choice?.kind).toBe("defuse");
+    expect(playClairvoyance(s, "B", ids(s, "B", "clairvoyance")[0], T, names).ok).toBe(true);
+    insertKitten(s, "A", 2, T, names);
+    expect(s.visions?.B.text).toContain("lá thứ 3");
   });
 });

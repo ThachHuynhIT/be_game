@@ -39,10 +39,18 @@ export type CardType =
   | "alternow"
   | "bury"
   | "personal"
-  | "share";
+  | "share"
+  // "Zombie Kittens" pack
+  | "zombie"
+  | "feed"
+  | "dig"
+  | "clone"
+  | "grave"
+  | "deadattack"
+  | "clairvoyance";
 
-export type Expansion = "imploding" | "streaking" | "barking";
-export const EXPANSIONS: Expansion[] = ["imploding", "streaking", "barking"];
+export type Expansion = "imploding" | "streaking" | "barking" | "zombie";
+export const EXPANSIONS: Expansion[] = ["imploding", "streaking", "barking", "zombie"];
 
 export interface MCard {
   id: number;
@@ -83,7 +91,16 @@ export const ACTION_TYPES: CardType[] = [
   "bury",
   "personal",
   "share",
+  "zombie",
+  "feed",
+  "dig",
+  "clone",
+  "grave",
+  "deadattack",
 ];
+
+/** Thấu thị: played while someone else is hiding a Mèo Nổ (see game.ts playClairvoyance). */
+export const CLAIRVOYANCE: CardType = "clairvoyance";
 
 /** “Now” cards: playable at any moment, even on someone else's turn (like Không!). */
 export const NOW_TYPES: CardType[] = ["alternow"];
@@ -109,6 +126,7 @@ export const PACK_COUNTS: Record<Expansion, Partial<Record<CardType, number>>> =
   // Streaking also adds one extra Mèo Nổ to the deck (see deal()).
   streaking: { streaking: 1, superskip: 1, future5: 1, swap: 3, garbage: 1, catomic: 1, mark: 3, curse: 2 },
   barking: { barking: 2, potluck: 2, ilt: 3, alternow: 2, bury: 2, personal: 3, share: 2 },
+  zombie: { zombie: 4, feed: 3, dig: 4, clone: 3, grave: 2, deadattack: 2, clairvoyance: 2 },
 };
 
 export const ALL_TYPES = [...new Set([...Object.keys(BASE_COUNTS), ...Object.values(PACK_COUNTS).flatMap((c) => Object.keys(c))])] as CardType[];

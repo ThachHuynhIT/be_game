@@ -24,6 +24,9 @@ import {
   newMeoGame,
   nextGameTickAt,
   playCards,
+  digCard,
+  digDeeper,
+  playClairvoyance,
   playNope,
   syncCurse,
   tickGame,
@@ -225,6 +228,12 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
     case "give":
       res = giveCard(g, p.id, unblind(g, p.id, msg.card), now, names);
       break;
+    case "dig":
+      res = digDeeper(g, p.id, msg.keep === true, now, names);
+      break;
+    case "see":
+      res = playClairvoyance(g, p.id, unblind(g, p.id, msg.card), now, names);
+      break;
     case "alter":
       res = alterFuture(g, p.id, msg.order, now, names);
       break;
@@ -387,6 +396,8 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
         : player && g?.shared?.player === player.id
           ? g.shared.cards.map((c) => c.type)
           : null,
+    dig: player && g ? digCard(g, player.id) : null,
+    vision: player && g?.visions?.[player.id] && now - g.visions[player.id].at < 90_000 ? g.visions[player.id].text : null,
     sharedBy: player && g?.shared?.player === player.id && !(g.future?.player === player.id) ? "shared" : null,
     alter: player && g?.choice?.kind === "alter" && g.choice.player === player.id ? g.choice.cards : null,
     history: (room.history ?? []).slice(-10),
