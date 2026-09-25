@@ -114,7 +114,15 @@ export interface TPState {
   log: LogEntry[];
   logSeq: number;
   recorded?: boolean;
+  /** Room settings for this game. */
+  stepMs?: number;
+  /** Landing exactly on Khởi hành pays double. */
+  doubleGo?: boolean;
+  /** Taxes and fines pile up on Nghỉ chân; landing there collects them (null = rule off). */
+  pot?: number | null;
 }
+
+const stepMs = (s: TPState) => s.stepMs ?? STEP_MS;
 
 export type Result = { ok: true } | { ok: false; error: string };
 const fail = (error: string): Result => ({ ok: false, error });
@@ -136,7 +144,7 @@ function shuffled(n: number, random: Random) {
 export function newTPGame(
   players: string[],
   now: number,
-  opts: { startCash: number; timeLimitMin: number },
+  opts: { startCash: number; timeLimitMin: number; stepMs?: number; doubleGo?: boolean; parkingPot?: boolean },
   random: Random = Math.random,
 ): TPState {
   if (players.length < MIN_PLAYERS) throw new Error("need at least 2 players");
@@ -147,7 +155,10 @@ export function newTPGame(
     turn: players[Math.floor(random() * players.length)],
     phase: "roll",
     phaseAt: now,
-    deadline: now + STEP_MS,
+    deadline: now + (opts.stepMs ?? STEP_MS),
+    ...(opts.stepMs ? { stepMs: opts.stepMs } : {}),
+    ...(opts.doubleGo ? { doubleGo: true } : {}),
+    pot: opts.parkingPot ? 0 : null,
     dice: null,
     doubles: 0,
     rollAgain: false,
@@ -175,7 +186,7 @@ function log(s: TPState, now: number, text: string, tone?: LogEntry["tone"]) {
 function setPhase(s: TPState, phase: Phase, now: number) {
   s.phase = phase;
   s.phaseAt = now;
-  s.deadline = now + (phase === "debt" ? DEBT_MS : STEP_MS);
+  s.deadline = now + (phase === "debt" ? DEBT_MS : stepMs(s));
 }
 
 export const active = (s: TPState) => s.players.filter((id) => !s.ps[id].bankrupt);
@@ -236,9 +247,10 @@ export function liquidValue(s: TPState, id: string) {
 
 function moveTo(s: TPState, id: string, pos: number, now: number, names: NameOf, passGo = true) {
   const p = s.ps[id];
-  if (passGo && pos < p.pos) {
-    p.cash += GO_SALARY;
-    log(s, now, `${names(id)} qua Khởi hành, nhận ${money(GO_SALARY)}`, "money");
+  if (passGo && (pos < p.pos || (pos === 0 && p.pos !== 0))) {
+    const salary = s.doubleGo && pos === 0 ? GO_SALARY * 2 : GO_SALARY;
+    p.cash += salary;
+    log(s, now, `${names(id)} ${pos === 0 ? "dừng đúng" : "qua"} Khởi hành, nhận ${money(salary)}`, "money");
   }
   p.pos = pos;
 }
@@ -287,6 +299,20 @@ function land(s: TPState, id: string, now: number, names: NameOf, random: Random
     case "chance":
     case "chest":
       drawDeckCard(s, id, b.kind, now, names, random);
+      return;
+    case "parking":
+      if (s.pot) {
+        p.cash += s.pot;
+        log(s, now, `☕ ${names(id)} nghỉ chân và hốt quỹ ${money(s.pot)}!`, "money");
+        s.pot = 0;
+      }
+      return;
+    case "parking":
+      if (s.pot) {
+        p.cash += s.pot;
+        log(s, now, `☕ ${names(id)} nghỉ chân và hốt quỹ ${money(s.pot)}!`, "money");
+        s.pot = 0;
+      }
       return;
     default:
       return;
@@ -371,8 +397,14 @@ function charge(s: TPState, payer: string, amount: number, to: string | null, re
   log(s, now, `${names(payer)} nợ ${money(amount)} ${reason} — cần bán nhà hoặc thế chấp`, "bad");
 }
 
+/** Money paid to the bank as a tax or fine — goes to the Nghỉ chân pot when that rule is on. */
+function toBank(s: TPState, amount: number) {
+  if (typeof s.pot === "number") s.pot += amount;
+}
+
 function pay(s: TPState, payer: string, amount: number, to: string | null, split?: string[]) {
   s.ps[payer].cash -= amount;
+  if (!to && !split?.length) toBank(s, amount);
   if (to) s.ps[to].cash += amount;
   else if (split?.length) {
     const each = Math.floor(amount / split.length);
@@ -520,6 +552,7 @@ export function rollDice(s: TPState, id: string, now: number, names: NameOf, ran
         return OK;
       }
       p.cash -= JAIL_FINE;
+      toBank(s, JAIL_FINE);
     } else {
       p.jail += 1;
       setPhase(s, "end", now);
@@ -592,10 +625,11 @@ export function payJail(s: TPState, id: string, useCard: boolean, now: number, n
   } else {
     if (p.cash < JAIL_FINE) return fail(`Cần ${money(JAIL_FINE)} để nộp phạt`);
     p.cash -= JAIL_FINE;
+    toBank(s, JAIL_FINE);
     log(s, now, `${names(id)} nộp ${money(JAIL_FINE)} để ra tù`, "jail");
   }
   p.jail = 0;
-  s.deadline = now + STEP_MS;
+  s.deadline = now + stepMs(s);
   return OK;
 }
 

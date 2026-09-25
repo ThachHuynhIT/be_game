@@ -294,7 +294,45 @@ describe("room", () => {
     g.turn = loser;
     expect(tpCommand(room, token, { type: "bankrupt" }, T).ok).toBe(true);
     expect(g.status).toBe("ended");
-    expect(room.history?.[0].results.map((r) => r.delta)).toEqual([1, -1]);
+    expect(room.history?.[0].results.map((r) => r.delta)).toEqual([2, -2]);
     expect(typhuAdapter.lastRecord(room)?.id).toBe("QWERT-1");
+  });
+});
+
+describe("settings", () => {
+  it("double salary on landing exactly on Khởi hành", () => {
+    const s = newTPGame(["a", "b"], T, { startCash: 1500, timeLimitMin: 0, doubleGo: true }, () => 0);
+    s.turn = "a";
+    s.ps.a.pos = 36;
+    rollDice(s, "a", T, names, dice(1, 3)); // → 0
+    expect(s.ps.a.cash).toBe(1500 + GO_SALARY * 2);
+  });
+
+  it("taxes feed the Nghỉ chân pot, collected by whoever lands there", () => {
+    const s = newTPGame(["a", "b"], T, { startCash: 1500, timeLimitMin: 0, parkingPot: true }, () => 0);
+    s.turn = "a";
+    s.ps.a.pos = 1;
+    rollDice(s, "a", T, names, dice(1, 2)); // → 4 thuế 200
+    expect(s.pot).toBe(200);
+    endTurn(s, "a", T, names);
+    s.ps.b.pos = 15;
+    rollDice(s, "b", T, names, dice(2, 3)); // → 20 Nghỉ chân
+    expect(s.ps.b.cash).toBe(1700);
+    expect(s.pot).toBe(0);
+  });
+
+  it("host settings validate and apply to the next game", () => {
+    let n = 0;
+    const room = newTPRoom("SETTP");
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", stepSeconds: 7 }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", first: 2, second: 3 }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", stepSeconds: 45, doubleGo: true, parkingPot: true, first: 6, second: 2 }, T).ok).toBe(true);
+    tpCommand(room, "token-aaaa", { type: "start" }, T);
+    expect(room.current?.deadline).toBe(T + 45_000);
+    expect(room.current?.doubleGo).toBe(true);
+    expect(room.current?.pot).toBe(0);
+    expect(tpView(room, room.seats[0], T).settings.first).toBe(6);
   });
 });

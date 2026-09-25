@@ -58,3 +58,14 @@ describe("custom Nhất / Nhì points", () => {
     expect(scoreTienLen(["a", "b", "c", "d"], null, [], ["d"], pts)).toEqual({ a: 10, b: 2, c: -2, d: -10 });
   });
 });
+
+describe("mirroredRankPoints", () => {
+  it("mirrors Nhất / Nhì and scores the middle 0", async () => {
+    const { mirroredRankPoints } = await import("../src/game/scoring");
+    const p = { first: 3, second: 1 };
+    expect(mirroredRankPoints(2, p)).toEqual([3, -3]);
+    expect(mirroredRankPoints(3, p)).toEqual([3, 1, -4]);
+    expect(mirroredRankPoints(5, p)).toEqual([3, 1, 0, -1, -3]);
+    expect(mirroredRankPoints(6, p)).toEqual([3, 1, 0, 0, -1, -3]);
+  });
+});

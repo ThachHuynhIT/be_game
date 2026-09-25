@@ -95,7 +95,18 @@ export interface MeoState {
   logSeq: number;
   /** Set once the finished game has been scored by the room. */
   recorded?: boolean;
+  /** Room settings for this game (fall back to TURN_MS / NOPE_WINDOW_MS). */
+  turnMs?: number;
+  nopeMs?: number;
 }
+
+export interface MeoOptions {
+  turnMs?: number;
+  nopeMs?: number;
+}
+
+const turnMs = (s: MeoState) => s.turnMs ?? TURN_MS;
+const nopeMs = (s: MeoState) => s.nopeMs ?? NOPE_WINDOW_MS;
 
 export type Result = { ok: true } | { ok: false; error: string };
 const fail = (error: string): Result => ({ ok: false, error });
@@ -129,7 +140,13 @@ export const CARD_NAMES: Record<CardType, string> = {
   catomic: "Bom Mèo Nguyên Tử",
 };
 
-export function newMeoGame(players: string[], now: number, expansions: Expansion[] = [], random: () => number = Math.random): MeoState {
+export function newMeoGame(
+  players: string[],
+  now: number,
+  expansions: Expansion[] = [],
+  random: () => number = Math.random,
+  opts: MeoOptions = {},
+): MeoState {
   if (players.length < MIN_PLAYERS || players.length > maxPlayers(expansions)) {
     throw new Error(`Cần ${MIN_PLAYERS}-${maxPlayers(expansions)} người chơi`);
   }
@@ -143,7 +160,9 @@ export function newMeoGame(players: string[], now: number, expansions: Expansion
     turn: players[Math.floor(random() * players.length)],
     dir: 1,
     turnsLeft: 1,
-    turnDeadline: now + TURN_MS,
+    turnDeadline: now + (opts.turnMs ?? TURN_MS),
+    ...(opts.turnMs ? { turnMs: opts.turnMs } : {}),
+    ...(opts.nopeMs ? { nopeMs: opts.nopeMs } : {}),
     pending: null,
     choice: null,
     future: null,
@@ -190,7 +209,7 @@ function endTurn(s: MeoState, now: number) {
     s.turn = nextAlive(s, s.turn);
     s.turnsLeft = 1;
   }
-  s.turnDeadline = now + TURN_MS;
+  s.turnDeadline = now + turnMs(s);
 }
 
 /** Hand the turn to `to` with `turns` turns (attacks). */
@@ -198,7 +217,7 @@ function passTurnTo(s: MeoState, to: string, turns: number, now: number) {
   s.future = null;
   s.turn = to;
   s.turnsLeft = turns;
-  s.turnDeadline = now + TURN_MS;
+  s.turnDeadline = now + turnMs(s);
 }
 
 function checkEnd(s: MeoState) {
@@ -232,7 +251,7 @@ function eliminate(s: MeoState, player: string, now: number) {
     s.turnsLeft = 1;
     s.pending = null;
     s.future = null;
-    s.turnDeadline = now + TURN_MS;
+    s.turnDeadline = now + turnMs(s);
   }
 }
 
@@ -296,7 +315,7 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
 
   const cards = takeFromHand(s, player, ids as number[])!;
   s.discard.push(...cards);
-  s.pending = { kind, by: player, target, named, cards, nopes: 0, deadline: now + NOPE_WINDOW_MS };
+  s.pending = { kind, by: player, target, named, cards, nopes: 0, deadline: now + nopeMs(s) };
   const main = types.find((t) => t !== WILD_CAT) ?? types[0];
   const label =
     kind === "pair"
@@ -320,7 +339,7 @@ export function playNope(s: MeoState, player: string, cardId: unknown, now: numb
   takeFromHand(s, player, [card.id]);
   s.discard.push(card);
   s.pending.nopes += 1;
-  s.pending.deadline = now + NOPE_WINDOW_MS;
+  s.pending.deadline = now + nopeMs(s);
   log(s, now, `${nameOf(player)}: KHÔNG! ${s.pending.nopes % 2 ? "(chặn)" : "(chặn lại lần nữa)"}`, "nope");
   return OK;
 }
@@ -401,7 +420,7 @@ export function giveCard(s: MeoState, player: string, cardId: unknown, now: numb
   s.hands[s.choice.to].push(card);
   log(s, now, `${nameOf(player)} đưa 1 lá cho ${nameOf(s.choice.to)}`, "steal");
   s.choice = null;
-  s.turnDeadline = now + TURN_MS;
+  s.turnDeadline = now + turnMs(s);
   return OK;
 }
 
@@ -415,7 +434,7 @@ export function alterFuture(s: MeoState, player: string, order: unknown, now: nu
   s.deck.unshift(...sorted);
   s.choice = null;
   s.future = { player, cards: sorted };
-  s.turnDeadline = now + TURN_MS;
+  s.turnDeadline = now + turnMs(s);
   log(s, now, `${nameOf(player)} đã sắp xếp lại tương lai 🔮`);
   return OK;
 }
@@ -434,7 +453,7 @@ const attackTurns = (s: MeoState) => (s.turnsLeft > 1 ? s.turnsLeft + 2 : 2);
 function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => number) {
   const p = s.pending!;
   s.pending = null;
-  s.turnDeadline = now + TURN_MS;
+  s.turnDeadline = now + turnMs(s);
   if (p.nopes % 2 === 1) {
     log(s, now, `${CARD_NAMES[p.cards[0].type]} của ${nameOf(p.by)} đã bị chặn 🚫`, "nope");
     return;

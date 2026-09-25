@@ -61,6 +61,8 @@ export interface MeoRoomView {
   serverTime: number;
   /** Packs enabled for the next game (host setting). */
   expansions: Expansion[];
+  /** Other host settings. */
+  settings: { turnSeconds: number; nopeSeconds: number; first: number; second: number };
   maxPlayers: number;
   seats: (MeoSeatView | null)[];
   current: MeoGameView | null;
@@ -105,5 +107,5 @@ export type MeoCommand =
   | { type: "insert"; position: number }
   | { type: "give"; card: number }
   | { type: "alter"; order: number[] }
-  | { type: "settings"; expansions: Expansion[] }
+  | { type: "settings"; expansions?: Expansion[]; turnSeconds?: number; nopeSeconds?: number; first?: number; second?: number }
   | { type: "kick"; playerId: string };

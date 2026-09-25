@@ -10,7 +10,7 @@ import {
   pruneSpectators,
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
-import { scoreGame } from "../game/scoring";
+import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
 import { DEFAULT_START_CASH, DEFAULT_TIME_LIMIT, MAX_SEATS, MIN_PLAYERS, START_CASH_OPTIONS, TIME_LIMIT_OPTIONS } from "./board";
 import {
   type Result,
@@ -64,6 +64,18 @@ export interface TPRoom {
   chat?: ChatMessage[];
 }
 
+export const STEP_SECONDS_OPTIONS = [15, 20, 30, 45, 60];
+export const DEFAULT_TP_SETTINGS: TPSettings = {
+  startCash: DEFAULT_START_CASH,
+  timeLimit: DEFAULT_TIME_LIMIT,
+  stepSeconds: 30,
+  doubleGo: false,
+  parkingPot: false,
+  ...DEFAULT_RANK_POINTS,
+};
+/** Rooms saved before a setting existed get its default. */
+export const tpSettingsOf = (room: TPRoom): TPSettings => ({ ...DEFAULT_TP_SETTINGS, ...room.settings });
+
 export function newTPRoom(code: string): TPRoom {
   return {
     game: "typhu",
@@ -71,7 +83,7 @@ export function newTPRoom(code: string): TPRoom {
     hostId: "",
     seats: Array.from({ length: MAX_SEATS }, () => null),
     current: null,
-    settings: { startCash: DEFAULT_START_CASH, timeLimit: DEFAULT_TIME_LIMIT },
+    settings: { ...DEFAULT_TP_SETTINGS },
   };
 }
 
@@ -141,21 +153,40 @@ function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
   dropGoneSeats(room, now);
   const players = room.seats.filter((p): p is TPPlayer => !!p).map((p) => p.id);
   if (players.length < MIN_PLAYERS) return { ok: false, error: `Cần ít nhất ${MIN_PLAYERS} người` };
-  room.current = newTPGame(players, now, { startCash: room.settings.startCash, timeLimitMin: room.settings.timeLimit });
+  const st = tpSettingsOf(room);
+  room.current = newTPGame(players, now, {
+    startCash: st.startCash,
+    timeLimitMin: st.timeLimit,
+    stepMs: st.stepSeconds * 1000,
+    doubleGo: st.doubleGo,
+    parkingPot: st.parkingPot,
+  });
   return { ok: true };
 }
 
-function setSettings(room: TPRoom, host: TPPlayer, msg: { startCash?: unknown; timeLimit?: unknown }): Result {
+function setSettings(room: TPRoom, host: TPPlayer, msg: Record<string, unknown>): Result {
   if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới đổi luật" };
   if (room.current?.status === "playing") return { ok: false, error: "Đổi luật khi ván đã kết thúc" };
+  const next = tpSettingsOf(room);
   if (msg.startCash !== undefined) {
     if (!START_CASH_OPTIONS.includes(msg.startCash as number)) return { ok: false, error: "Tiền khởi đầu không hợp lệ" };
-    room.settings.startCash = msg.startCash as number;
+    next.startCash = msg.startCash as number;
   }
   if (msg.timeLimit !== undefined) {
     if (!TIME_LIMIT_OPTIONS.includes(msg.timeLimit as number)) return { ok: false, error: "Thời gian không hợp lệ" };
-    room.settings.timeLimit = msg.timeLimit as number;
+    next.timeLimit = msg.timeLimit as number;
   }
+  if (msg.stepSeconds !== undefined) {
+    if (!STEP_SECONDS_OPTIONS.includes(msg.stepSeconds as number)) return { ok: false, error: "Thời gian mỗi bước không hợp lệ" };
+    next.stepSeconds = msg.stepSeconds as number;
+  }
+  if (msg.doubleGo !== undefined) next.doubleGo = msg.doubleGo === true;
+  if (msg.parkingPot !== undefined) next.parkingPot = msg.parkingPot === true;
+  if (msg.first !== undefined) next.first = msg.first as number;
+  if (msg.second !== undefined) next.second = msg.second as number;
+  const err = checkRankPoints(next.first, next.second);
+  if (err) return { ok: false, error: err };
+  room.settings = next;
   return { ok: true };
 }
 
@@ -185,7 +216,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
   if (msg.type === "start") return startTP(room, p, now);
   if (msg.type === "kick") return kickTP(room, p, msg.playerId, now);
-  if (msg.type === "settings") return setSettings(room, p, msg);
+  if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
   if (!g.ps[p.id]) return { ok: false, error: "Bạn không chơi ván này" };
@@ -251,7 +282,7 @@ function afterChange(room: TPRoom, now: number) {
   const g = room.current;
   if (!g || g.status !== "ended" || g.recorded) return;
   g.recorded = true;
-  const deltas = scoreGame(g.finished, null);
+  const deltas = scoreByRank(g.finished, tpSettingsOf(room));
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
@@ -330,7 +361,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     meId: player?.id ?? "",
     role: player ? "player" : "spectator",
     serverTime: now,
-    settings: room.settings,
+    settings: tpSettingsOf(room),
     seats: room.seats.map((p, i) =>
       p
         ? {
@@ -370,6 +401,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
           lastCard: g.lastCard,
           finished: g.finished,
           endsAt: g.endsAt,
+          pot: g.pot ?? null,
           log: g.log,
         }
       : null,

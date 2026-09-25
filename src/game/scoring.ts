@@ -17,11 +17,41 @@ export const DEFAULT_TIENLEN_POINTS = { first: 2, second: 1 };
  *   2 players: +first, −first
  */
 export function tienlenRankPoints(n: number, points = DEFAULT_TIENLEN_POINTS): number[] {
-  const { first, second } = points;
+  return mirroredRankPoints(n, points);
+}
+
+/** Room setting shared by every game: points for Nhất and Nhì. */
+export interface RankPointsSetting {
+  first: number;
+  second: number;
+}
+export const DEFAULT_RANK_POINTS: RankPointsSetting = { first: 2, second: 1 };
+export const MAX_RANK_POINTS = 20;
+
+/**
+ * Nhất / Nhì points mirrored onto the last places so a game always sums to zero;
+ * places in between score 0.
+ *   2: +f −f · 3: +f +s −(f+s) · 4: +f +s −s −f · 5: +f +s 0 −s −f · 6: +f +s 0 0 −s −f
+ */
+export function mirroredRankPoints(n: number, { first, second }: RankPointsSetting): number[] {
+  if (n < 2) return n === 1 ? [0] : [];
   if (n === 2) return [first, -first];
   if (n === 3) return [first, second, -(first + second)];
-  if (n === 4) return [first, second, -second, -first];
-  return [];
+  return [first, second, ...Array.from({ length: n - 4 }, () => 0), -second, -first];
+}
+
+/** Validate a host's Nhất / Nhì choice. */
+export function checkRankPoints(first: unknown, second: unknown): string | null {
+  const ok = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= MAX_RANK_POINTS;
+  if (!ok(first) || first < 1) return `Điểm Nhất từ 1 đến ${MAX_RANK_POINTS}`;
+  if (!ok(second) || second > first) return "Điểm Nhì từ 0 đến điểm Nhất";
+  return null;
+}
+
+/** Point change per player id from the finishing order and the room's Nhất / Nhì setting. */
+export function scoreByRank(finished: string[], points: RankPointsSetting = DEFAULT_RANK_POINTS): Record<string, number> {
+  const table = mirroredRankPoints(finished.length, points);
+  return Object.fromEntries(finished.map((id, i) => [id, table[i] ?? 0]));
 }
 
 /** Mèo Nổ and Cờ Tỷ Phú: symmetric points by rank. */

@@ -253,3 +253,20 @@ describe("Mèo Nổ room", () => {
     expect(view.current.status).toBe("playing");
   });
 });
+
+describe("settings", () => {
+  it("host sets turn / Nope timers and points for the next game", () => {
+    let n = 0;
+    const room = newMeoRoom("SETMN");
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(meoCommand(room, "token-bbbb", { type: "settings", turnSeconds: 45 }, T).ok).toBe(false);
+    expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 12 }, T).ok).toBe(false);
+    expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1, expansions: ["chaos"] }, T).ok).toBe(true);
+    meoCommand(room, "token-aaaa", { type: "start" }, T);
+    expect(room.current?.turnDeadline).toBe(T + 45_000);
+    expect(room.current?.nopeMs).toBe(5_000);
+    expect(room.current?.expansions).toEqual(["chaos"]);
+    expect(meoView(room, room.seats[0], T).settings).toEqual({ turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1 });
+  });
+});

@@ -10,7 +10,7 @@ import {
   pruneSpectators,
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
-import { scoreGame } from "../game/scoring";
+import { DEFAULT_RANK_POINTS, type RankPointsSetting, checkRankPoints, scoreByRank } from "../game/scoring";
 import { type Expansion, MAX_SEATS, MIN_PLAYERS, cleanExpansions, maxPlayers } from "./cards";
 import {
   type MeoState,
@@ -51,12 +51,26 @@ export interface MeoRoom {
   current: MeoState | null;
   /** Packs the host enabled for the next game. */
   expansions?: Expansion[];
+  /** Other host settings; missing on older rooms. */
+  settings?: MeoSettings;
   history?: GameRecord[];
   gameSeq?: number;
   spectators?: Spectator[];
   reactions?: Reaction[];
   chat?: ChatMessage[];
 }
+
+export interface MeoSettings extends RankPointsSetting {
+  /** Seconds per turn before the server draws for you. */
+  turnSeconds: number;
+  /** Seconds everyone gets to answer an action with “Không!”. */
+  nopeSeconds: number;
+}
+
+export const TURN_SECONDS_OPTIONS = [15, 20, 30, 45, 60];
+export const NOPE_SECONDS_OPTIONS = [2, 3.5, 5, 7];
+export const DEFAULT_MEO_SETTINGS: MeoSettings = { turnSeconds: 30, nopeSeconds: 3.5, ...DEFAULT_RANK_POINTS };
+export const meoSettingsOf = (room: MeoRoom): MeoSettings => ({ ...DEFAULT_MEO_SETTINGS, ...room.settings });
 
 export function newMeoRoom(code: string): MeoRoom {
   return { game: "meono", code, hostId: "", seats: Array.from({ length: MAX_SEATS }, () => null), current: null, expansions: [] };
@@ -130,15 +144,33 @@ function startMeo(room: MeoRoom, host: MeoPlayer, now: number): Result {
   if (players.length > maxPlayers(expansions)) {
     return { ok: false, error: `Bàn cơ bản tối đa ${maxPlayers(expansions)} người — bật gói Mèo Tự Huỷ để chơi 6 người` };
   }
-  room.current = newMeoGame(players, now, expansions);
+  const settings = meoSettingsOf(room);
+  room.current = newMeoGame(players, now, expansions, Math.random, {
+    turnMs: settings.turnSeconds * 1000,
+    nopeMs: settings.nopeSeconds * 1000,
+  });
   return { ok: true };
 }
 
-/** Host picks the expansion packs between games. */
-function setExpansions(room: MeoRoom, host: MeoPlayer, raw: unknown): Result {
-  if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới chọn gói mở rộng" };
-  if (room.current?.status === "playing") return { ok: false, error: "Đổi gói khi ván đã kết thúc" };
-  room.expansions = cleanExpansions(raw);
+/** Host changes packs / timers / points between games. Only the fields sent are changed. */
+function setMeoSettings(room: MeoRoom, host: MeoPlayer, msg: Record<string, unknown>): Result {
+  if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới đổi luật" };
+  if (room.current?.status === "playing") return { ok: false, error: "Đổi luật khi ván đã kết thúc" };
+  const next = meoSettingsOf(room);
+  if (msg.turnSeconds !== undefined) {
+    if (!TURN_SECONDS_OPTIONS.includes(msg.turnSeconds as number)) return { ok: false, error: "Thời gian lượt không hợp lệ" };
+    next.turnSeconds = msg.turnSeconds as number;
+  }
+  if (msg.nopeSeconds !== undefined) {
+    if (!NOPE_SECONDS_OPTIONS.includes(msg.nopeSeconds as number)) return { ok: false, error: "Thời gian “Không!” không hợp lệ" };
+    next.nopeSeconds = msg.nopeSeconds as number;
+  }
+  if (msg.first !== undefined) next.first = msg.first as number;
+  if (msg.second !== undefined) next.second = msg.second as number;
+  const err = checkRankPoints(next.first, next.second);
+  if (err) return { ok: false, error: err };
+  if (msg.expansions !== undefined) room.expansions = cleanExpansions(msg.expansions);
+  room.settings = next;
   return { ok: true };
 }
 
@@ -167,7 +199,7 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
   if (msg.type === "start") return startMeo(room, p, now);
   if (msg.type === "kick") return kickMeo(room, p, msg.playerId, now);
-  if (msg.type === "settings") return setExpansions(room, p, msg.expansions);
+  if (msg.type === "settings") return setMeoSettings(room, p, msg as unknown as Record<string, unknown>);
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
   const names = nameOf(room);
@@ -204,7 +236,8 @@ function afterChange(room: MeoRoom, now: number) {
   if (!g || g.status !== "ended") return;
   if (g.recorded) return;
   g.recorded = true;
-  const deltas = scoreGame(g.finished, null);
+  const settings = meoSettingsOf(room);
+  const deltas = scoreByRank(g.finished, settings);
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
@@ -284,6 +317,7 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
     role: player ? "player" : "spectator",
     serverTime: now,
     expansions: room.expansions ?? [],
+    settings: meoSettingsOf(room),
     maxPlayers: maxPlayers(room.expansions ?? []),
     seats: room.seats.map((p) =>
       p
