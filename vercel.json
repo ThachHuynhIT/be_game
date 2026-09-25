@@ -9,6 +9,9 @@
     },
     "api/meono/ws.ts": {
       "maxDuration": 300
+    },
+    "api/typhu/ws.ts": {
+      "maxDuration": 300
     }
   }
 }

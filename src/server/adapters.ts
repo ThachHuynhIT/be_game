@@ -36,6 +36,21 @@ import {
   tickMeo,
 } from "../meono/room";
 import type { MeoCommand } from "../meono/protocol";
+import {
+  type TPRoom,
+  findByToken as findTPByToken,
+  isTPActive,
+  joinTP,
+  leaveTP,
+  newTPRoom,
+  nextTPTickAt,
+  tickTP,
+  tpCommand,
+  tpHeartbeat,
+  tpSummary,
+  tpView,
+} from "../typhu/room";
+import type { TPCommand } from "../typhu/protocol";
 import type { CodedRoom, GameKind } from "./store";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -129,7 +144,31 @@ export const meonoAdapter: GameAdapter<MeoRoom> = {
   lastRecord: (room) => room.history?.[room.history.length - 1],
 };
 
+export const typhuAdapter: GameAdapter<TPRoom> = {
+  game: "typhu",
+  newRoom: newTPRoom,
+  join: (room, token, name, now, newId) => joinTP(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: tpHeartbeat,
+  leave: leaveTP,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => tpCommand(room, token, msg as unknown as TPCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findTPByToken(room, token);
+      return p ? tpView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? tpView(room, null, now) : null;
+  },
+  tick: tickTP,
+  nextTickAt: nextTPTickAt,
+  summary: tpSummary,
+  isActive: isTPActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
 export const ADAPTERS: Record<GameKind, GameAdapter> = {
   tienlen: tienlenAdapter as unknown as GameAdapter,
   meono: meonoAdapter as unknown as GameAdapter,
+  typhu: typhuAdapter as unknown as GameAdapter,
 };

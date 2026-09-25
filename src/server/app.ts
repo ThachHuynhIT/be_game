@@ -9,7 +9,7 @@ import { type GameKind, getRoomStore, redisUrl } from "./store";
 /**
  * The whole backend as a plain Node `http.Server`. Per game (Tiến Lên keeps
  * its original unprefixed paths):
- *   GET /api/ws              · /api/meono/ws            (Upgrade: websocket)
+ *   GET /api/ws              · /api/meono/ws · /api/typhu/ws   (Upgrade: websocket)
  *   GET /api/rooms           · /api/meono/rooms         open tables for the lobby
  *   GET /api/leaderboard     · /api/meono/leaderboard   all-time points
  *   GET /api/health                                     store diagnostics
@@ -22,6 +22,9 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/meono/ws": { game: "meono", kind: "ws" },
   "/api/meono/rooms": { game: "meono", kind: "rooms" },
   "/api/meono/leaderboard": { game: "meono", kind: "leaderboard" },
+  "/api/typhu/ws": { game: "typhu", kind: "ws" },
+  "/api/typhu/rooms": { game: "typhu", kind: "rooms" },
+  "/api/typhu/leaderboard": { game: "typhu", kind: "leaderboard" },
 };
 
 export function createGameServer(): Server {
