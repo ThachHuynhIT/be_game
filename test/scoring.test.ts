@@ -13,9 +13,9 @@ describe("scoreTienLen", () => {
     for (const f of [["a", "b"], ["a", "b", "c"], ["a", "b", "c", "d"]]) expect(sum(scoreTienLen(f, null))).toBe(0);
   });
 
-  it("tới trắng: winner takes 2 from everyone", () => {
+  it("tới trắng pays double: winner takes 4 from everyone", () => {
     const d = scoreTienLen(["w", "x", "y", "z"], "w");
-    expect(d).toEqual({ w: 6, x: -2, y: -2, z: -2 });
+    expect(d).toEqual({ w: 12, x: -4, y: -4, z: -4 });
     expect(sum(d)).toBe(0);
   });
 
@@ -23,6 +23,13 @@ describe("scoreTienLen", () => {
     const d = scoreTienLen(["a", "b", "c", "d"], null, [{ from: "a", to: "d", points: 2 }]);
     expect(d).toEqual({ a: 0, b: 1, c: -1, d: 0 });
     expect(sum(d)).toBe(0);
+  });
+
+  it("chết cháy doubles the loss and Nhất collects the extra", () => {
+    expect(scoreTienLen(["a", "b", "c", "d"], null, [], ["d"])).toEqual({ a: 4, b: 1, c: -1, d: -4 });
+    expect(scoreTienLen(["a", "b", "c", "d"], null, [], ["c", "d"])).toEqual({ a: 5, b: 1, c: -2, d: -4 });
+    expect(scoreTienLen(["a", "b"], null, [], ["b"])).toEqual({ a: 4, b: -4 });
+    expect(sum(scoreTienLen(["a", "b", "c"], null, [], ["c"]))).toBe(0);
   });
 
   it("values heo đen 1, heo đỏ 2, chặt chồng 2", () => {

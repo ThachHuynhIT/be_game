@@ -91,6 +91,26 @@ describe("game flow", () => {
     ]);
   });
 
+  it("burns a player holding 13 cards when someone goes out", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: {
+        A: c("3s 5s"),
+        B: c("4c 4d 5d 6h 8s 9c 10d Jh Qs Kc Ad 2c 7d"),
+        C: c("4s 6s 7s 8c 9d 10c Js Qc Kd As 2d Kh 9h"),
+      },
+      starter: "A",
+    });
+    play(g, "A", c("3s"));
+    pass(g, "B");
+    play(g, "C", c("4s"));
+    // A: 5♠ beats 4♠; B has not played a single card yet.
+    play(g, "A", c("5s"));
+    expect(g.burned).toEqual(["B"]);
+    // Only C is left playing → game over, burned B last.
+    expect(g.status).toBe("ended");
+    expect(g.finished).toEqual(["A", "C", "B"]);
+  });
+
   it("chặt chồng doubles every time", () => {
     const g = newGame(["A", "B", "C", "D"], {
       hands: {

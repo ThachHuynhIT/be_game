@@ -349,7 +349,7 @@ function afterAction(room: RoomState, now: number) {
 function recordGame(room: RoomState, now: number) {
   const g = room.game;
   if (!g) return;
-  const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops);
+  const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops, g.burned);
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
@@ -361,7 +361,7 @@ function recordGame(room: RoomState, now: number) {
         p.points = (p.points ?? 0) + deltas[id];
         p.games = (p.games ?? 0) + 1;
       }
-      return { id, name: p?.name ?? "?", rank, delta: deltas[id] };
+      return { id, name: p?.name ?? "?", rank, delta: deltas[id], ...(g.burned?.includes(id) ? { burned: true } : {}) };
     }),
   };
   room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
@@ -415,6 +415,7 @@ export function roomView(room: RoomState, player: RoomPlayer | null, now: number
           finished: g.finished,
           mustInclude: g.mustInclude,
           instantWin: g.instantWin,
+          burned: g.burned ?? [],
         }
       : null,
     hand: player ? (g?.hands[player.id] ?? []) : [],

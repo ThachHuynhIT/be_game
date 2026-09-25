@@ -39,6 +39,8 @@ export interface GameState {
   instantWin: { playerId: string; reason: InstantWinReason } | null;
   /** Chặt heo point transfers so far, settled when the game ends. */
   chops?: ChopScore[];
+  /** Chết cháy: still holding all 13 cards when the first player finished. They stop playing and rank last. */
+  burned?: string[];
   /** Players the server passed for because they had nothing that could beat the table this round. */
   autoPassed?: string[];
 }
@@ -108,7 +110,7 @@ export function newGame(players: string[], opts: NewGameOptions = {}): GameState
 }
 
 /** Finished normally, or forfeited (kicked while disconnected). */
-const isOut = (s: GameState, p: string) => s.finished.includes(p) || !!s.forfeited?.includes(p);
+const isOut = (s: GameState, p: string) => s.finished.includes(p) || !!s.forfeited?.includes(p) || !!s.burned?.includes(p);
 
 export const activePlayers = (s: GameState) => s.players.filter((p) => !isOut(s, p));
 
@@ -129,8 +131,8 @@ function nextPlayer(s: GameState, from: string, skipPassed: boolean): string | n
 function advance(s: GameState, actor: string | null) {
   const remaining = activePlayers(s);
   if (remaining.length <= 1) {
-    // Forfeited players rank below everyone, the first one kicked last.
-    s.finished.push(...remaining, ...(s.forfeited ?? []).slice().reverse());
+    // Then the burned (chết cháy), then forfeited players, the first one kicked last.
+    s.finished.push(...remaining, ...(s.burned ?? []), ...(s.forfeited ?? []).slice().reverse());
     s.status = "ended";
     s.turn = null;
     return;
@@ -219,7 +221,17 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
     s.chops = [...(s.chops ?? []), { from: prevPlayer, to: playerId, points }];
   }
   s.mustInclude = null;
-  if (s.hands[playerId].length === 0) s.finished.push(playerId);
+  if (s.hands[playerId].length === 0) {
+    s.finished.push(playerId);
+    // Chết cháy: when the first player goes out, anyone who has not played a single card is burned.
+    if (s.finished.length === 1) {
+      const burned = activePlayers(s).filter((p) => s.hands[p].length === HAND_SIZE);
+      if (burned.length) {
+        s.burned = burned;
+        s.passed = s.passed.filter((p) => !burned.includes(p));
+      }
+    }
+  }
   advance(s, playerId);
   return { ok: true };
 }

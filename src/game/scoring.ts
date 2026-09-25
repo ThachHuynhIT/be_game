@@ -6,7 +6,8 @@ import type { Combo } from "./combos";
  *   4 players: +2, +1, −1, −2
  *   3 players: +2, +1, −3
  *   2 players: +2, −2
- *   Tới trắng: the winner takes +2 from every other player.
+ *   Tới trắng: the winner takes +4 from every other player (double).
+ *   Chết cháy (never played a card before the first player finished): the loss is doubled; the extra goes to Nhất.
  * On top of that, chặt heo moves points from the chopped player to the chopper (see chopPoints);
  * each chặt chồng doubles the previous chop.
  */
@@ -26,6 +27,8 @@ const RANK_POINTS: Record<number, number[]> = {
 };
 
 export const INSTANT_WIN_POINTS = 2;
+/** Tiến Lên tới trắng pays double. */
+export const TIENLEN_INSTANT_WIN_POINTS = 4;
 /** Chặt heo: heo đen (♠ ♣) 1 điểm, heo đỏ (♦ ♥) 2 điểm each. */
 export const BLACK_TWO_POINTS = 1;
 export const RED_TWO_POINTS = 2;
@@ -47,16 +50,29 @@ export function chopPoints(chopped: Combo): number {
 }
 
 /** Tiến Lên point change for each player id: finishing order + chặt heo transfers. */
-export function scoreTienLen(finished: string[], instantWinner: string | null, chops: ChopScore[] = []): Record<string, number> {
+export function scoreTienLen(
+  finished: string[],
+  instantWinner: string | null,
+  chops: ChopScore[] = [],
+  burned: string[] = [],
+): Record<string, number> {
   const n = finished.length;
   const deltas: Record<string, number> = {};
   if (instantWinner) {
-    for (const id of finished) deltas[id] = id === instantWinner ? INSTANT_WIN_POINTS * (n - 1) : -INSTANT_WIN_POINTS;
+    for (const id of finished) deltas[id] = id === instantWinner ? TIENLEN_INSTANT_WIN_POINTS * (n - 1) : -TIENLEN_INSTANT_WIN_POINTS;
   } else {
     const table = TIENLEN_POINTS[n] ?? [];
     finished.forEach((id, i) => {
       deltas[id] = table[i] ?? 0;
     });
+    // Chết cháy: pay your rank's loss twice; Nhất collects the extra.
+    const winner = finished[0];
+    for (const id of burned) {
+      if (id === winner || !(id in deltas) || deltas[id] >= 0) continue;
+      const extra = -deltas[id];
+      deltas[id] -= extra;
+      deltas[winner] += extra;
+    }
   }
   for (const c of chops) {
     if (!(c.from in deltas) || !(c.to in deltas)) continue;
