@@ -11,6 +11,9 @@ import {
   play,
 } from "./game";
 import {
+  CHAT_HISTORY,
+  CHAT_MAX_LENGTH,
+  type ChatMessage,
   EMOJIS,
   type GameRecord,
   MAX_NAME_LENGTH,
@@ -71,6 +74,7 @@ export interface RoomState {
   spectators?: Spectator[];
   /** Recent emoji reactions (short-lived). */
   reactions?: Reaction[];
+  chat?: ChatMessage[];
 }
 
 export interface Spectator {
@@ -84,6 +88,7 @@ export interface SocialRoom {
   seats: ({ id: string; token: string; name: string } | null)[];
   spectators?: Spectator[];
   reactions?: Reaction[];
+  chat?: ChatMessage[];
 }
 
 export const MAX_SPECTATORS = 30;
@@ -221,6 +226,32 @@ export function react(room: SocialRoom, token: string, emoji: unknown, now: numb
     playerId: player?.id ?? null,
   };
   room.reactions = [...(room.reactions ?? []), reaction].slice(-MAX_REACTIONS);
+  return { ok: true };
+}
+
+/** Free-text chat line from a player or spectator. */
+export function sendChat(room: SocialRoom, token: string, text: unknown, now: number): { ok: true } | { ok: false; error: string } {
+  const clean =
+    typeof text === "string"
+      ? text
+          .normalize("NFC")
+          .replace(/[\u0000-\u001f\u007f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, CHAT_MAX_LENGTH)
+      : "";
+  if (!clean) return { ok: false, error: "Tin nhắn trống" };
+  const player = room.seats.find((p) => p?.token === token) ?? null;
+  const spectator = player ? null : findSpectator(room, token);
+  if (!player && !spectator) return { ok: false, error: "Bạn chưa vào phòng" };
+  const msg: ChatMessage = {
+    id: `${now.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    at: now,
+    name: player?.name ?? spectator!.name,
+    playerId: player?.id ?? null,
+    text: clean,
+  };
+  room.chat = [...(room.chat ?? []), msg].slice(-CHAT_HISTORY);
   return { ok: true };
 }
 
@@ -422,6 +453,7 @@ export function roomView(room: RoomState, player: RoomPlayer | null, now: number
     history: (room.history ?? []).slice(-10),
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),
     reactions: (room.reactions ?? []).filter((r) => now - r.at < REACTION_TTL_MS),
+    chat: room.chat ?? [],
   };
 }
 

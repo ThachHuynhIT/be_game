@@ -1,8 +1,8 @@
-import type { GameRecord, LeaderboardEntry, Reaction } from "../game/protocol";
+import type { ChatMessage, GameRecord, LeaderboardEntry, Reaction } from "../game/protocol";
 import type { Deed, LogEntry, Phase, TradeSide } from "./game";
 
-export type { Deed, GameRecord, LeaderboardEntry, LogEntry, Phase, Reaction, TradeSide };
-export { EMOJIS, EMOJI_COOLDOWN_MS, MAX_NAME_LENGTH, PING_INTERVAL_MS } from "../game/protocol";
+export type { ChatMessage, Deed, GameRecord, LeaderboardEntry, LogEntry, Phase, Reaction, TradeSide };
+export { CHAT_MAX_LENGTH, EMOJIS, EMOJI_COOLDOWN_MS, MAX_NAME_LENGTH, PING_INTERVAL_MS } from "../game/protocol";
 
 /** WebSocket endpoint for Cờ Tỷ Phú. */
 export const TYPHU_WS_PATH = "/api/typhu/ws";
@@ -66,6 +66,7 @@ export interface TPRoomView {
   history: GameRecord[];
   spectators: string[];
   reactions: Reaction[];
+  chat: ChatMessage[];
 }
 
 export interface TPRoomSummary {

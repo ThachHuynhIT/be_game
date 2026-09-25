@@ -9,7 +9,7 @@ import {
   pruneReactions,
   pruneSpectators,
 } from "../game/room";
-import type { GameRecord, Reaction } from "../game/protocol";
+import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { scoreGame } from "../game/scoring";
 import { type Expansion, MAX_SEATS, MIN_PLAYERS, cleanExpansions, maxPlayers } from "./cards";
 import {
@@ -55,6 +55,7 @@ export interface MeoRoom {
   gameSeq?: number;
   spectators?: Spectator[];
   reactions?: Reaction[];
+  chat?: ChatMessage[];
 }
 
 export function newMeoRoom(code: string): MeoRoom {
@@ -330,6 +331,7 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
     history: (room.history ?? []).slice(-10),
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),
     reactions: (room.reactions ?? []).filter((r) => now - r.at < REACTION_TTL_MS),
+    chat: room.chat ?? [],
   };
 }
 

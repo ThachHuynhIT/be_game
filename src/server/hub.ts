@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
-import { randomCode } from "../game/room";
+import { CHAT_COOLDOWN_MS, EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
+import { type SocialRoom, randomCode, sendChat } from "../game/room";
 import { ADAPTERS, type GameAdapter, type Result, tienlenAdapter } from "./adapters";
 import { type CodedRoom, type GameKind, type RoomStore, getRoomStore } from "./store";
 
@@ -228,6 +228,7 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
   let windowStart = Date.now();
   let messagesInWindow = 0;
   let lastEmojiAt = 0;
+  let lastChatAt = 0;
 
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   if (opts.deadline) {
@@ -285,6 +286,15 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return ack(id, { ok: false, error: "Chậm lại một chút" });
       lastEmojiAt = now;
       const res = await hub.mutate(code, (room, t) => adapter.react(room, token, msg.emoji, t));
+      return ack(id, res.found ? res.result : { ok: false, error: "Không tìm thấy phòng" });
+    }
+
+    if (msg.type === "chat") {
+      const now = Date.now();
+      if (now - lastChatAt < CHAT_COOLDOWN_MS) return ack(id, { ok: false, error: "Chậm lại một chút" });
+      lastChatAt = now;
+      // Every game's room has the shared social fields (seats, spectators, chat).
+      const res = await hub.mutate(code, (room, t) => sendChat(room as unknown as SocialRoom, token, msg.text, t));
       return ack(id, res.found ? res.result : { ok: false, error: "Không tìm thấy phòng" });
     }
 

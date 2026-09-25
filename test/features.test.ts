@@ -169,3 +169,26 @@ describe("leaderboard + room index (store via hub)", () => {
     expect(rooms.map((r) => r.code)).toContain(code);
   });
 });
+
+describe("chat", () => {
+  it("lets players and spectators send trimmed free text, keeping the last 40", async () => {
+    const { newRoom, joinRoom, watchRoom, sendChat, roomView } = await import("../src/game/room");
+    const room = newRoom("CHATS");
+    let n = 0;
+    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`);
+    watchRoom(room, "token-watch", "Khách", 1000);
+    expect(sendChat(room, "token-aaaa", "  chào   cả nhà \n ", 1001)).toEqual({ ok: true });
+    expect(sendChat(room, "token-watch", "hay quá 🐔", 1002)).toEqual({ ok: true });
+    expect(sendChat(room, "token-aaaa", "   ", 1003).ok).toBe(false);
+    expect(sendChat(room, "stranger-token", "hi", 1003).ok).toBe(false);
+    expect(room.chat?.map((m) => [m.name, m.text, m.playerId])).toEqual([
+      ["An", "chào cả nhà", "p1"],
+      ["Khách", "hay quá 🐔", null],
+    ]);
+    sendChat(room, "token-aaaa", "x".repeat(500), 1004);
+    expect(room.chat?.at(-1)?.text).toHaveLength(200);
+    for (let i = 0; i < 50; i++) sendChat(room, "token-aaaa", `m${i}`, 2000 + i);
+    expect(room.chat).toHaveLength(40);
+    expect(roomView(room, room.seats[0], 3000).chat.at(-1)?.text).toBe("m49");
+  });
+});

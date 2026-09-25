@@ -9,7 +9,7 @@ import {
   pruneReactions,
   pruneSpectators,
 } from "../game/room";
-import type { GameRecord, Reaction } from "../game/protocol";
+import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { scoreGame } from "../game/scoring";
 import { DEFAULT_START_CASH, DEFAULT_TIME_LIMIT, MAX_SEATS, MIN_PLAYERS, START_CASH_OPTIONS, TIME_LIMIT_OPTIONS } from "./board";
 import {
@@ -61,6 +61,7 @@ export interface TPRoom {
   gameSeq?: number;
   spectators?: Spectator[];
   reactions?: Reaction[];
+  chat?: ChatMessage[];
 }
 
 export function newTPRoom(code: string): TPRoom {
@@ -375,6 +376,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     history: (room.history ?? []).slice(-10),
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).map((x) => x.name),
     reactions: (room.reactions ?? []).filter((r) => now - r.at < REACTION_TTL_MS),
+    chat: room.chat ?? [],
   };
 }
 
