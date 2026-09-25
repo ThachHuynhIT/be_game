@@ -56,6 +56,11 @@ export type PendingKind =
   | "dig"
   | "grave"
   | "deadattack"
+  | "slap"
+  | "annoy"
+  | "steal"
+  | "rollcall"
+  | "corn"
   | "pair"
   | "triple"
   | "five";
@@ -146,6 +151,12 @@ export interface MeoState {
   visions?: Record<string, { text: string; at: number }>;
   /** Kicked players can't be brought back by Mèo Xác Sống. */
   noRevive?: string[];
+  /** Tát: extra turns waiting for a player, added when their turn starts. */
+  extra?: Record<string, number>;
+  /** Nổi cáu: cards that can't be used until the end of their owner's next turn. */
+  annoyed?: { player: string; card: number }[];
+  /** Xáo bài is locked until this player's turn ends (Điểm danh mèo / Lời nguyền ngô pha lê). */
+  noShuffle?: string | null;
 }
 
 export interface MeoOptions {
@@ -205,12 +216,22 @@ export const CARD_NAMES: Record<CardType, string> = {
   grave: "Đào mộ",
   deadattack: "Xác sống tấn công",
   clairvoyance: "Thấu thị",
+  slap: "Tát",
+  annoy: "Nổi cáu",
+  steal: "Cướp bài",
+  rollcall: "Điểm danh mèo",
+  corn: "Lời nguyền ngô pha lê",
 };
+
+const isAnnoyed = (s: MeoState, id: number) => !!s.annoyed?.some((a) => a.card === id);
+/** A usable (not annoyed) Gỡ bom in this hand. */
+const usableDefuse = (s: MeoState, player: string) => s.hands[player]?.find((c) => c.type === "defuse" && !isAnnoyed(s, c.id));
 
 /** Actions Nhân bản can copy (the effect is replayed with no target). */
 const CLONEABLE: CardType[] = [
   "attack", "skip", "shuffle", "future", "reverse", "bottom", "alter", "superskip", "swap", "catomic",
   "future5", "garbage", "potluck", "alternow", "bury", "personal", "share", "feed", "dig", "grave", "deadattack",
+  "slap", "rollcall", "corn",
 ];
 
 export function newMeoGame(
@@ -281,9 +302,16 @@ function endTurn(s: MeoState, now: number) {
   } else if (s.turn) {
     leaveTurn(s, s.turn);
     s.turn = nextAlive(s, s.turn);
-    s.turnsLeft = 1;
+    s.turnsLeft = 1 + takeExtra(s, s.turn);
   }
   s.turnDeadline = now + turnMs(s);
+}
+
+/** Tát: turns someone owes, collected when their turn starts. */
+function takeExtra(s: MeoState, player: string): number {
+  const n = s.extra?.[player] ?? 0;
+  if (n && s.extra) delete s.extra[player];
+  return n;
 }
 
 /** The turn moves away from `player`: their curse lifts, a future shared with them expires. */
@@ -293,6 +321,8 @@ function leaveTurn(s: MeoState, player: string) {
     if (s.curseOrder) delete s.curseOrder[player];
   }
   if (s.shared?.player === player) s.shared = null;
+  if (s.annoyed?.length) s.annoyed = s.annoyed.filter((a) => a.player !== player);
+  if (s.noShuffle === player) s.noShuffle = null;
 }
 
 /** Hand the turn to `to` with `turns` turns (attacks). */
@@ -300,7 +330,7 @@ function passTurnTo(s: MeoState, to: string, turns: number, now: number) {
   s.future = null;
   if (s.turn && s.turn !== to) leaveTurn(s, s.turn);
   s.turn = to;
-  s.turnsLeft = turns;
+  s.turnsLeft = turns + takeExtra(s, to);
   s.turnDeadline = now + turnMs(s);
 }
 
@@ -334,7 +364,7 @@ function settleHeld(s: MeoState, now: number, nameOf: NameOf) {
     if (count(hand, "exploding") <= count(hand, "streaking")) continue;
     const kitten = hand.find((c) => c.type === "exploding")!;
     takeFromHand(s, p, [kitten.id]);
-    const defuse = s.hands[p].find((c) => c.type === "defuse");
+    const defuse = usableDefuse(s, p);
     if (defuse) {
       takeFromHand(s, p, [defuse.id]);
       s.discard.push(defuse);
@@ -393,7 +423,7 @@ export interface PlayOptions {
   named?: unknown;
 }
 
-const TARGETED: PendingKind[] = ["favor", "pair", "triple", "targeted", "mark", "curse", "ilt", "zombie"];
+const TARGETED: PendingKind[] = ["favor", "pair", "triple", "targeted", "mark", "curse", "ilt", "zombie", "annoy", "steal"];
 /** Targeted cards that work even on a player with an empty hand. */
 const TARGET_ANY_HAND: PendingKind[] = ["targeted", "curse", "ilt"];
 
@@ -410,6 +440,8 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
   const nowCard = types.length === 1 && NOW_TYPES.includes(types[0]);
   if (s.turn !== player && !nowCard) return fail("Chưa đến lượt bạn");
   if (types.includes("exploding")) return fail("Mèo Nổ không đánh ra được — nó chỉ nằm yên nhờ Mèo Chạy Rông");
+  if ((chosen as MCard[]).some((c) => isAnnoyed(s, c.id))) return fail("Lá này đang bị Nổi cáu vô hiệu hoá tới hết lượt tới của bạn");
+  if (types.length === 1 && types[0] === "shuffle" && s.noShuffle) return fail("Xáo bài đang bị khoá");
 
   let kind: PendingKind;
   if (types.length === 1) {
@@ -476,6 +508,7 @@ export function playNope(s: MeoState, player: string, cardId: unknown, now: numb
   if (s.out.includes(player)) return fail("Bạn đã bị loại");
   const card = (s.hands[player] ?? []).find((c) => c.id === cardId && c.type === "nope");
   if (!card) return fail("Bạn không có lá “Không!”");
+  if (isAnnoyed(s, card.id)) return fail("Lá “Không!” này đang bị Nổi cáu vô hiệu hoá");
   takeFromHand(s, player, [card.id]);
   s.discard.push(card);
   s.pending.nopes += 1;
@@ -527,7 +560,7 @@ function receiveDraw(s: MeoState, player: string, card: MCard | undefined, now: 
     endTurn(s, now);
     return;
   }
-  const defuse = s.hands[player].find((c) => c.type === "defuse");
+  const defuse = usableDefuse(s, player);
   if (defuse) {
     takeFromHand(s, player, [defuse.id]);
     s.discard.push(defuse);
@@ -782,7 +815,7 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
       const theirs = s.hands[holder].find((c) => c.type === "barking")!;
       takeFromHand(s, holder, [theirs.id]);
       s.discard.push(theirs);
-      const defuse = s.hands[holder].find((c) => c.type === "defuse");
+      const defuse = usableDefuse(s, holder);
       if (defuse) {
         takeFromHand(s, holder, [defuse.id]);
         s.discard.push(defuse);
@@ -847,6 +880,46 @@ function resolvePending(s: MeoState, now: number, nameOf: NameOf, random: () => 
       const turns = attackTurns(s) + s.out.length;
       passTurnTo(s, victim, turns, now);
       log(s, now, `🧟⚔️ Xác sống tấn công! ${nameOf(victim)} phải chơi ${turns} lượt`);
+      break;
+    }
+    case "slap": {
+      // End one of your turns without drawing; the next player draws it for you.
+      const next = nextAlive(s, p.by);
+      if (s.turnsLeft > 1) {
+        s.turnsLeft -= 1;
+        s.extra = { ...s.extra, [next]: (s.extra?.[next] ?? 0) + 1 };
+        log(s, now, `👋 ${nameOf(p.by)} tát! ${nameOf(next)} sẽ phải rút hộ 1 lượt`);
+      } else {
+        passTurnTo(s, next, 2, now);
+        log(s, now, `👋 ${nameOf(p.by)} tát! ${nameOf(next)} phải rút hộ rồi chơi lượt của mình (${s.turnsLeft} lượt)`);
+      }
+      break;
+    }
+    case "annoy": {
+      const hand = p.target ? s.hands[p.target].filter((c) => !isAnnoyed(s, c.id)) : [];
+      const card = hand[Math.floor(random() * hand.length)];
+      if (card && p.target) {
+        s.annoyed = [...(s.annoyed ?? []), { player: p.target, card: card.id }];
+        log(s, now, `😾 ${nameOf(p.by)} làm ${nameOf(p.target)} nổi cáu — 1 lá của họ bị vô hiệu tới hết lượt tới`, "nope");
+      }
+      break;
+    }
+    case "steal":
+      if (p.target && stealRandom(s, p.target, p.by, random)) log(s, now, `🦝 ${nameOf(p.by)} cướp 1 lá của ${nameOf(p.target)}`, "steal");
+      break;
+    case "rollcall": {
+      const kittens = s.deck.filter((c) => KITTENS.includes(c.type));
+      s.deck = [...kittens, ...s.deck.filter((c) => !KITTENS.includes(c.type))];
+      const next = nextAlive(s, p.by);
+      s.noShuffle = next;
+      log(s, now, `📋 Điểm danh mèo! ${kittens.length} quả Mèo Nổ lên đầu chồng bài — ${nameOf(next)} không được Xáo bài`, "boom");
+      endTurn(s, now);
+      break;
+    }
+    case "corn": {
+      const next = nextAlive(s, p.by);
+      s.noShuffle = next;
+      log(s, now, `🌽 Lời nguyền ngô pha lê: không ai được Xáo bài cho tới hết lượt của ${nameOf(next)}`, "nope");
       break;
     }
     case "personal":

@@ -268,7 +268,7 @@ describe("settings", () => {
     expect(room.current?.turnDeadline).toBe(T + 45_000);
     expect(room.current?.nopeMs).toBe(5_000);
     expect(room.current?.expansions).toEqual(["streaking"]);
-    expect(meoView(room, room.seats[0], T).settings).toEqual({ turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1 });
+    expect(meoView(room, room.seats[0], T).settings).toEqual({ preset: "custom", turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1 });
   });
 });
 
@@ -499,5 +499,104 @@ describe("Zombie Kittens pack", () => {
     expect(playClairvoyance(s, "B", ids(s, "B", "clairvoyance")[0], T, names).ok).toBe(true);
     insertKitten(s, "A", 2, T, names);
     expect(s.visions?.B.text).toContain("lá thứ 3");
+  });
+});
+
+describe("Attacking Kittens pack", () => {
+  it("allows 7 players and adds two Mèo Nổ", () => {
+    const players = ["a", "b", "c", "d", "e", "f", "g"];
+    const { deck } = deal(players, ["attacking"], Math.random);
+    expect(deck.filter((c) => c.type === "exploding")).toHaveLength(8);
+    expect(() => newMeoGame(players, T, ["attacking"])).not.toThrow();
+    expect(() => newMeoGame(players, T, ["imploding"])).toThrow();
+  });
+
+  it("Tát ends your turn without drawing; the next player draws for you", () => {
+    const s = rig({ A: ["slap"], B: ["skip"], C: ["skip"] }, ["taco", "melon", "potato"], ["attacking"]);
+    playCards(s, "A", ids(s, "A", "slap"), {}, T, names);
+    settle(s);
+    expect(s.turn).toBe("B");
+    expect(s.turnsLeft).toBe(2);
+    expect(s.hands.A).toHaveLength(0);
+  });
+
+  it("Tát with turns left: the next player owes one more turn later", () => {
+    const s = rig({ A: ["slap"], B: ["skip"] }, ["taco", "melon", "potato"], ["attacking"]);
+    s.turnsLeft = 2;
+    playCards(s, "A", ids(s, "A", "slap"), {}, T, names);
+    settle(s);
+    expect(s.turn).toBe("A");
+    expect(s.turnsLeft).toBe(1);
+    drawCard(s, "A", T, names);
+    expect(s.turn).toBe("B");
+    expect(s.turnsLeft).toBe(2);
+  });
+
+  it("Nổi cáu disables a card (even a Gỡ bom) until the end of its owner's next turn", () => {
+    const s = rig({ A: ["annoy"], B: ["defuse"] }, ["taco", "exploding"], ["attacking"]);
+    playCards(s, "A", ids(s, "A", "annoy"), { target: "B" }, T, names);
+    settle(s);
+    expect(s.annoyed).toHaveLength(1);
+    drawCard(s, "A", T, names);
+    drawCard(s, "B", T, names); // Mèo Nổ with an annoyed Gỡ bom
+    expect(s.out).toEqual(["B"]);
+  });
+
+  it("Cướp bài takes a random card", () => {
+    const s = rig({ A: ["steal"], B: ["taco"] }, ["melon"], ["attacking"]);
+    playCards(s, "A", ids(s, "A", "steal"), { target: "B" }, T, names);
+    settle(s);
+    expect(s.hands.A.map((c) => c.type)).toEqual(["taco"]);
+  });
+});
+
+describe("Defending Kittens pack", () => {
+  it("Điểm danh mèo puts every Mèo Nổ on top, ends the turn and locks Xáo bài for the next player", () => {
+    const s = rig({ A: ["rollcall"], B: ["shuffle"] }, ["taco", "exploding", "melon", "exploding"], ["defending"]);
+    playCards(s, "A", ids(s, "A", "rollcall"), {}, T, names);
+    settle(s);
+    expect(s.deck.slice(0, 2).map((c) => c.type)).toEqual(["exploding", "exploding"]);
+    expect(s.turn).toBe("B");
+    expect(playCards(s, "B", ids(s, "B", "shuffle"), {}, T, names)).toEqual({ ok: false, error: "Xáo bài đang bị khoá" });
+  });
+
+  it("Lời nguyền ngô pha lê locks Xáo bài until the next player's turn ends", () => {
+    const s = rig({ A: ["corn", "shuffle"], B: ["shuffle"] }, ["taco", "melon", "potato"], ["defending"]);
+    playCards(s, "A", ids(s, "A", "corn"), {}, T, names);
+    settle(s);
+    expect(playCards(s, "A", ids(s, "A", "shuffle"), {}, T, names).ok).toBe(false);
+    drawCard(s, "A", T, names);
+    drawCard(s, "B", T, names);
+    expect(s.noShuffle).toBeNull();
+  });
+});
+
+describe("presets", () => {
+  it("a preset decides the packs and the player range; custom uses the ticked packs", () => {
+    let n = 0;
+    const room = newMeoRoom("ZOMBI");
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(meoCommand(room, "token-aaaa", { type: "settings", preset: "nope" }, T).ok).toBe(false);
+    expect(meoCommand(room, "token-aaaa", { type: "settings", preset: "zombiewar", expansions: ["barking"] }, T).ok).toBe(true);
+    // Zombie War is for 3–7 players.
+    expect(meoCommand(room, "token-aaaa", { type: "start" }, T)).toEqual({ ok: false, error: "Chế độ Zombie War cần ít nhất 3 người" });
+    meoCommand(room, "token-aaaa", { type: "settings", preset: "zombie" }, T);
+    meoCommand(room, "token-aaaa", { type: "start" }, T);
+    expect(room.current?.expansions).toEqual(["zombie"]);
+    const all = [...room.current!.deck, ...Object.values(room.current!.hands).flat()];
+    expect(all.some((c) => c.type === "zombie")).toBe(true);
+    expect(all.some((c) => c.type === "barking")).toBe(false);
+  });
+
+  it("custom plays the ticked packs, zombie included", () => {
+    let n = 0;
+    const room = newMeoRoom("CUSTM");
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    meoCommand(room, "token-aaaa", { type: "settings", preset: "custom", expansions: ["zombie", "barking"] }, T);
+    meoCommand(room, "token-aaaa", { type: "start" }, T);
+    expect(room.current?.expansions).toEqual(["barking", "zombie"]);
+    expect(meoView(room, room.seats[0], T).maxPlayers).toBe(6);
   });
 });

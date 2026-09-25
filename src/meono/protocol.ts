@@ -58,6 +58,8 @@ export interface MeoGameView {
     | null;
   /** Để đó cho tui: whose next draw goes to whom. */
   claims: { victim: string; by: string }[];
+  /** Điểm danh mèo / Lời nguyền ngô pha lê: Xáo bài can't be played right now. */
+  shuffleLocked: boolean;
   finished: string[];
   log: { id: number; at: number; text: string; tone?: string }[];
 }
@@ -71,8 +73,10 @@ export interface MeoRoomView {
   /** Packs enabled for the next game (host setting). */
   expansions: Expansion[];
   /** Other host settings. */
-  settings: { turnSeconds: number; nopeSeconds: number; first: number; second: number };
+  settings: { preset: string; turnSeconds: number; nopeSeconds: number; first: number; second: number };
   maxPlayers: number;
+  /** Fewest players the chosen preset allows. */
+  minPlayers: number;
   seats: (MeoSeatView | null)[];
   current: MeoGameView | null;
   /** Your hand; while cursed every card is {id: -position, type: "hidden"}. */
@@ -123,7 +127,7 @@ export type MeoCommand =
   | { type: "insert"; position: number }
   | { type: "give"; card: number }
   | { type: "alter"; order: number[] }
-  | { type: "settings"; expansions?: Expansion[]; turnSeconds?: number; nopeSeconds?: number; first?: number; second?: number }
+  | { type: "settings"; preset?: string; expansions?: Expansion[]; turnSeconds?: number; nopeSeconds?: number; first?: number; second?: number }
   | { type: "kick"; playerId: string }
   | { type: "dig"; keep: boolean }
   | { type: "see"; card: number };

@@ -47,10 +47,18 @@ export type CardType =
   | "clone"
   | "grave"
   | "deadattack"
-  | "clairvoyance";
+  | "clairvoyance"
+  // "Attacking Kittens" / "Defending Kittens" packs
+  | "slap"
+  | "annoy"
+  | "steal"
+  | "rollcall"
+  | "corn";
 
-export type Expansion = "imploding" | "streaking" | "barking" | "zombie";
-export const EXPANSIONS: Expansion[] = ["imploding", "streaking", "barking", "zombie"];
+export type Expansion = "imploding" | "streaking" | "barking" | "attacking" | "defending" | "zombie";
+export const EXPANSIONS: Expansion[] = ["imploding", "streaking", "barking", "attacking", "defending", "zombie"];
+/** Packs the host can tick in the "custom" preset. */
+export const SELECTABLE_PACKS: Expansion[] = ["imploding", "streaking", "barking", "attacking", "defending", "zombie"];
 
 export interface MCard {
   id: number;
@@ -59,6 +67,8 @@ export interface MCard {
   faceUp?: boolean;
   /** Đánh dấu: this card is shown to everyone while it stays in a hand. */
   marked?: boolean;
+  /** View only: Nổi cáu made this card unusable for now. */
+  annoyed?: boolean;
 }
 
 export const CAT_TYPES: CardType[] = ["taco", "melon", "potato", "beard", "rainbow"];
@@ -97,6 +107,11 @@ export const ACTION_TYPES: CardType[] = [
   "clone",
   "grave",
   "deadattack",
+  "slap",
+  "annoy",
+  "steal",
+  "rollcall",
+  "corn",
 ];
 
 /** Thấu thị: played while someone else is hiding a Mèo Nổ (see game.ts playClairvoyance). */
@@ -127,19 +142,23 @@ export const PACK_COUNTS: Record<Expansion, Partial<Record<CardType, number>>> =
   streaking: { streaking: 1, superskip: 1, future5: 1, swap: 3, garbage: 1, catomic: 1, mark: 3, curse: 2 },
   barking: { barking: 2, potluck: 2, ilt: 3, alternow: 2, bury: 2, personal: 3, share: 2 },
   zombie: { zombie: 4, feed: 3, dig: 4, clone: 3, grave: 2, deadattack: 2, clairvoyance: 2 },
+  // Attacking also adds two Mèo Nổ (see deal()).
+  attacking: { slap: 4, steal: 4, annoy: 3, alter: 2, defuse: 1 },
+  defending: { reverse: 2, future: 2, future5: 2, alter: 2, shuffle: 2, bottom: 1, annoy: 1, rollcall: 1, corn: 1 },
 };
 
 export const ALL_TYPES = [...new Set([...Object.keys(BASE_COUNTS), ...Object.values(PACK_COUNTS).flatMap((c) => Object.keys(c))])] as CardType[];
 
 export const MIN_PLAYERS = 2;
-/** Seats in a Mèo Nổ room; the base game plays up to 5, any expansion pack adds a 6th. */
-export const MAX_SEATS = 6;
-export const maxPlayers = (expansions: Expansion[]) => (expansions.length ? 6 : 5);
+/** Seats in a Mèo Nổ room (7 with Attacking Kittens). */
+export const MAX_SEATS = 7;
+/** Base 5; any pack 6; Attacking Kittens 7. */
+export const maxPlayers = (expansions: Expansion[]) => (expansions.includes("attacking") ? 7 : expansions.length ? 6 : 5);
 export const HAND_SIZE = 7;
 
-/** "chaos" was the old name of (part of) the Streaking pack. */
+/** Host-selectable packs; "chaos" was the old name of (part of) the Streaking pack. */
 export const cleanExpansions = (raw: unknown): Expansion[] =>
-  Array.isArray(raw) ? EXPANSIONS.filter((e) => raw.includes(e) || (e === "streaking" && raw.includes("chaos"))) : [];
+  Array.isArray(raw) ? SELECTABLE_PACKS.filter((e) => raw.includes(e) || (e === "streaking" && raw.includes("chaos"))) : [];
 
 export function shuffle<T>(items: T[], random: () => number = Math.random): T[] {
   const a = items.slice();
@@ -173,7 +192,7 @@ export function deal(
     random,
   );
   const defuses = make("defuse", Math.max(counts.defuse ?? 6, players.length));
-  const bombs = players.length - 1 + (expansions.includes("streaking") ? 1 : 0);
+  const bombs = players.length - 1 + (expansions.includes("streaking") ? 1 : 0) + (expansions.includes("attacking") ? 2 : 0);
   const implode = expansions.includes("imploding") ? 1 : 0;
   const kittens = [...make("exploding", Math.max(bombs - implode, 0)), ...make("imploding", implode)];
 
@@ -185,3 +204,34 @@ export function deal(
   const deck = shuffle([...base, ...kittens, ...spareDefuses], random);
   return { hands, deck };
 }
+
+/** Ready-made pack combinations the host picks from, each with the player counts it suits. */
+export interface Preset {
+  id: string;
+  name: string;
+  emoji: string;
+  group: "basic" | "advanced" | "chaos";
+  packs: Expansion[];
+  minPlayers: number;
+  maxPlayers: number;
+}
+
+export const PRESETS: Preset[] = [
+  { id: "classic", name: "Classic", emoji: "🐱", group: "basic", packs: [], minPlayers: 2, maxPlayers: 5 },
+  { id: "runaway", name: "Runaway Cats", emoji: "🏃", group: "basic", packs: ["streaking"], minPlayers: 2, maxPlayers: 5 },
+  { id: "implosion", name: "Implosion", emoji: "🌀", group: "basic", packs: ["imploding"], minPlayers: 2, maxPlayers: 6 },
+  { id: "zombie", name: "Zombie Apocalypse", emoji: "🧟", group: "basic", packs: ["zombie"], minPlayers: 2, maxPlayers: 5 },
+  { id: "war", name: "War of Cats", emoji: "⚔️🛡️", group: "basic", packs: ["attacking", "defending"], minPlayers: 3, maxPlayers: 7 },
+  { id: "catchaos", name: "Cat Chaos", emoji: "🏃🌀", group: "basic", packs: ["streaking", "imploding"], minPlayers: 3, maxPlayers: 6 },
+  { id: "ultimatechaos", name: "Ultimate Chaos", emoji: "🔥", group: "basic", packs: ["streaking", "imploding", "barking"], minPlayers: 3, maxPlayers: 6 },
+  { id: "aggressive", name: "Aggressive Cats", emoji: "⚔️🏃", group: "advanced", packs: ["attacking", "streaking"], minPlayers: 3, maxPlayers: 7 },
+  { id: "defchaos", name: "Defensive Chaos", emoji: "🛡️🌀", group: "advanced", packs: ["defending", "imploding"], minPlayers: 2, maxPlayers: 6 },
+  { id: "catfight", name: "Cat Fight", emoji: "🐶⚔️", group: "advanced", packs: ["barking", "attacking"], minPlayers: 3, maxPlayers: 7 },
+  { id: "zombiewar", name: "Zombie War", emoji: "🧟⚔️", group: "advanced", packs: ["zombie", "attacking"], minPlayers: 3, maxPlayers: 7 },
+  { id: "undead", name: "Undead Defense", emoji: "🧟🛡️", group: "advanced", packs: ["zombie", "defending"], minPlayers: 2, maxPlayers: 6 },
+  { id: "zombierun", name: "Zombie Run", emoji: "🧟🏃", group: "advanced", packs: ["zombie", "streaking"], minPlayers: 3, maxPlayers: 6 },
+  { id: "ultimatewar", name: "Ultimate War", emoji: "🔥", group: "chaos", packs: ["attacking", "defending", "streaking", "imploding"], minPlayers: 4, maxPlayers: 7 },
+  { id: "zombiechaos", name: "Zombie Apocalypse Chaos", emoji: "☠️", group: "chaos", packs: ["zombie", "streaking", "imploding", "barking"], minPlayers: 4, maxPlayers: 7 },
+  { id: "everything", name: "Everything", emoji: "💀", group: "chaos", packs: ["streaking", "imploding", "barking", "attacking", "zombie", "defending"], minPlayers: 4, maxPlayers: 7 },
+];
+export const PRESET_BY_ID: Record<string, Preset> = Object.fromEntries(PRESETS.map((p) => [p.id, p]));

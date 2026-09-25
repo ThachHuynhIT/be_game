@@ -11,7 +11,7 @@ import {
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, type RankPointsSetting, checkRankPoints, scoreByRank } from "../game/scoring";
-import { type Expansion, type MCard, MAX_SEATS, MIN_PLAYERS, cleanExpansions, maxPlayers } from "./cards";
+import { type Expansion, type MCard, MAX_SEATS, MIN_PLAYERS, PRESET_BY_ID, cleanExpansions, maxPlayers } from "./cards";
 import {
   type MeoState,
   type Result,
@@ -66,6 +66,8 @@ export interface MeoRoom {
 }
 
 export interface MeoSettings extends RankPointsSetting {
+  /** A PRESETS id, or "custom" to play the packs the host ticked. */
+  preset: string;
   /** Seconds per turn before the server draws for you. */
   turnSeconds: number;
   /** Seconds everyone gets to answer an action with “Không!”. */
@@ -74,7 +76,17 @@ export interface MeoSettings extends RankPointsSetting {
 
 export const TURN_SECONDS_OPTIONS = [15, 20, 30, 45, 60];
 export const NOPE_SECONDS_OPTIONS = [3.5, 5, 7, 10];
-export const DEFAULT_MEO_SETTINGS: MeoSettings = { turnSeconds: 30, nopeSeconds: 7, ...DEFAULT_RANK_POINTS };
+export const DEFAULT_MEO_SETTINGS: MeoSettings = { preset: "classic", turnSeconds: 30, nopeSeconds: 7, ...DEFAULT_RANK_POINTS };
+/** Packs actually dealt: the preset's, or the ticked ones for "custom". */
+export const packsInPlay = (room: MeoRoom): Expansion[] => {
+  const preset = PRESET_BY_ID[meoSettingsOf(room).preset];
+  return preset ? preset.packs : cleanExpansions(room.expansions ?? []);
+};
+/** Player counts the chosen preset suits (custom: 2 up to what the packs allow). */
+export const playerRange = (room: MeoRoom): [number, number] => {
+  const preset = PRESET_BY_ID[meoSettingsOf(room).preset];
+  return preset ? [preset.minPlayers, preset.maxPlayers] : [MIN_PLAYERS, maxPlayers(packsInPlay(room))];
+};
 export const meoSettingsOf = (room: MeoRoom): MeoSettings => ({ ...DEFAULT_MEO_SETTINGS, ...room.settings });
 
 export function newMeoRoom(code: string): MeoRoom {
@@ -144,11 +156,12 @@ function startMeo(room: MeoRoom, host: MeoPlayer, now: number): Result {
   if (room.current?.status === "playing") return { ok: false, error: "Ván đang diễn ra" };
   dropGoneSeats(room, now);
   const players = room.seats.filter((p): p is MeoPlayer => !!p).map((p) => p.id);
-  const expansions = room.expansions ?? [];
-  if (players.length < MIN_PLAYERS) return { ok: false, error: `Cần ít nhất ${MIN_PLAYERS} người` };
-  if (players.length > maxPlayers(expansions)) {
-    return { ok: false, error: `Bàn cơ bản tối đa ${maxPlayers(expansions)} người — bật một gói mở rộng để chơi 6 người` };
-  }
+  const expansions = packsInPlay(room);
+  const [min, max] = playerRange(room);
+  const preset = PRESET_BY_ID[meoSettingsOf(room).preset];
+  const label = preset ? `Chế độ ${preset.name}` : "Bộ gói đã chọn";
+  if (players.length < min) return { ok: false, error: `${label} cần ít nhất ${min} người` };
+  if (players.length > max) return { ok: false, error: `${label} chỉ dành cho tối đa ${max} người` };
   const settings = meoSettingsOf(room);
   room.current = newMeoGame(players, now, expansions, Math.random, {
     turnMs: settings.turnSeconds * 1000,
@@ -170,11 +183,19 @@ function setMeoSettings(room: MeoRoom, host: MeoPlayer, msg: Record<string, unkn
     if (!NOPE_SECONDS_OPTIONS.includes(msg.nopeSeconds as number)) return { ok: false, error: "Thời gian “Không!” không hợp lệ" };
     next.nopeSeconds = msg.nopeSeconds as number;
   }
+  if (msg.preset !== undefined) {
+    if (msg.preset !== "custom" && !PRESET_BY_ID[msg.preset as string]) return { ok: false, error: "Chế độ không hợp lệ" };
+    next.preset = msg.preset as string;
+  }
   if (msg.first !== undefined) next.first = msg.first as number;
   if (msg.second !== undefined) next.second = msg.second as number;
   const err = checkRankPoints(next.first, next.second);
   if (err) return { ok: false, error: err };
-  if (msg.expansions !== undefined) room.expansions = cleanExpansions(msg.expansions);
+  if (msg.expansions !== undefined) {
+    room.expansions = cleanExpansions(msg.expansions);
+    // Ticking packs by hand means a custom mix.
+    if (msg.preset === undefined) next.preset = "custom";
+  }
   room.settings = next;
   return { ok: true };
 }
@@ -326,7 +347,8 @@ function dropGoneSeats(room: MeoRoom, now: number): boolean {
 
 /** Your hand — face down (blind positions) while you are cursed. */
 function handFor(g: MeoState, id: string): MCard[] {
-  const hand = g.hands[id] ?? [];
+  const annoyed = new Set((g.annoyed ?? []).map((a) => a.card));
+  const hand = (g.hands[id] ?? []).map((c) => (annoyed.has(c.id) ? { ...c, annoyed: true } : c));
   if (!g.cursed?.includes(id)) return hand;
   const order = g.curseOrder?.[id] ?? hand.map((c) => c.id);
   return order.map((_, i) => ({ id: -(i + 1), type: "hidden" as unknown as MCard["type"] }));
@@ -342,7 +364,8 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
     serverTime: now,
     expansions: room.expansions ?? [],
     settings: meoSettingsOf(room),
-    maxPlayers: maxPlayers(room.expansions ?? []),
+    maxPlayers: playerRange(room)[1],
+    minPlayers: playerRange(room)[0],
     seats: room.seats.map((p) =>
       p
         ? {
@@ -385,6 +408,7 @@ export function meoView(room: MeoRoom, player: MeoPlayer | null, now: number): M
                 : { kind: g.choice.kind, player: g.choice.player, deadline: g.choice.deadline, ...(g.choice.kind === "alter" && g.choice.share ? { share: true } : {}) }
             : null,
           claims: g.claims ?? [],
+          shuffleLocked: !!g.noShuffle,
           finished: g.finished,
           log: g.log,
         }
@@ -412,7 +436,7 @@ export function meoSummary(room: MeoRoom, now: number): MeoRoomSummary {
   return {
     code: room.code,
     status: room.current?.status === "playing" ? "playing" : "waiting",
-    expansions: room.expansions ?? [],
+    expansions: packsInPlay(room),
     players: seated.map((p) => ({ name: p.name, connected: isOnline(p, now), points: p.points })),
     spectators: (room.spectators ?? []).filter((x) => now - x.lastSeen < PRESENCE_TIMEOUT_MS).length,
     games: room.gameSeq ?? 0,
