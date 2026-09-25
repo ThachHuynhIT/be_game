@@ -7,13 +7,7 @@
     "api/ws.ts": {
       "maxDuration": 300
     },
-    "api/meono/ws.ts": {
-      "maxDuration": 300
-    },
-    "api/typhu/ws.ts": {
-      "maxDuration": 300
-    },
-    "api/splendor/ws.ts": {
+    "api/[game]/[kind].ts": {
       "maxDuration": 300
     }
   }
