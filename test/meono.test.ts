@@ -270,3 +270,29 @@ describe("settings", () => {
     expect(meoView(room, room.seats[0], T).settings).toEqual({ turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1 });
   });
 });
+
+describe("hiding the kitten", () => {
+  it("keeps it out of the top and bottom 10% when the deck is big enough", async () => {
+    const { insertRange } = await import("../src/meono/game");
+    expect(insertRange(5)).toEqual([0, 5]); // too small: anywhere
+    expect(insertRange(9)).toEqual([0, 9]);
+    expect(insertRange(10)).toEqual([1, 9]);
+    expect(insertRange(40)).toEqual([4, 36]);
+  });
+
+  it("rejects a position in the forbidden zone and accepts one inside", () => {
+    const s = rig({ A: ["skip"], B: ["skip"] }, Array.from({ length: 30 }, () => "taco"));
+    s.choice = { kind: "defuse", player: "A", kitten: card("exploding"), deadline: T + CHOICE_MS };
+    expect(insertKitten(s, "A", 0, T, names).ok).toBe(false);
+    expect(insertKitten(s, "A", 30, T, names).ok).toBe(false);
+    expect(insertKitten(s, "A", 3, T, names).ok).toBe(true);
+    expect(s.deck[3].type).toBe("exploding");
+  });
+
+  it("the timeout hides it inside the allowed zone too", () => {
+    const s = rig({ A: ["skip"], B: ["skip"] }, Array.from({ length: 30 }, () => "taco"));
+    s.choice = { kind: "defuse", player: "A", kitten: card("exploding"), deadline: T + 1 };
+    tickGame(s, T + 2, names, never, () => 0);
+    expect(s.deck.findIndex((c) => c.type === "exploding")).toBe(3);
+  });
+});

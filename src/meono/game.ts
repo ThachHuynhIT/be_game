@@ -19,7 +19,7 @@ import {
  */
 
 /** After an action card, everyone gets this long to answer with "Không!" (Nope). Each Nope restarts it. */
-export const NOPE_WINDOW_MS = 3_500;
+export const NOPE_WINDOW_MS = 7_000;
 export const TURN_MS = 30_000;
 /** Time to answer a choice (hide a kitten, give a card for Xin xỏ, reorder the future). */
 export const CHOICE_MS = 15_000;
@@ -393,10 +393,24 @@ export function drawCard(s: MeoState, player: string, now: number, nameOf: NameO
 }
 
 /** Hide the pending kitten back in the deck (0 = top). */
+/**
+ * Where a kitten may go back (0 = top, deckLength = bottom): not in the top or bottom 10% of the
+ * deck. When the deck is too small for 10% to be a whole card, anywhere is allowed.
+ */
+export function insertRange(deckLength: number): [number, number] {
+  const margin = Math.floor(deckLength * 0.1);
+  return margin < 1 ? [0, deckLength] : [margin, deckLength - margin];
+}
+
 export function insertKitten(s: MeoState, player: string, position: unknown, now: number, nameOf: NameOf): Result {
   const c = s.choice;
   if (!c || (c.kind !== "defuse" && c.kind !== "implode") || c.player !== player) return fail("Không có Mèo Nổ để nhét lại");
-  const pos = Math.max(0, Math.min(s.deck.length, Math.floor(Number(position)) || 0));
+  const [min, max] = insertRange(s.deck.length);
+  const wanted = Math.floor(Number(position));
+  if (Number.isFinite(wanted) && (wanted < min || wanted > max)) {
+    return fail(`Chỉ được nhét từ lá thứ ${min + 1} đến lá thứ ${max + 1} (không nằm trong 10% trên cùng / dưới cùng)`);
+  }
+  const pos = Math.max(min, Math.min(max, Number.isFinite(wanted) ? wanted : min));
   s.deck.splice(pos, 0, c.kitten);
   s.choice = null;
   log(
@@ -562,7 +576,10 @@ export function tickGame(s: MeoState, now: number, nameOf: NameOf, absent: (id: 
       const c = s.choice;
       const owner = choiceOwner(c);
       if (now < c.deadline && !absent(owner)) break;
-      if (c.kind === "defuse" || c.kind === "implode") insertKitten(s, owner, Math.floor(random() * (s.deck.length + 1)), now, nameOf);
+      if (c.kind === "defuse" || c.kind === "implode") {
+        const [min, max] = insertRange(s.deck.length);
+        insertKitten(s, owner, min + Math.floor(random() * (max - min + 1)), now, nameOf);
+      }
       else if (c.kind === "alter") alterFuture(s, owner, c.cards.map((x) => x.id), now, nameOf);
       else {
         const hand = s.hands[owner];

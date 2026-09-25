@@ -68,8 +68,8 @@ export interface MeoSettings extends RankPointsSetting {
 }
 
 export const TURN_SECONDS_OPTIONS = [15, 20, 30, 45, 60];
-export const NOPE_SECONDS_OPTIONS = [2, 3.5, 5, 7];
-export const DEFAULT_MEO_SETTINGS: MeoSettings = { turnSeconds: 30, nopeSeconds: 3.5, ...DEFAULT_RANK_POINTS };
+export const NOPE_SECONDS_OPTIONS = [3.5, 5, 7, 10];
+export const DEFAULT_MEO_SETTINGS: MeoSettings = { turnSeconds: 30, nopeSeconds: 7, ...DEFAULT_RANK_POINTS };
 export const meoSettingsOf = (room: MeoRoom): MeoSettings => ({ ...DEFAULT_MEO_SETTINGS, ...room.settings });
 
 export function newMeoRoom(code: string): MeoRoom {
