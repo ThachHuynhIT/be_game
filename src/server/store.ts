@@ -16,7 +16,7 @@ export interface CodedRoom {
   code: string;
 }
 
-export type GameKind = "tienlen" | "meono" | "typhu" | "splendor";
+export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang";
 
 export interface StoredRoom<S extends CodedRoom = CodedRoom> {
   state: S;

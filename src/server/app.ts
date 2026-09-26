@@ -28,6 +28,9 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/splendor/ws": { game: "splendor", kind: "ws" },
   "/api/splendor/rooms": { game: "splendor", kind: "rooms" },
   "/api/splendor/leaderboard": { game: "splendor", kind: "leaderboard" },
+  "/api/bang/ws": { game: "bang", kind: "ws" },
+  "/api/bang/rooms": { game: "bang", kind: "rooms" },
+  "/api/bang/leaderboard": { game: "bang", kind: "leaderboard" },
 };
 
 export function createGameServer(): Server {
