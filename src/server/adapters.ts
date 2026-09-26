@@ -67,6 +67,21 @@ import {
   tickSP,
 } from "../splendor/room";
 import type { SPCommand } from "../splendor/protocol";
+import {
+  type BangRoom,
+  bangCommand,
+  bangHeartbeat,
+  bangSummary,
+  bangView,
+  findByToken as findBangByToken,
+  isBangActive,
+  joinBang,
+  leaveBang,
+  newBangRoom,
+  nextBangTickAt,
+  tickBang,
+} from "../bang/room";
+import type { BangCommand } from "../bang/protocol";
 import type { CodedRoom, GameKind } from "./store";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -207,9 +222,33 @@ export const splendorAdapter: GameAdapter<SPRoom> = {
   lastRecord: (room) => room.history?.[room.history.length - 1],
 };
 
+export const bangAdapter: GameAdapter<BangRoom> = {
+  game: "bang",
+  newRoom: newBangRoom,
+  join: (room, token, name, now, newId) => joinBang(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: bangHeartbeat,
+  leave: leaveBang,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => bangCommand(room, token, msg as unknown as BangCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findBangByToken(room, token);
+      return p ? bangView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? bangView(room, null, now) : null;
+  },
+  tick: tickBang,
+  nextTickAt: nextBangTickAt,
+  summary: bangSummary,
+  isActive: isBangActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
 export const ADAPTERS: Record<GameKind, GameAdapter> = {
   tienlen: tienlenAdapter as unknown as GameAdapter,
   meono: meonoAdapter as unknown as GameAdapter,
   typhu: typhuAdapter as unknown as GameAdapter,
   splendor: splendorAdapter as unknown as GameAdapter,
+  bang: bangAdapter as unknown as GameAdapter,
 };
