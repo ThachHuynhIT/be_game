@@ -120,7 +120,30 @@ export interface TPState {
   doubleGo?: boolean;
   /** Taxes and fines pile up on Nghỉ chân; landing there collects them (null = rule off). */
   pot?: number | null;
+  /** House rules for building, selling land and bankruptcy (missing on older saved games). */
+  rules?: TPRules;
 }
+
+/**
+ * - buildRule "even": the classic rule, build evenly across the colour group.
+ *   "chain": house 2 needs 2 lots of the group with a house, house 3 needs 2 lots with 2 houses,
+ *   house 4 needs every lot at 3, a hotel needs every lot at 4.
+ * - needGroup: owning the whole colour group is required before building.
+ * - sellLand: land (with no houses on its group) can be sold back to the bank for half its price.
+ * - bankruptTo "bank": a bankrupt player's land goes back on the market (others can buy it
+ *   again); "creditor": it all goes to whoever they owed.
+ */
+export interface TPRules {
+  buildRule: "even" | "chain";
+  needGroup: boolean;
+  sellLand: boolean;
+  bankruptTo: "bank" | "creditor";
+}
+
+export const DEFAULT_TP_RULES: TPRules = { buildRule: "even", needGroup: true, sellLand: true, bankruptTo: "bank" };
+/** Games saved before house rules existed keep the old behaviour. */
+const LEGACY_RULES: TPRules = { buildRule: "even", needGroup: true, sellLand: false, bankruptTo: "creditor" };
+const rulesOf = (s: TPState): TPRules => s.rules ?? LEGACY_RULES;
 
 const stepMs = (s: TPState) => s.stepMs ?? STEP_MS;
 
@@ -144,7 +167,7 @@ function shuffled(n: number, random: Random) {
 export function newTPGame(
   players: string[],
   now: number,
-  opts: { startCash: number; timeLimitMin: number; stepMs?: number; doubleGo?: boolean; parkingPot?: boolean },
+  opts: { startCash: number; timeLimitMin: number; stepMs?: number; doubleGo?: boolean; parkingPot?: boolean; rules?: Partial<TPRules> },
   random: Random = Math.random,
 ): TPState {
   if (players.length < MIN_PLAYERS) throw new Error("need at least 2 players");
@@ -159,6 +182,7 @@ export function newTPGame(
     ...(opts.stepMs ? { stepMs: opts.stepMs } : {}),
     ...(opts.doubleGo ? { doubleGo: true } : {}),
     pot: opts.parkingPot ? 0 : null,
+    rules: { ...DEFAULT_TP_RULES, ...opts.rules },
     dice: null,
     doubles: 0,
     rollAgain: false,
@@ -457,8 +481,10 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
     d.houses = 0;
   }
   const toPlayer = creditor && !s.ps[creditor].bankrupt ? creditor : null;
+  // Land goes to the creditor only under that house rule; otherwise it's back on the market.
+  const landTo = rulesOf(s).bankruptTo === "creditor" ? toPlayer : null;
   for (const pos of ownedBy(s, id)) {
-    if (toPlayer) s.deeds[pos].owner = toPlayer;
+    if (landTo) s.deeds[pos].owner = landTo;
     else delete s.deeds[pos];
   }
   if (toPlayer) s.ps[toPlayer].cash += Math.max(0, p.cash);
@@ -469,7 +495,12 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   p.bankrupt = true;
   s.out.push(id);
   if (s.trade && (s.trade.from === id || s.trade.to === id)) s.trade = null;
-  log(s, now, `💸 ${names(id)} phá sản${toPlayer ? `, toàn bộ tài sản về tay ${names(toPlayer)}` : ""}!`, "bad");
+  log(
+    s,
+    now,
+    `💸 ${names(id)} phá sản${landTo ? `, toàn bộ tài sản về tay ${names(landTo)}` : toPlayer ? ` — tiền còn lại về tay ${names(toPlayer)}, đất trả về ngân hàng` : " — đất trả về ngân hàng"}!`,
+    "bad",
+  );
   if (active(s).length <= 1) {
     endGame(s, now, names);
     return;
@@ -668,19 +699,87 @@ function canManage(s: TPState, id: string, pos: number): Result | null {
   return null;
 }
 
+/** Houses on each lot of `pos`'s group that `id` owns (0 for lots owned by others / nobody). */
+function groupHouses(s: TPState, id: string, group: number[]) {
+  return group.map((g) => (s.deeds[g]?.owner === id ? s.deeds[g].houses : 0));
+}
+
+/** Under the chain rule: is a lot allowed to stand at `level` houses, given the whole group? */
+function chainAllows(level: number, houses: number[]) {
+  const atLeast = (n: number) => houses.filter((h) => h >= n).length;
+  if (level === 2) return atLeast(1) >= 2;
+  if (level === 3) return atLeast(2) >= 2;
+  if (level === 4) return atLeast(3) === houses.length;
+  if (level >= 5) return atLeast(4) === houses.length;
+  return true;
+}
+
+/** Why `id` can't build on `pos` right now (turn / phase aside), or null when they can. */
+export function buildBlocker(s: TPState, id: string, pos: number): string | null {
+  const b = BOARD[pos];
+  if (b.kind !== "prop") return "Chỉ xây nhà trên đất thành phố";
+  const d = s.deeds[pos];
+  if (!d || d.owner !== id) return "Đây không phải đất của bạn";
+  const r = rulesOf(s);
+  if (r.needGroup && !ownsGroup(s, id, pos)) return "Cần sở hữu cả nhóm màu mới được xây";
+  const group = groupPositions(b.group);
+  if (group.some((g) => s.deeds[g]?.owner === id && s.deeds[g].mortgaged)) return "Có đất trong nhóm đang thế chấp";
+  if (d.houses >= MAX_HOUSES) return "Đã có khách sạn";
+  const houses = groupHouses(s, id, group);
+  if (r.buildRule === "even") {
+    if (d.houses > Math.min(...houses)) return "Phải xây đều các ô trong nhóm";
+  } else {
+    const after = houses.map((h, i) => (group[i] === pos ? h + 1 : h));
+    if (!chainAllows(d.houses + 1, after)) {
+      return (
+        ["", "", "Nhà 2: cần ít nhất 2 ô trong nhóm đã có nhà", "Nhà 3: cần ít nhất 2 ô trong nhóm đã có 2 nhà", "Nhà 4: mọi ô trong nhóm phải có 3 nhà", "Khách sạn: mọi ô trong nhóm phải có 4 nhà"][
+          d.houses + 1
+        ] ?? "Chưa đủ điều kiện xây"
+      );
+    }
+  }
+  if (s.ps[id].cash < b.house) return `Cần ${money(b.house)} để xây`;
+  return null;
+}
+
+/** Why `id` can't sell a house on `pos`, or null when they can. */
+export function sellBlocker(s: TPState, id: string, pos: number): string | null {
+  const b = BOARD[pos];
+  const d = s.deeds[pos];
+  if (b.kind !== "prop" || !d || d.owner !== id || d.houses === 0) return "Không có nhà để bán";
+  const group = groupPositions(b.group);
+  const houses = groupHouses(s, id, group);
+  if (rulesOf(s).buildRule === "even") {
+    if (d.houses < Math.max(...houses)) return "Phải bán đều các ô trong nhóm";
+    return null;
+  }
+  // Chain: after the sale every lot must still meet the rule for the houses it keeps.
+  const after = houses.map((h, i) => (group[i] === pos ? h - 1 : h));
+  if (!after.every((h) => chainAllows(h, after))) return "Bán nhà ở ô cao hơn trong nhóm trước";
+  return null;
+}
+
+/** Why `id` can't sell the land `pos` back to the bank, or null when they can. */
+export function sellLandBlocker(s: TPState, id: string, pos: number): string | null {
+  if (!rulesOf(s).sellLand) return "Luật bàn không cho bán đất";
+  const d = s.deeds[pos];
+  if (!d || d.owner !== id) return "Đây không phải đất của bạn";
+  if (d.mortgaged) return "Chuộc lại đất trước khi bán";
+  const b = BOARD[pos];
+  if (b.kind === "prop" && groupPositions(b.group).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) return "Bán hết nhà trong nhóm trước";
+  return null;
+}
+
+export const landSalePrice = (pos: number) => Math.floor((BOARD[pos] as Ownable).price / 2);
+
 export function build(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
   if (bad) return bad;
   if (s.phase === "debt") return fail("Đang nợ — không xây được");
-  const b = BOARD[pos];
-  if (b.kind !== "prop") return fail("Chỉ xây nhà trên đất thành phố");
-  if (!ownsGroup(s, id, pos)) return fail("Cần sở hữu cả nhóm màu mới được xây");
-  const group = groupPositions(b.group);
-  if (group.some((g) => s.deeds[g].mortgaged)) return fail("Có đất trong nhóm đang thế chấp");
+  const why = buildBlocker(s, id, pos);
+  if (why) return fail(why);
+  const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  if (d.houses >= MAX_HOUSES) return fail("Đã có khách sạn");
-  if (d.houses > Math.min(...group.map((g) => s.deeds[g].houses))) return fail("Phải xây đều các ô trong nhóm");
-  if (s.ps[id].cash < b.house) return fail(`Cần ${money(b.house)} để xây`);
   s.ps[id].cash -= b.house;
   d.houses += 1;
   log(s, now, `🏠 ${names(id)} xây ${d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`} ở ${b.name}`, "buy");
@@ -690,14 +789,26 @@ export function build(s: TPState, id: string, pos: number, now: number, names: N
 export function sellHouse(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
   if (bad) return bad;
-  const b = BOARD[pos];
+  const why = sellBlocker(s, id, pos);
+  if (why) return fail(why);
+  const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  if (b.kind !== "prop" || d.houses === 0) return fail("Không có nhà để bán");
-  const group = groupPositions(b.group);
-  if (d.houses < Math.max(...group.map((g) => s.deeds[g].houses))) return fail("Phải bán đều các ô trong nhóm");
   d.houses -= 1;
   s.ps[id].cash += b.house / 2;
   log(s, now, `${names(id)} bán 1 nhà ở ${b.name}, thu ${money(b.house / 2)}`, "info");
+  return OK;
+}
+
+/** Sell a piece of land back to the bank for half its price; it's back on the market. */
+export function sellLand(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
+  const bad = canManage(s, id, pos);
+  if (bad) return bad;
+  const why = sellLandBlocker(s, id, pos);
+  if (why) return fail(why);
+  const price = landSalePrice(pos);
+  delete s.deeds[pos];
+  s.ps[id].cash += price;
+  log(s, now, `🏷️ ${names(id)} bán ${BOARD[pos].name} cho ngân hàng, thu ${money(price)} — ai cũng mua lại được`, "info");
   return OK;
 }
 

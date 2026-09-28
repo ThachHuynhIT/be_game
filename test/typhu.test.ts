@@ -6,6 +6,7 @@ import {
   type TPState,
   answerTrade,
   build,
+  buildBlocker,
   buySquare,
   declareBankrupt,
   endTurn,
@@ -16,7 +17,9 @@ import {
   proposeTrade,
   rentFor,
   rollDice,
+  sellBlocker,
   sellHouse,
+  sellLand,
   skipBuy,
   tickGame,
   unmortgage,
@@ -183,6 +186,7 @@ describe("cards", () => {
 describe("debt and bankruptcy", () => {
   it("opens a debt, settles after mortgaging, and bankrupts to the creditor", () => {
     const s = game(["a", "b", "c"]);
+    s.rules = { ...s.rules!, bankruptTo: "creditor" };
     s.deeds[39] = { owner: "b", houses: 5, mortgaged: false };
     s.deeds[37] = { owner: "b", houses: 5, mortgaged: false };
     s.deeds[1] = { owner: "a", houses: 0, mortgaged: false };
@@ -196,6 +200,24 @@ describe("debt and bankruptcy", () => {
     expect(s.deeds[1].owner).toBe("b");
     expect(s.ps.b.cash).toBe(1600);
     expect(s.turn).toBe("b");
+  });
+
+  it("by default a bankrupt player's land goes back on the market; the creditor gets the cash", () => {
+    const s = game(["a", "b", "c"]);
+    s.deeds[39] = { owner: "b", houses: 5, mortgaged: false };
+    s.deeds[1] = { owner: "a", houses: 0, mortgaged: true };
+    s.ps.a.cash = 100;
+    s.ps.a.pos = 33;
+    rollDice(s, "a", T, names, dice(2, 4));
+    declareBankrupt(s, "a", T, names);
+    expect(s.deeds[1]).toBeUndefined();
+    expect(s.ps.b.cash).toBe(1600);
+    // Land that's free again can be bought normally.
+    s.turn = "c";
+    s.ps.c.pos = 1;
+    s.phase = "buy";
+    expect(buySquare(s, "c", T, names).ok).toBe(true);
+    expect(s.deeds[1].owner).toBe("c");
   });
 
   it("ends the game when one player is left", () => {
@@ -215,6 +237,85 @@ describe("debt and bankruptcy", () => {
     tickGame(s, T + 20 * 60_000, names, never);
     expect(s.status).toBe("ended");
     expect(s.finished).toEqual(["b", "a"]);
+  });
+});
+
+describe("house rules", () => {
+  // Brown group: 1, 3 · light blue: 6, 8, 9
+  const own = (s: TPState, id: string, ...pos: number[]) => pos.forEach((p) => (s.deeds[p] = { owner: id, houses: 0, mortgaged: false }));
+
+  it("even rule: must build evenly", () => {
+    const s = game();
+    own(s, "a", 6, 8, 9);
+    expect(build(s, "a", 6, T, names).ok).toBe(true);
+    expect(build(s, "a", 6, T, names).ok).toBe(false);
+    expect(buildBlocker(s, "a", 6)).toBe("Phải xây đều các ô trong nhóm");
+  });
+
+  it("chain rule: 2nd house needs 2 lots with a house, 4th needs all at 3, hotel needs all at 4", () => {
+    const s = game();
+    s.ps.a.cash = 100_000;
+    s.rules = { ...s.rules!, buildRule: "chain" };
+    own(s, "a", 6, 8, 9);
+    expect(build(s, "a", 6, T, names).ok).toBe(true);
+    expect(buildBlocker(s, "a", 6)).toMatch(/Nhà 2/);
+    expect(build(s, "a", 8, T, names).ok).toBe(true);
+    expect(build(s, "a", 6, T, names).ok).toBe(true); // 2 lots have a house → house 2 ok, lot 9 still empty
+    expect(buildBlocker(s, "a", 6)).toMatch(/Nhà 3/);
+    expect(build(s, "a", 8, T, names).ok).toBe(true);
+    expect(build(s, "a", 6, T, names).ok).toBe(true); // 3 houses
+    expect(buildBlocker(s, "a", 6)).toMatch(/Nhà 4/); // lot 9 has none
+    for (let i = 0; i < 3; i++) build(s, "a", 9, T, names);
+    build(s, "a", 8, T, names);
+    expect(s.deeds[9].houses).toBe(3);
+    expect(build(s, "a", 6, T, names).ok).toBe(true); // all at ≥3 → house 4
+    expect(buildBlocker(s, "a", 6)).toMatch(/Khách sạn/);
+    build(s, "a", 8, T, names);
+    build(s, "a", 9, T, names);
+    expect(build(s, "a", 6, T, names).ok).toBe(true);
+    expect(s.deeds[6].houses).toBe(5);
+    // Selling must keep the chain valid: lot 9 can't drop below 4 while 6 has a hotel.
+    expect(sellBlocker(s, "a", 9)).not.toBeNull();
+    expect(sellHouse(s, "a", 6, T, names).ok).toBe(true);
+  });
+
+  it("without the full-group rule a single lot can get its first house", () => {
+    const s = game();
+    s.rules = { ...s.rules!, needGroup: false, buildRule: "chain" };
+    own(s, "a", 6);
+    expect(build(s, "a", 6, T, names).ok).toBe(true);
+    expect(buildBlocker(s, "a", 6)).toMatch(/Nhà 2/);
+    const strict = game();
+    own(strict, "a", 6);
+    expect(buildBlocker(strict, "a", 6)).toBe("Cần sở hữu cả nhóm màu mới được xây");
+  });
+
+  it("land can be sold back to the bank for half its price when the rule is on", () => {
+    const s = game();
+    own(s, "a", 6, 8, 9);
+    build(s, "a", 6, T, names);
+    expect(sellLand(s, "a", 8, T, names).ok).toBe(false); // houses in the group
+    sellHouse(s, "a", 6, T, names);
+    const cash = s.ps.a.cash;
+    expect(sellLand(s, "a", 8, T, names).ok).toBe(true);
+    expect(s.deeds[8]).toBeUndefined();
+    expect(s.ps.a.cash).toBe(cash + (BOARD[8] as { price: number }).price / 2);
+    s.rules = { ...s.rules!, sellLand: false };
+    expect(sellLand(s, "a", 9, T, names).ok).toBe(false);
+  });
+
+  it("settings carry the house rules into the game and the view lists what I can do", () => {
+    let n = 0;
+    const room = newTPRoom("RULES");
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" }, T).ok).toBe(true);
+    expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
+    expect(room.current!.rules).toEqual({ buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" });
+    room.current!.deeds[6] = { owner: "p1", houses: 0, mortgaged: false };
+    const v = tpView(room, room.seats[0], T);
+    expect(v.current!.manage![6]).toEqual({ build: null, sell: "Không có nhà để bán", sellLand: "Luật bàn không cho bán đất", landPrice: 50 });
+    expect(tpView(room, room.seats[1], T).current!.manage![6]).toBeUndefined();
   });
 });
 

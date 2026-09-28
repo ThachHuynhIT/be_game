@@ -16,7 +16,9 @@ import {
   type Result,
   type TPState,
   answerTrade,
+  DEFAULT_TP_RULES,
   build,
+  buildBlocker,
   buySquare,
   declareBankrupt,
   endTurn,
@@ -29,7 +31,11 @@ import {
   payJail,
   proposeTrade,
   rollDice,
+  landSalePrice,
+  sellBlocker,
   sellHouse,
+  sellLand,
+  sellLandBlocker,
   skipBuy,
   tickGame,
   unmortgage,
@@ -72,6 +78,7 @@ export const DEFAULT_TP_SETTINGS: TPSettings = {
   doubleGo: false,
   parkingPot: false,
   ...DEFAULT_RANK_POINTS,
+  ...DEFAULT_TP_RULES,
 };
 /** Rooms saved before a setting existed get its default. */
 export const tpSettingsOf = (room: TPRoom): TPSettings => ({ ...DEFAULT_TP_SETTINGS, ...room.settings });
@@ -160,6 +167,7 @@ function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
     stepMs: st.stepSeconds * 1000,
     doubleGo: st.doubleGo,
     parkingPot: st.parkingPot,
+    rules: { buildRule: st.buildRule, needGroup: st.needGroup, sellLand: st.sellLand, bankruptTo: st.bankruptTo },
   });
   return { ok: true };
 }
@@ -182,6 +190,16 @@ function setSettings(room: TPRoom, host: TPPlayer, msg: Record<string, unknown>)
   }
   if (msg.doubleGo !== undefined) next.doubleGo = msg.doubleGo === true;
   if (msg.parkingPot !== undefined) next.parkingPot = msg.parkingPot === true;
+  if (msg.buildRule !== undefined) {
+    if (msg.buildRule !== "even" && msg.buildRule !== "chain") return { ok: false, error: "Luật xây nhà không hợp lệ" };
+    next.buildRule = msg.buildRule;
+  }
+  if (msg.needGroup !== undefined) next.needGroup = msg.needGroup === true;
+  if (msg.sellLand !== undefined) next.sellLand = msg.sellLand === true;
+  if (msg.bankruptTo !== undefined) {
+    if (msg.bankruptTo !== "bank" && msg.bankruptTo !== "creditor") return { ok: false, error: "Luật phá sản không hợp lệ" };
+    next.bankruptTo = msg.bankruptTo;
+  }
   if (msg.first !== undefined) next.first = msg.first as number;
   if (msg.second !== undefined) next.second = msg.second as number;
   const err = checkRankPoints(next.first, next.second);
@@ -252,6 +270,9 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
       break;
     case "sell":
       res = sellHouse(g, p.id, posOf(msg), now, names);
+      break;
+    case "sellland":
+      res = sellLand(g, p.id, posOf(msg), now, names);
       break;
     case "mortgage":
       res = mortgage(g, p.id, posOf(msg), now, names);
@@ -403,6 +424,19 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
           endsAt: g.endsAt,
           pot: g.pot ?? null,
           log: g.log,
+          // What the viewer may do with each of their own lots (reason when not), so the UI never guesses the rules.
+          ...(player && g.ps[player.id]
+            ? {
+                manage: Object.fromEntries(
+                  Object.entries(g.deeds)
+                    .filter(([, d]) => d.owner === player.id)
+                    .map(([pos]) => {
+                      const n = Number(pos);
+                      return [n, { build: buildBlocker(g, player.id, n), sell: sellBlocker(g, player.id, n), sellLand: sellLandBlocker(g, player.id, n), landPrice: landSalePrice(n) }];
+                    }),
+                ),
+              }
+            : {}),
         }
       : null,
     history: (room.history ?? []).slice(-10),

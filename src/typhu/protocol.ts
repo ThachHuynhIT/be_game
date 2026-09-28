@@ -20,6 +20,11 @@ export interface TPSettings {
   /** Points for Nhất / Nhì (the rest is mirrored so games sum to zero). */
   first: number;
   second: number;
+  /** House rules (see TPRules in game.ts). */
+  buildRule: "even" | "chain";
+  needGroup: boolean;
+  sellLand: boolean;
+  bankruptTo: "bank" | "creditor";
 }
 
 export interface TPSeatView {
@@ -63,6 +68,8 @@ export interface TPGameView {
   /** Nghỉ chân pot (null when the rule is off). */
   pot: number | null;
   log: LogEntry[];
+  /** The viewer's own lots: why they can't build / sell a house / sell the land (null = allowed), and the land's sale price. */
+  manage?: Record<number, { build: string | null; sell: string | null; sellLand: string | null; landPrice: number }>;
 }
 
 export interface TPRoomView {
@@ -99,9 +106,22 @@ export interface TPRoomSummary {
  */
 export type TPCommand =
   | { type: "start" }
-  | { type: "settings"; startCash?: number; timeLimit?: number; stepSeconds?: number; doubleGo?: boolean; parkingPot?: boolean; first?: number; second?: number }
+  | {
+      type: "settings";
+      startCash?: number;
+      timeLimit?: number;
+      stepSeconds?: number;
+      doubleGo?: boolean;
+      parkingPot?: boolean;
+      first?: number;
+      second?: number;
+      buildRule?: "even" | "chain";
+      needGroup?: boolean;
+      sellLand?: boolean;
+      bankruptTo?: "bank" | "creditor";
+    }
   | { type: "kick"; playerId: string }
   | { type: "roll" | "buy" | "skip" | "end" | "payjail" | "jailcard" | "paydebt" | "bankrupt" }
-  | { type: "build" | "sell" | "mortgage" | "unmortgage"; pos: number }
+  | { type: "build" | "sell" | "sellland" | "mortgage" | "unmortgage"; pos: number }
   | { type: "trade"; to: string; give: TradeSide; get: TradeSide }
   | { type: "tradeanswer"; accept: boolean };
