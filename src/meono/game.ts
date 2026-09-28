@@ -25,7 +25,7 @@ export const NOPE_WINDOW_MS = 7_000;
 export const TURN_MS = 30_000;
 /** Time to answer a choice (hide a kitten, give a card for Xin xỏ, reorder the future). */
 export const CHOICE_MS = 15_000;
-export const LOG_LIMIT = 14;
+export const LOG_LIMIT = 60;
 
 export type PendingKind =
   | "attack"
@@ -73,6 +73,8 @@ export interface Pending {
   named: CardType | null;
   cards: MCard[];
   nopes: number;
+  /** Who played the most recent Không! (null before any). They can't nope their own card. */
+  lastNoper?: string | null;
   deadline: number;
 }
 
@@ -105,6 +107,8 @@ export interface LogEntry {
   text: string;
   /** For UI emphasis. */
   tone?: "boom" | "defuse" | "nope" | "steal" | "info";
+  /** The PlayRecord id this line announces (the UI shows the play's cards in its place). */
+  play?: number;
 }
 
 export interface MeoState {
@@ -288,9 +292,9 @@ export function newMeoGame(
 
 export const alive = (s: MeoState) => s.players.filter((p) => !s.out.includes(p));
 
-function log(s: MeoState, now: number, text: string, tone: LogEntry["tone"] = "info") {
+function log(s: MeoState, now: number, text: string, tone: LogEntry["tone"] = "info", play?: number) {
   s.logSeq += 1;
-  s.log = [...s.log, { id: s.logSeq, at: now, text, tone }].slice(-LOG_LIMIT);
+  s.log = [...s.log, { id: s.logSeq, at: now, text, tone, ...(play ? { play } : {}) }].slice(-LOG_LIMIT);
 }
 
 function nextAlive(s: MeoState, from: string): string {
@@ -520,8 +524,13 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
           : types[0] === "clone"
             ? `Nhân bản (${CARD_NAMES[kind as CardType]})`
             : CARD_NAMES[types[0]];
-  log(s, now, `${nameOf(player)} đánh ${label}${target ? ` → ${nameOf(target)}` : ""}`);
+  log(s, now, `${nameOf(player)} đánh ${label}${target ? ` → ${nameOf(target)}` : ""}`, "info", s.plays.at(-1)?.id);
   return OK;
+}
+
+/** Owner of the card a new Không! would answer: the last noper, or the original player. */
+export function nopeOwner(p: Pending): string {
+  return p.nopes > 0 && p.lastNoper ? p.lastNoper : p.by;
 }
 
 /** Answer the pending action with a Nope (anyone still in the game, any number of times). */
@@ -532,9 +541,12 @@ export function playNope(s: MeoState, player: string, cardId: unknown, now: numb
   const card = (s.hands[player] ?? []).find((c) => c.id === cardId && c.type === "nope");
   if (!card) return fail("Bạn không có lá “Không!”");
   if (isAnnoyed(s, card.id)) return fail("Lá “Không!” này đang bị Nổi cáu vô hiệu hoá");
+  // You can't answer your own card: the play itself, or your own Không! on top of the chain.
+  if (nopeOwner(s.pending) === player) return fail("Không thể tự chặn lá bài của chính mình");
   takeFromHand(s, player, [card.id]);
   s.discard.push(card);
   s.pending.nopes += 1;
+  s.pending.lastNoper = player;
   s.pending.deadline = now + nopeMs(s);
   const last = s.plays?.at(-1);
   if (last?.result === "pending") last.nopes.push(player);

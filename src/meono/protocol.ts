@@ -47,6 +47,8 @@ export interface MeoGameView {
     named: CardType | null;
     cards: CardType[];
     nopes: number;
+    /** Who played the most recent Không! (they can't nope their own card). */
+    lastNoper?: string | null;
     deadline: number;
   } | null;
   choice:
@@ -61,7 +63,8 @@ export interface MeoGameView {
   /** Điểm danh mèo / Lời nguyền ngô pha lê: Xáo bài can't be played right now. */
   shuffleLocked: boolean;
   finished: string[];
-  log: { id: number; at: number; text: string; tone?: string }[];
+  /** `play`: the PlayRecord this line announces (shown as that play's cards). */
+  log: { id: number; at: number; text: string; tone?: string; play?: number }[];
   /** Card history, oldest first (see PlayRecord in game.ts). */
   plays: {
     id: number;

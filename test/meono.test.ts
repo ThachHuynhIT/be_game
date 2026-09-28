@@ -92,6 +92,26 @@ describe("turns, nope and kittens", () => {
     expect(s.turn).toBe("B"); // nope-noped → skip goes through
   });
 
+  it("you can't nope your own card, but can nope a nope against your play", () => {
+    const s = rig({ A: ["skip", "nope", "nope"], B: ["nope", "nope"] }, ["taco", "taco", "exploding"]);
+    playCards(s, "A", ids(s, "A", "skip"), {}, T, names);
+    // A can't nope their own Bỏ lượt.
+    expect(playNope(s, "A", ids(s, "A", "nope")[0], T + 100, names).ok).toBe(false);
+    expect(s.pending?.nopes).toBe(0);
+    expect(s.hands.A.filter((c) => c.type === "nope")).toHaveLength(2);
+    expect(playNope(s, "B", ids(s, "B", "nope")[0], T + 200, names).ok).toBe(true);
+    // B can't nope their own Không!…
+    expect(playNope(s, "B", ids(s, "B", "nope")[0], T + 300, names).ok).toBe(false);
+    // …but A can answer B's Không!, and then A can't stack another on their own.
+    expect(playNope(s, "A", ids(s, "A", "nope")[0], T + 400, names).ok).toBe(true);
+    expect(playNope(s, "A", ids(s, "A", "nope")[0], T + 500, names).ok).toBe(false);
+    // B may answer A's Không! again.
+    expect(playNope(s, "B", ids(s, "B", "nope")[0], T + 600, names).ok).toBe(true);
+    expect(s.pending?.nopes).toBe(3);
+    tickGame(s, T + 600 + NOPE_WINDOW_MS + 1, names, never);
+    expect(s.turn).toBe("A"); // odd → blocked
+  });
+
   it("keeps a card history with who noped and how each play ended", () => {
     const s = rig({ A: ["skip", "skip"], B: ["nope", "nope"], C: ["nope"] }, ["taco", "taco", "exploding", "exploding"]);
     playCards(s, "A", ids(s, "A", "skip"), {}, T, names);
@@ -105,6 +125,8 @@ describe("turns, nope and kittens", () => {
       ["A", ["skip"], ["B"], "blocked"],
       ["A", ["skip"], ["B", "C"], "done"],
     ]);
+    // Each play's announcement line points at its record, so the UI can show the cards there.
+    expect(s.log.filter((e) => e.play).map((e) => e.play)).toEqual([1, 2]);
   });
 
   it("defuse lets you hide the kitten; without one you explode and the game can end", () => {
