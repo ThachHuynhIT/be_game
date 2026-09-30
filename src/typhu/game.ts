@@ -818,7 +818,8 @@ export function mortgage(s: TPState, id: string, pos: number, now: number, names
   const d = s.deeds[pos];
   const b = sq(pos);
   if (d.mortgaged) return fail("Đã thế chấp rồi");
-  if (b.kind === "prop" && groupPositions(b.group).some((g) => (s.deeds[g]?.houses ?? 0) > 0)) {
+  // Only my own houses in the group block it; another player's houses on the same colour don't.
+  if (b.kind === "prop" && groupPositions(b.group).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) {
     return fail("Bán hết nhà trong nhóm trước khi thế chấp");
   }
   d.mortgaged = true;

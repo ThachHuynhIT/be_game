@@ -130,6 +130,20 @@ describe("moving and buying", () => {
     expect(unmortgage(s, "a", 39, T, names).ok).toBe(true);
     expect(s.ps.a.cash).toBe(1480);
   });
+
+  it("other players' houses on the same colour don't block my mortgage or house sale", () => {
+    const s = game();
+    s.deeds[37] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[39] = { owner: "b", houses: 3, mortgaged: false };
+    expect(mortgage(s, "a", 37, T, names).ok).toBe(true);
+    s.deeds[1] = { owner: "a", houses: 1, mortgaged: false };
+    s.deeds[3] = { owner: "b", houses: 3, mortgaged: false };
+    expect(sellHouse(s, "a", 1, T, names).ok).toBe(true);
+    // My own houses in the group still do.
+    s.deeds[37] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[39] = { owner: "a", houses: 1, mortgaged: false };
+    expect(mortgage(s, "a", 37, T, names).ok).toBe(false);
+  });
 });
 
 describe("jail", () => {
