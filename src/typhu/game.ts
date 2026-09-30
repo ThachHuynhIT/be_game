@@ -858,11 +858,8 @@ function checkSide(s: TPState, owner: string, side: TradeSide): string | null {
   if (s.ps[owner].cash < side.cash) return "Không đủ tiền cho giao dịch";
   for (const pos of side.props) {
     const d = s.deeds[pos];
+    // Built lots can be traded too: the houses go with the land.
     if (!d || d.owner !== owner) return "Có ô không thuộc về người đổi";
-    const b = BOARD[pos];
-    if (b.kind === "prop" && groupPositions(b.group).some((g) => (s.deeds[g]?.houses ?? 0) > 0)) {
-      return `Phải bán hết nhà nhóm ${b.name} trước khi đổi`;
-    }
   }
   return null;
 }

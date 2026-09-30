@@ -347,6 +347,16 @@ describe("trade", () => {
     expect(s.ps.b.cash).toBe(1550);
   });
 
+  it("trades built lots with their houses", () => {
+    const s = game();
+    s.deeds[1] = { owner: "a", houses: 3, mortgaged: false };
+    s.deeds[3] = { owner: "a", houses: 3, mortgaged: false };
+    expect(proposeTrade(s, "a", { to: "b", give: { props: [1], cash: 0 }, get: { props: [], cash: 100 } }, T, names).ok).toBe(true);
+    expect(answerTrade(s, "b", true, T, names).ok).toBe(true);
+    expect(s.deeds[1]).toEqual({ owner: "b", houses: 3, mortgaged: false });
+    expect(s.deeds[3].owner).toBe("a");
+  });
+
   it("rejects land you don't own and expires", () => {
     const s = game();
     s.deeds[3] = { owner: "b", houses: 0, mortgaged: false };
