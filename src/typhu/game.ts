@@ -20,6 +20,7 @@ import {
   houseRefund,
   landSaleValue,
   mortgageValue,
+  type PriceRules,
   unmortgageCost,
 } from "./board";
 
@@ -137,18 +138,40 @@ export interface TPState {
  * - sellLand: land (with no houses on its group) can be sold back to the bank for half its price.
  * - bankruptTo "bank": a bankrupt player's land goes back on the market (others can buy it
  *   again); "creditor": it all goes to whoever they owed.
+ * - goSalary: cash for passing Khởi hành.
+ * - risingCost / unmortgageFee / landSalePct: price knobs (see PriceRules in board.ts).
+ * - jailRent: owners still collect rent while in jail.
+ * - doubleRoll: rolling a double gives another roll (three in a row still means jail).
  */
-export interface TPRules {
+export interface TPRules extends PriceRules {
   buildRule: "even" | "chain";
   needGroup: boolean;
   sellLand: boolean;
   bankruptTo: "bank" | "creditor";
+  goSalary: number;
+  risingCost: boolean;
+  unmortgageFee: number;
+  landSalePct: number;
+  jailRent: boolean;
+  doubleRoll: boolean;
 }
 
-export const DEFAULT_TP_RULES: TPRules = { buildRule: "even", needGroup: true, sellLand: true, bankruptTo: "bank" };
+export const DEFAULT_TP_RULES: TPRules = {
+  buildRule: "even",
+  needGroup: true,
+  sellLand: true,
+  bankruptTo: "bank",
+  goSalary: GO_SALARY,
+  risingCost: true,
+  unmortgageFee: 10,
+  landSalePct: 70,
+  jailRent: true,
+  doubleRoll: true,
+};
 /** Games saved before house rules existed keep the old behaviour. */
-const LEGACY_RULES: TPRules = { buildRule: "even", needGroup: true, sellLand: false, bankruptTo: "creditor" };
-const rulesOf = (s: TPState): TPRules => s.rules ?? LEGACY_RULES;
+const LEGACY_RULES: Partial<TPRules> = { sellLand: false, bankruptTo: "creditor", risingCost: false, landSalePct: 50 };
+/** Rules saved before a field existed get its default. */
+export const rulesOf = (s: TPState): TPRules => ({ ...DEFAULT_TP_RULES, ...(s.rules ?? LEGACY_RULES) });
 
 const stepMs = (s: TPState) => s.stepMs ?? STEP_MS;
 
@@ -255,7 +278,7 @@ export function netWorth(s: TPState, id: string) {
     const d = s.deeds[pos];
     const b = sq(pos);
     total += d.mortgaged ? mortgageValue(b) : b.price;
-    if (b.kind === "prop") total += builtCost(b, d.houses);
+    if (b.kind === "prop") total += builtCost(b, d.houses, rulesOf(s));
   }
   return total;
 }
@@ -267,7 +290,7 @@ export function liquidValue(s: TPState, id: string) {
     const d = s.deeds[pos];
     const b = sq(pos);
     if (!d.mortgaged) total += mortgageValue(b);
-    if (b.kind === "prop") total += builtRefund(b, d.houses);
+    if (b.kind === "prop") total += builtRefund(b, d.houses, rulesOf(s));
   }
   return total;
 }
@@ -277,7 +300,8 @@ export function liquidValue(s: TPState, id: string) {
 function moveTo(s: TPState, id: string, pos: number, now: number, names: NameOf, passGo = true) {
   const p = s.ps[id];
   if (passGo && (pos < p.pos || (pos === 0 && p.pos !== 0))) {
-    const salary = s.doubleGo && pos === 0 ? GO_SALARY * 2 : GO_SALARY;
+    const base = rulesOf(s).goSalary;
+    const salary = s.doubleGo && pos === 0 ? base * 2 : base;
     p.cash += salary;
     log(s, now, `${names(id)} ${pos === 0 ? "dừng đúng" : "qua"} Khởi hành, nhận ${money(salary)}`, "money");
   }
@@ -306,6 +330,10 @@ function land(s: TPState, id: string, now: number, names: NameOf, random: Random
     if (d.owner === id) return;
     if (d.mortgaged) {
       log(s, now, `${b.name} đang thế chấp — ${names(id)} không phải trả tiền`, "info");
+      return;
+    }
+    if (!rulesOf(s).jailRent && s.ps[d.owner]?.jail > 0) {
+      log(s, now, `${names(d.owner)} đang ở tù — ${names(id)} không phải trả tiền thuê ${b.name}`, "info");
       return;
     }
     let dice = (s.dice?.[0] ?? 0) + (s.dice?.[1] ?? 0);
@@ -462,7 +490,7 @@ function autoLiquidate(s: TPState, id: string, target: number, now: number, name
       .sort((a, b) => s.deeds[b].houses - s.deeds[a].houses);
     if (!built.length) break;
     const pos = built[0];
-    p.cash += houseRefund(sq(pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses);
+    p.cash += houseRefund(sq(pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses, rulesOf(s));
     s.deeds[pos].houses -= 1;
   }
   while (p.cash < target) {
@@ -482,7 +510,7 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   for (const pos of ownedBy(s, id)) {
     const d = s.deeds[pos];
     const b = sq(pos);
-    if (d.houses && b.kind === "prop") p.cash += builtRefund(b, d.houses);
+    if (d.houses && b.kind === "prop") p.cash += builtRefund(b, d.houses, rulesOf(s));
     d.houses = 0;
   }
   const toPlayer = creditor && !s.ps[creditor].bankrupt ? creditor : null;
@@ -594,7 +622,7 @@ export function rollDice(s: TPState, id: string, now: number, names: NameOf, ran
       setPhase(s, "end", now);
       return OK;
     }
-  } else if (isDouble) {
+  } else if (isDouble && rulesOf(s).doubleRoll) {
     s.doubles += 1;
     if (s.doubles >= 3) {
       log(s, now, `${names(id)} tung đôi 3 lần liền — quá tốc độ!`, "jail");
@@ -743,7 +771,7 @@ export function buildBlocker(s: TPState, id: string, pos: number): string | null
       );
     }
   }
-  const cost = houseCost(b, d.houses + 1);
+  const cost = houseCost(b, d.houses + 1, rulesOf(s));
   if (s.ps[id].cash < cost) return `Cần ${money(cost)} để xây`;
   return null;
 }
@@ -776,7 +804,7 @@ export function sellLandBlocker(s: TPState, id: string, pos: number): string | n
   return null;
 }
 
-export const landSalePrice = (pos: number) => landSaleValue(BOARD[pos] as Ownable);
+export const landSalePrice = (s: TPState, pos: number) => landSaleValue(BOARD[pos] as Ownable, rulesOf(s));
 
 export function build(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
@@ -786,7 +814,7 @@ export function build(s: TPState, id: string, pos: number, now: number, names: N
   if (why) return fail(why);
   const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  s.ps[id].cash -= houseCost(b, d.houses + 1);
+  s.ps[id].cash -= houseCost(b, d.houses + 1, rulesOf(s));
   d.houses += 1;
   log(s, now, `🏠 ${names(id)} xây ${d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`} ở ${b.name}`, "buy");
   return OK;
@@ -799,7 +827,7 @@ export function sellHouse(s: TPState, id: string, pos: number, now: number, name
   if (why) return fail(why);
   const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  const refund = houseRefund(b, d.houses);
+  const refund = houseRefund(b, d.houses, rulesOf(s));
   d.houses -= 1;
   s.ps[id].cash += refund;
   log(s, now, `${names(id)} bán 1 nhà ở ${b.name}, thu ${money(refund)}`, "info");
@@ -812,7 +840,7 @@ export function sellLand(s: TPState, id: string, pos: number, now: number, names
   if (bad) return bad;
   const why = sellLandBlocker(s, id, pos);
   if (why) return fail(why);
-  const price = landSalePrice(pos);
+  const price = landSalePrice(s, pos);
   delete s.deeds[pos];
   s.ps[id].cash += price;
   log(s, now, `🏷️ ${names(id)} bán ${BOARD[pos].name} cho ngân hàng, thu ${money(price)} — ai cũng mua lại được`, "info");
@@ -842,7 +870,7 @@ export function unmortgage(s: TPState, id: string, pos: number, now: number, nam
   const d = s.deeds[pos];
   const b = sq(pos);
   if (!d.mortgaged) return fail("Đất này không thế chấp");
-  const cost = unmortgageCost(b);
+  const cost = unmortgageCost(b, rulesOf(s));
   if (s.ps[id].cash < cost) return fail(`Cần ${money(cost)} để chuộc`);
   s.ps[id].cash -= cost;
   d.mortgaged = false;

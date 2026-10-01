@@ -25,6 +25,18 @@ export interface TPSettings {
   needGroup: boolean;
   sellLand: boolean;
   bankruptTo: "bank" | "creditor";
+  /** Cash for passing Khởi hành (GO_SALARY_OPTIONS). */
+  goSalary: number;
+  /** Each building on a lot costs more than the last. */
+  risingCost: boolean;
+  /** Extra % to lift a mortgage (UNMORTGAGE_FEE_OPTIONS). */
+  unmortgageFee: number;
+  /** % of the price paid for land sold back to the bank (LAND_SALE_OPTIONS). */
+  landSalePct: number;
+  /** Owners in jail still collect rent. */
+  jailRent: boolean;
+  /** A double gives another roll. */
+  doubleRoll: boolean;
 }
 
 export interface TPSeatView {
@@ -119,6 +131,12 @@ export type TPCommand =
       needGroup?: boolean;
       sellLand?: boolean;
       bankruptTo?: "bank" | "creditor";
+      goSalary?: number;
+      risingCost?: boolean;
+      unmortgageFee?: number;
+      landSalePct?: number;
+      jailRent?: boolean;
+      doubleRoll?: boolean;
     }
   | { type: "kick"; playerId: string }
   | { type: "roll" | "buy" | "skip" | "end" | "payjail" | "jailcard" | "paydebt" | "bankrupt" }

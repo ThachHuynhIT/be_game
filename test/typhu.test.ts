@@ -344,11 +344,87 @@ describe("house rules", () => {
     joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
     expect(tpCommand(room, "token-aaaa", { type: "settings", buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" }, T).ok).toBe(true);
     expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
-    expect(room.current!.rules).toEqual({ buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" });
+    expect(room.current!.rules).toMatchObject({ buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" });
     room.current!.deeds[6] = { owner: "p1", houses: 0, mortgaged: false };
     const v = tpView(room, room.seats[0], T);
     expect(v.current!.manage![6]).toEqual({ build: null, sell: "Không có nhà để bán", sellLand: "Luật bàn không cho bán đất", landPrice: 70 });
     expect(tpView(room, room.seats[1], T).current!.manage![6]).toBeUndefined();
+  });
+});
+
+describe("table settings", () => {
+  const withRules = (rules: Partial<TPState["rules"] & object>) => {
+    const s = game();
+    s.rules = { ...s.rules!, ...rules };
+    return s;
+  };
+
+  it("pays the chosen salary for passing Khởi hành", () => {
+    const s = withRules({ goSalary: 300 });
+    s.ps.a.pos = 38;
+    rollDice(s, "a", T, names, dice(1, 2)); // 38 → 1, passing GO
+    expect(s.ps.a.cash).toBe(1500 + 300);
+  });
+
+  it("flat house prices when rising costs are off", () => {
+    const s = withRules({ risingCost: false });
+    s.deeds[1] = { owner: "a", houses: 1, mortgaged: false };
+    s.deeds[3] = { owner: "a", houses: 1, mortgaged: false };
+    s.phase = "end";
+    expect(build(s, "a", 1, T, names).ok).toBe(true);
+    expect(s.ps.a.cash).toBe(1500 - (BOARD[1] as { house: number }).house);
+  });
+
+  it("unmortgage fee and land sale price follow the table", () => {
+    const s = withRules({ unmortgageFee: 30, landSalePct: 90 });
+    s.deeds[39] = { owner: "a", houses: 0, mortgaged: false };
+    expect(mortgage(s, "a", 39, T, names).ok).toBe(true); // +200
+    expect(unmortgage(s, "a", 39, T, names).ok).toBe(true); // −260
+    expect(s.ps.a.cash).toBe(1500 + 200 - 260);
+    expect(sellLand(s, "a", 39, T, names).ok).toBe(true);
+    expect(s.ps.a.cash).toBe(1500 + 200 - 260 + 360);
+  });
+
+  it("owners in jail collect no rent when jailRent is off", () => {
+    const s = withRules({ jailRent: false });
+    s.deeds[3] = { owner: "b", houses: 0, mortgaged: false };
+    s.ps.b.jail = 1;
+    rollDice(s, "a", T, names, dice(1, 2)); // → 3
+    expect(s.ps.a.cash).toBe(1500);
+    const on = game();
+    on.deeds[3] = { owner: "b", houses: 0, mortgaged: false };
+    on.ps.b.jail = 1;
+    rollDice(on, "a", T, names, dice(1, 2));
+    expect(on.ps.a.cash).toBeLessThan(1500);
+  });
+
+  it("no extra roll on a double when doubleRoll is off", () => {
+    const s = withRules({ doubleRoll: false });
+    rollDice(s, "a", T, names, dice(2, 2)); // → 4 thuế
+    expect(s.rollAgain).toBe(false);
+    expect(s.doubles).toBe(0);
+  });
+
+  it("room settings validate and reach the game", () => {
+    let n = 0;
+    const room = newTPRoom("KNOBS");
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", goSalary: 150 }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", unmortgageFee: 15 }, T).ok).toBe(false);
+    expect(
+      tpCommand(room, "token-aaaa", { type: "settings", goSalary: 400, risingCost: false, unmortgageFee: 0, landSalePct: 50, jailRent: false, doubleRoll: false }, T).ok,
+    ).toBe(true);
+    expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
+    expect(room.current!.rules).toMatchObject({ goSalary: 400, risingCost: false, unmortgageFee: 0, landSalePct: 50, jailRent: false, doubleRoll: false });
+  });
+
+  it("older saved games without the new fields get the defaults", () => {
+    const s = game();
+    s.rules = { buildRule: "even", needGroup: true, sellLand: true, bankruptTo: "bank" } as TPState["rules"];
+    s.ps.a.pos = 38;
+    rollDice(s, "a", T, names, dice(1, 2));
+    expect(s.ps.a.cash).toBe(1500 + GO_SALARY);
   });
 });
 

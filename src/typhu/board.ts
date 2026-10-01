@@ -101,24 +101,40 @@ export const isOwnable = (sq: Square): sq is Ownable => sq.kind === "prop" || sq
 export const groupPositions = (group: Group) =>
   BOARD.flatMap((sq, i) => (sq.kind === "prop" && sq.group === group ? [i] : []));
 
+/** Table settings that change prices (all optional: missing = the default). Room settings / game rules carry them. */
+export interface PriceRules {
+  /** Each building on a lot costs more than the last (default on). */
+  risingCost?: boolean;
+  /** Extra % paid to lift a mortgage (default 10). */
+  unmortgageFee?: number;
+  /** % of the price the bank pays for land sold back (default 70). */
+  landSalePct?: number;
+}
+export const GO_SALARY_OPTIONS = [100, 200, 300, 400];
+export const UNMORTGAGE_FEE_OPTIONS = [0, 10, 20, 30];
+export const LAND_SALE_OPTIONS = [50, 70, 90];
+
 export const mortgageValue = (sq: Ownable) => sq.price / 2;
-/** Lifting a mortgage costs its value + 10%. */
-export const unmortgageCost = (sq: Ownable) => Math.ceil((sq.price * 11) / 20);
-/** Selling land back to the bank: 70% of its price — more than a mortgage (50%), but the land is gone. */
-export const landSaleValue = (sq: Ownable) => Math.floor((sq.price * 7) / 10);
+/** Lifting a mortgage costs its value + the table's fee (10% by default). */
+export const unmortgageCost = (sq: Ownable, r?: PriceRules) => Math.ceil((mortgageValue(sq) * (100 + (r?.unmortgageFee ?? 10))) / 100);
+/** Selling land back to the bank: 70% of its price by default — more than a mortgage (50%), but the land is gone. */
+export const landSaleValue = (sq: Ownable, r?: PriceRules) => Math.floor((sq.price * (r?.landSalePct ?? 70)) / 100);
 
 type Prop = Extract<Square, { kind: "prop" }>;
 /**
- * Each building on a lot costs 25% more than the one before, rounded to 5tr:
- * building n (1–4 houses, 5 = hotel) = base × (3 + n) / 4, so the hotel is 2× the base price.
+ * Price of building n on a lot (1–4 houses, 5 = hotel). With rising costs (default) each one costs 25% more than
+ * the one before, rounded to 5tr: base × (3 + n) / 4, so the hotel is 2× the base. Otherwise always the base price.
  */
-export const houseCost = (sq: Prop, level: number) => Math.round((sq.house * (3 + level)) / 20) * 5;
+export const houseCost = (sq: Prop, level: number, r?: PriceRules) =>
+  r?.risingCost === false ? sq.house : Math.round((sq.house * (3 + level)) / 20) * 5;
 /** Selling a building back returns half of what that building cost. */
-export const houseRefund = (sq: Prop, level: number) => Math.floor(houseCost(sq, level) / 2);
+export const houseRefund = (sq: Prop, level: number, r?: PriceRules) => Math.floor(houseCost(sq, level, r) / 2);
 /** Total paid for the first `houses` buildings on a lot. */
-export const builtCost = (sq: Prop, houses: number) => Array.from({ length: houses }, (_, i) => houseCost(sq, i + 1)).reduce((a, b) => a + b, 0);
+export const builtCost = (sq: Prop, houses: number, r?: PriceRules) =>
+  Array.from({ length: houses }, (_, i) => houseCost(sq, i + 1, r)).reduce((a, b) => a + b, 0);
 /** Cash back from selling all `houses` buildings on a lot. */
-export const builtRefund = (sq: Prop, houses: number) => Array.from({ length: houses }, (_, i) => houseRefund(sq, i + 1)).reduce((a, b) => a + b, 0);
+export const builtRefund = (sq: Prop, houses: number, r?: PriceRules) =>
+  Array.from({ length: houses }, (_, i) => houseRefund(sq, i + 1, r)).reduce((a, b) => a + b, 0);
 
 export type CardEffect =
   | { kind: "money"; amount: number }

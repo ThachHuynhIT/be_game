@@ -11,7 +11,17 @@ import {
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
-import { DEFAULT_START_CASH, DEFAULT_TIME_LIMIT, MAX_SEATS, MIN_PLAYERS, START_CASH_OPTIONS, TIME_LIMIT_OPTIONS } from "./board";
+import {
+  DEFAULT_START_CASH,
+  DEFAULT_TIME_LIMIT,
+  GO_SALARY_OPTIONS,
+  LAND_SALE_OPTIONS,
+  MAX_SEATS,
+  MIN_PLAYERS,
+  START_CASH_OPTIONS,
+  TIME_LIMIT_OPTIONS,
+  UNMORTGAGE_FEE_OPTIONS,
+} from "./board";
 import {
   type Result,
   type TPState,
@@ -167,7 +177,18 @@ function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
     stepMs: st.stepSeconds * 1000,
     doubleGo: st.doubleGo,
     parkingPot: st.parkingPot,
-    rules: { buildRule: st.buildRule, needGroup: st.needGroup, sellLand: st.sellLand, bankruptTo: st.bankruptTo },
+    rules: {
+      buildRule: st.buildRule,
+      needGroup: st.needGroup,
+      sellLand: st.sellLand,
+      bankruptTo: st.bankruptTo,
+      goSalary: st.goSalary,
+      risingCost: st.risingCost,
+      unmortgageFee: st.unmortgageFee,
+      landSalePct: st.landSalePct,
+      jailRent: st.jailRent,
+      doubleRoll: st.doubleRoll,
+    },
   });
   return { ok: true };
 }
@@ -195,6 +216,21 @@ function setSettings(room: TPRoom, host: TPPlayer, msg: Record<string, unknown>)
     next.buildRule = msg.buildRule;
   }
   if (msg.needGroup !== undefined) next.needGroup = msg.needGroup === true;
+  if (msg.goSalary !== undefined) {
+    if (!GO_SALARY_OPTIONS.includes(msg.goSalary as number)) return { ok: false, error: "Tiền qua Khởi hành không hợp lệ" };
+    next.goSalary = msg.goSalary as number;
+  }
+  if (msg.unmortgageFee !== undefined) {
+    if (!UNMORTGAGE_FEE_OPTIONS.includes(msg.unmortgageFee as number)) return { ok: false, error: "Phí chuộc không hợp lệ" };
+    next.unmortgageFee = msg.unmortgageFee as number;
+  }
+  if (msg.landSalePct !== undefined) {
+    if (!LAND_SALE_OPTIONS.includes(msg.landSalePct as number)) return { ok: false, error: "Giá bán đất không hợp lệ" };
+    next.landSalePct = msg.landSalePct as number;
+  }
+  if (msg.risingCost !== undefined) next.risingCost = msg.risingCost === true;
+  if (msg.jailRent !== undefined) next.jailRent = msg.jailRent === true;
+  if (msg.doubleRoll !== undefined) next.doubleRoll = msg.doubleRoll === true;
   if (msg.sellLand !== undefined) next.sellLand = msg.sellLand === true;
   if (msg.bankruptTo !== undefined) {
     if (msg.bankruptTo !== "bank" && msg.bankruptTo !== "creditor") return { ok: false, error: "Luật phá sản không hợp lệ" };
@@ -432,7 +468,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
                     .filter(([, d]) => d.owner === player.id)
                     .map(([pos]) => {
                       const n = Number(pos);
-                      return [n, { build: buildBlocker(g, player.id, n), sell: sellBlocker(g, player.id, n), sellLand: sellLandBlocker(g, player.id, n), landPrice: landSalePrice(n) }];
+                      return [n, { build: buildBlocker(g, player.id, n), sell: sellBlocker(g, player.id, n), sellLand: sellLandBlocker(g, player.id, n), landPrice: landSalePrice(g, n) }];
                     }),
                 ),
               }
