@@ -104,6 +104,21 @@ export const groupPositions = (group: Group) =>
 export const mortgageValue = (sq: Ownable) => sq.price / 2;
 /** Lifting a mortgage costs its value + 10%. */
 export const unmortgageCost = (sq: Ownable) => Math.ceil((sq.price * 11) / 20);
+/** Selling land back to the bank: 70% of its price — more than a mortgage (50%), but the land is gone. */
+export const landSaleValue = (sq: Ownable) => Math.floor((sq.price * 7) / 10);
+
+type Prop = Extract<Square, { kind: "prop" }>;
+/**
+ * Each building on a lot costs 25% more than the one before, rounded to 5tr:
+ * building n (1–4 houses, 5 = hotel) = base × (3 + n) / 4, so the hotel is 2× the base price.
+ */
+export const houseCost = (sq: Prop, level: number) => Math.round((sq.house * (3 + level)) / 20) * 5;
+/** Selling a building back returns half of what that building cost. */
+export const houseRefund = (sq: Prop, level: number) => Math.floor(houseCost(sq, level) / 2);
+/** Total paid for the first `houses` buildings on a lot. */
+export const builtCost = (sq: Prop, houses: number) => Array.from({ length: houses }, (_, i) => houseCost(sq, i + 1)).reduce((a, b) => a + b, 0);
+/** Cash back from selling all `houses` buildings on a lot. */
+export const builtRefund = (sq: Prop, houses: number) => Array.from({ length: houses }, (_, i) => houseRefund(sq, i + 1)).reduce((a, b) => a + b, 0);
 
 export type CardEffect =
   | { kind: "money"; amount: number }

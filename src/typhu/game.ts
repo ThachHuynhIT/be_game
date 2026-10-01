@@ -14,6 +14,11 @@ import {
   UTIL_MULT,
   groupPositions,
   isOwnable,
+  builtCost,
+  builtRefund,
+  houseCost,
+  houseRefund,
+  landSaleValue,
   mortgageValue,
   unmortgageCost,
 } from "./board";
@@ -250,7 +255,7 @@ export function netWorth(s: TPState, id: string) {
     const d = s.deeds[pos];
     const b = sq(pos);
     total += d.mortgaged ? mortgageValue(b) : b.price;
-    if (b.kind === "prop") total += d.houses * b.house;
+    if (b.kind === "prop") total += builtCost(b, d.houses);
   }
   return total;
 }
@@ -262,7 +267,7 @@ export function liquidValue(s: TPState, id: string) {
     const d = s.deeds[pos];
     const b = sq(pos);
     if (!d.mortgaged) total += mortgageValue(b);
-    if (b.kind === "prop") total += (d.houses * b.house) / 2;
+    if (b.kind === "prop") total += builtRefund(b, d.houses);
   }
   return total;
 }
@@ -457,8 +462,8 @@ function autoLiquidate(s: TPState, id: string, target: number, now: number, name
       .sort((a, b) => s.deeds[b].houses - s.deeds[a].houses);
     if (!built.length) break;
     const pos = built[0];
+    p.cash += houseRefund(sq(pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses);
     s.deeds[pos].houses -= 1;
-    p.cash += (sq(pos) as Extract<Ownable, { kind: "prop" }>).house / 2;
   }
   while (p.cash < target) {
     const free = mine().filter((pos) => !s.deeds[pos].mortgaged);
@@ -477,7 +482,7 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   for (const pos of ownedBy(s, id)) {
     const d = s.deeds[pos];
     const b = sq(pos);
-    if (d.houses && b.kind === "prop") p.cash += (d.houses * b.house) / 2;
+    if (d.houses && b.kind === "prop") p.cash += builtRefund(b, d.houses);
     d.houses = 0;
   }
   const toPlayer = creditor && !s.ps[creditor].bankrupt ? creditor : null;
@@ -738,7 +743,8 @@ export function buildBlocker(s: TPState, id: string, pos: number): string | null
       );
     }
   }
-  if (s.ps[id].cash < b.house) return `Cần ${money(b.house)} để xây`;
+  const cost = houseCost(b, d.houses + 1);
+  if (s.ps[id].cash < cost) return `Cần ${money(cost)} để xây`;
   return null;
 }
 
@@ -770,7 +776,7 @@ export function sellLandBlocker(s: TPState, id: string, pos: number): string | n
   return null;
 }
 
-export const landSalePrice = (pos: number) => Math.floor((BOARD[pos] as Ownable).price / 2);
+export const landSalePrice = (pos: number) => landSaleValue(BOARD[pos] as Ownable);
 
 export function build(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
@@ -780,7 +786,7 @@ export function build(s: TPState, id: string, pos: number, now: number, names: N
   if (why) return fail(why);
   const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  s.ps[id].cash -= b.house;
+  s.ps[id].cash -= houseCost(b, d.houses + 1);
   d.houses += 1;
   log(s, now, `🏠 ${names(id)} xây ${d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`} ở ${b.name}`, "buy");
   return OK;
@@ -793,9 +799,10 @@ export function sellHouse(s: TPState, id: string, pos: number, now: number, name
   if (why) return fail(why);
   const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
+  const refund = houseRefund(b, d.houses);
   d.houses -= 1;
-  s.ps[id].cash += b.house / 2;
-  log(s, now, `${names(id)} bán 1 nhà ở ${b.name}, thu ${money(b.house / 2)}`, "info");
+  s.ps[id].cash += refund;
+  log(s, now, `${names(id)} bán 1 nhà ở ${b.name}, thu ${money(refund)}`, "info");
   return OK;
 }
 

@@ -95,6 +95,25 @@ describe("moving and buying", () => {
     expect(s.phase).toBe("end");
   });
 
+  it("each building on a lot costs more than the last; selling returns half of that building", () => {
+    const s = game(["a", "b"], 5000);
+    s.deeds[37] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[39] = { owner: "a", houses: 0, mortgaged: false };
+    s.phase = "end";
+    const base = (BOARD[39] as { house: number }).house; // 200
+    const paid: number[] = [];
+    for (let n = 0; n < 5; n++)
+      for (const pos of [37, 39]) {
+        const before = s.ps.a.cash;
+        expect(build(s, "a", pos, T, names).ok).toBe(true);
+        if (pos === 39) paid.push(before - s.ps.a.cash);
+      }
+    expect(paid).toEqual([base, base * 1.25, base * 1.5, base * 1.75, base * 2]);
+    const before = s.ps.a.cash;
+    expect(sellHouse(s, "a", 39, T, names).ok).toBe(true);
+    expect(s.ps.a.cash - before).toBe(base); // half of the hotel's 2× price
+  });
+
   it("doubles rent on a full colour set and uses the house table after building", () => {
     const s = game();
     s.deeds[1] = { owner: "a", houses: 0, mortgaged: false };
@@ -304,7 +323,7 @@ describe("house rules", () => {
     expect(buildBlocker(strict, "a", 6)).toBe("Cần sở hữu cả nhóm màu mới được xây");
   });
 
-  it("land can be sold back to the bank for half its price when the rule is on", () => {
+  it("land can be sold back to the bank for 70% of its price when the rule is on", () => {
     const s = game();
     own(s, "a", 6, 8, 9);
     build(s, "a", 6, T, names);
@@ -313,7 +332,7 @@ describe("house rules", () => {
     const cash = s.ps.a.cash;
     expect(sellLand(s, "a", 8, T, names).ok).toBe(true);
     expect(s.deeds[8]).toBeUndefined();
-    expect(s.ps.a.cash).toBe(cash + (BOARD[8] as { price: number }).price / 2);
+    expect(s.ps.a.cash).toBe(cash + Math.floor(((BOARD[8] as { price: number }).price * 7) / 10));
     s.rules = { ...s.rules!, sellLand: false };
     expect(sellLand(s, "a", 9, T, names).ok).toBe(false);
   });
@@ -328,7 +347,7 @@ describe("house rules", () => {
     expect(room.current!.rules).toEqual({ buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" });
     room.current!.deeds[6] = { owner: "p1", houses: 0, mortgaged: false };
     const v = tpView(room, room.seats[0], T);
-    expect(v.current!.manage![6]).toEqual({ build: null, sell: "Không có nhà để bán", sellLand: "Luật bàn không cho bán đất", landPrice: 50 });
+    expect(v.current!.manage![6]).toEqual({ build: null, sell: "Không có nhà để bán", sellLand: "Luật bàn không cho bán đất", landPrice: 70 });
     expect(tpView(room, room.seats[1], T).current!.manage![6]).toBeUndefined();
   });
 });
