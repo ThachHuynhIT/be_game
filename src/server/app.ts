@@ -31,6 +31,12 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/bang/ws": { game: "bang", kind: "ws" },
   "/api/bang/rooms": { game: "bang", kind: "rooms" },
   "/api/bang/leaderboard": { game: "bang", kind: "leaderboard" },
+  "/api/cangua/ws": { game: "cangua", kind: "ws" },
+  "/api/cangua/rooms": { game: "cangua", kind: "rooms" },
+  "/api/cangua/leaderboard": { game: "cangua", kind: "leaderboard" },
+  "/api/oanquan/ws": { game: "oanquan", kind: "ws" },
+  "/api/oanquan/rooms": { game: "oanquan", kind: "rooms" },
+  "/api/oanquan/leaderboard": { game: "oanquan", kind: "leaderboard" },
 };
 
 export function createGameServer(): Server {

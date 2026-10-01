@@ -1,6 +1,6 @@
 # be_game
 
-> Năm game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`), **Mèo Nổ** (`/api/meono/*`), **Cờ Tỷ Phú** (`/api/typhu/*`), **Đá Quý** — lối chơi Splendor (`/api/splendor/*`) và **Đấu Súng** — lối chơi Bang! kèm 7 bản mở rộng (`/api/bang/*`), cùng chung hạ tầng hub / Redis / chat. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`), code ở `src/game/`, `src/meono/`, `src/typhu/`, `src/splendor/`, `src/bang/`. Trên Vercel, các endpoint `/api/<game>/<kind>` dùng chung một function động `api/[game]/[kind].ts` để nằm trong giới hạn 12 function của gói Hobby.
+> Bảy game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`), **Mèo Nổ** (`/api/meono/*`), **Cờ Tỷ Phú** (`/api/typhu/*`), **Đá Quý** — lối chơi Splendor (`/api/splendor/*`), **Cờ Cá Ngựa** (`/api/cangua/*`), **Ô Ăn Quan** (`/api/oanquan/*`) và **Đấu Súng** — lối chơi Bang! kèm 7 bản mở rộng (`/api/bang/*`), cùng chung hạ tầng hub / Redis / chat. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`), code ở `src/game/`, `src/meono/`, `src/typhu/`, `src/splendor/`, `src/bang/`, `src/cangua/`, `src/oanquan/`. Trên Vercel, các endpoint `/api/<game>/<kind>` dùng chung một function động `api/[game]/[kind].ts` để nằm trong giới hạn 12 function của gói Hobby.
 
 Backend cho các game online trên portfolio, gồm luật chơi, phòng chơi và WebSocket realtime. Phần giao diện nằm trong repo [portfolio](https://github.com/ThachHuynhIT/portfolio) (`/tien-len` …) và kết nối tới backend này qua `NEXT_PUBLIC_TIENLEN_SERVER_URL`.
 
@@ -23,18 +23,24 @@ Redis (Upstash): trạng thái phòng dùng chung giữa các instance
 | Cờ Tỷ Phú | `src/typhu/` | 2–6 | `/api/typhu/ws` | `/api/typhu/rooms` | `/api/typhu/leaderboard` |
 | Đá Quý (Splendor) | `src/splendor/` | 2–4 | `/api/splendor/ws` | `/api/splendor/rooms` | `/api/splendor/leaderboard` |
 | Đấu Súng (Bang!) | `src/bang/` | 3–8 | `/api/bang/ws` | `/api/bang/rooms` | `/api/bang/leaderboard` |
+| Cờ Cá Ngựa | `src/cangua/` | 2–4 | `/api/cangua/ws` | `/api/cangua/rooms` | `/api/cangua/leaderboard` |
+| Ô Ăn Quan | `src/oanquan/` | 2 | `/api/oanquan/ws` | `/api/oanquan/rooms` | `/api/oanquan/leaderboard` |
 
 `/rooms` trả các phòng còn người (tối đa 30), `/leaderboard?limit=20` (1–100) trả điểm mọi thời đại. `GET /api/health` kiểm tra store (Redis/RAM, vòng pub/sub). Bảng route nằm ở `src/server/app.ts`.
 
-Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts` (Tiến Lên + health) và `api/[game]/[kind].ts` cho mọi endpoint của 4 game còn lại. Mọi file đều export cùng một server; `app.ts` định tuyến theo path. Game mới chỉ cần thêm route trong `app.ts`, không thêm file vào `api/`.
+Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts` (Tiến Lên + health) và `api/[game]/[kind].ts` cho mọi endpoint của 6 game còn lại. Mọi file đều export cùng một server; `app.ts` định tuyến theo path. Game mới chỉ cần thêm route trong `app.ts`, không thêm file vào `api/`.
 
 **Mèo Nổ** (`src/meono/cards.ts`): 6 gói mở rộng (`imploding`, `streaking`, `barking`, `attacking`, `defending`, `zombie`). Chủ phòng chọn một trong 16 chế độ `PRESETS` (mỗi chế độ có số người tối thiểu/tối đa riêng) hoặc `custom` để tự tick gói; khi đó tối đa 5 người với bộ gốc, 6 nếu có gói bất kỳ, 7 nếu có Attacking Kittens. Không ai được "Không!" (Nope) chặn lá của chính mình: lá Không! đầu tiên không thể do người đánh lá gốc chơi, và không ai chặn lại lá Không! của chính mình (người đánh lá gốc vẫn được Không! đáp lại người vừa chặn).
+
+**Ô Ăn Quan** (`src/oanquan/`, 2 người): 12 ô thành vòng — ô 0 và ô 6 là ô quan, người thứ nhất giữ ô 1–5, người thứ hai giữ ô 7–11; hướng `+1` là "phải" theo góc nhìn người đi. Lệnh `{ type: "move", cell, dir: 1 | -1 }`: bốc một ô dân bên mình, rải từng viên, gặp ô dân có quân thì rải tiếp, gặp ô quan có quân thì dừng, gặp ô trống rồi ô có quân thì ăn (ăn liên tiếp), hai ô trống liền thì dừng. Luật bàn: giá quan 5/10 dân, **quan non** (ô quan còn quan mà dưới 5 dân thì không ăn được; bật sẵn), thời gian lượt 15/20/30/45 giây, điểm Nhất/Nhì. Đầu lượt mà hàng mình trống thì tự rải quân (5 dân từ phần đã ăn, thiếu thì vay đối thủ — khoản vay trả lại khi tính điểm; không đủ cả hai bên thì thua). Hết cả hai quan và ô quan trống thì mỗi bên thu dân trên hàng mình; điểm = dân + quan × giá − vay + cho vay, có thể hoà (0 điểm xếp hạng). `lastMove` trong view gồm bàn trước nước đi và từng bước (`pick` / `sow` / `capture`) để client diễn hoạt. Hết giờ hoặc mất kết nối thì máy đi một nước hợp lệ ngẫu nhiên.
 
 ## Cấu trúc
 
 | Đường dẫn | Nội dung |
 |---|---|
 | `src/bang/` | Đấu Súng (xem mục riêng bên dưới) |
+| `src/cangua/` | Cờ Cá Ngựa: `board` (bàn 15×15, đường 56 ô, chuồng 6 bậc — chép sang portfolio), `game`, `room`, `protocol`. Luật tuỳ chọn: xuất quân bằng 1 hoặc 6, không nhảy qua đầu ngựa, lên chuồng theo số, ba lần 6 mất lượt, xếp hạng hết |
+| `src/oanquan/` | Ô Ăn Quan: `board` (bố cục 12 ô, tuỳ chọn), `game`, `room`, `protocol` (xem mục riêng bên dưới) |
 | `src/meono/`, `src/typhu/`, `src/splendor/` | Mèo Nổ, Cờ Tỷ Phú, Đá Quý: `cards`/`board`, `game`, `room`, `protocol` |
 | `src/game/` | Luật chơi thuần TS: `cards`, `combos` (nhận diện bộ, chặn, chặt), `rules` (tới trắng), `game` (máy trạng thái ván), `room` (vòng đời phòng, không dùng timer), `protocol` (định dạng message) |
 | `src/server/hub.ts` | Xử lý từng kết nối: load → apply → compare-and-swap, phát thay đổi qua pub/sub, timer lượt, gửi `reconnect` trước khi hết thời gian của function |

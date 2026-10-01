@@ -82,6 +82,36 @@ import {
   tickBang,
 } from "../bang/room";
 import type { BangCommand } from "../bang/protocol";
+import {
+  type CNRoom,
+  cnCommand,
+  cnHeartbeat,
+  cnSummary,
+  cnView,
+  findByToken as findCNByToken,
+  isCNActive,
+  joinCN,
+  leaveCN,
+  newCNRoom,
+  nextCNTickAt,
+  tickCN,
+} from "../cangua/room";
+import type { CNCommand } from "../cangua/protocol";
+import {
+  type OQRoom,
+  findByToken as findOQByToken,
+  isOQActive,
+  joinOQ,
+  leaveOQ,
+  newOQRoom,
+  nextOQTickAt,
+  oqCommand,
+  oqHeartbeat,
+  oqSummary,
+  oqView,
+  tickOQ,
+} from "../oanquan/room";
+import type { OQCommand } from "../oanquan/protocol";
 import type { CodedRoom, GameKind } from "./store";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -245,10 +275,58 @@ export const bangAdapter: GameAdapter<BangRoom> = {
   lastRecord: (room) => room.history?.[room.history.length - 1],
 };
 
+export const oanquanAdapter: GameAdapter<OQRoom> = {
+  game: "oanquan",
+  newRoom: newOQRoom,
+  join: (room, token, name, now, newId) => joinOQ(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: oqHeartbeat,
+  leave: leaveOQ,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => oqCommand(room, token, msg as unknown as OQCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findOQByToken(room, token);
+      return p ? oqView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? oqView(room, null, now) : null;
+  },
+  tick: tickOQ,
+  nextTickAt: nextOQTickAt,
+  summary: oqSummary,
+  isActive: isOQActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
+export const canguaAdapter: GameAdapter<CNRoom> = {
+  game: "cangua",
+  newRoom: newCNRoom,
+  join: (room, token, name, now, newId) => joinCN(room, token, name, now, newId),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: cnHeartbeat,
+  leave: leaveCN,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => cnCommand(room, token, msg as unknown as CNCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findCNByToken(room, token);
+      return p ? cnView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? cnView(room, null, now) : null;
+  },
+  tick: (room, now) => tickCN(room, now),
+  nextTickAt: nextCNTickAt,
+  summary: cnSummary,
+  isActive: isCNActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
 export const ADAPTERS: Record<GameKind, GameAdapter> = {
   tienlen: tienlenAdapter as unknown as GameAdapter,
   meono: meonoAdapter as unknown as GameAdapter,
   typhu: typhuAdapter as unknown as GameAdapter,
   splendor: splendorAdapter as unknown as GameAdapter,
   bang: bangAdapter as unknown as GameAdapter,
+  cangua: canguaAdapter as unknown as GameAdapter,
+  oanquan: oanquanAdapter as unknown as GameAdapter,
 };
