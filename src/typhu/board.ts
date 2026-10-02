@@ -68,9 +68,9 @@ export const BOARD: Square[] = [
   prop("Phú Quốc", "Đảo ngọc", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]),
   { kind: "air", name: "Sân bay Nội Bài", price: 200 },
   { kind: "chance", name: "Cơ hội" },
-  prop("Hà Nội", "Hồ Hoàn Kiếm", "darkblue", 350, 200, [35, 175, 500, 1100, 1300, 1500]),
+  prop("Hà Nội", "Hồ Hoàn Kiếm", "darkblue", 350, 200, [50, 250, 700, 1600, 1900, 2200]),
   { kind: "tax", name: "Thuế xa xỉ", amount: 100 },
-  prop("TP. Hồ Chí Minh", "Phố đi bộ Nguyễn Huệ", "darkblue", 400, 200, [50, 200, 600, 1400, 1700, 2000]),
+  prop("TP. Hồ Chí Minh", "Phố đi bộ Nguyễn Huệ", "darkblue", 400, 200, [70, 300, 900, 2000, 2400, 2800]),
 ];
 
 export const BOARD_SIZE = BOARD.length;

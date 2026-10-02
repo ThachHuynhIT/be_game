@@ -55,6 +55,42 @@ interface LocalRoom {
   dirty: boolean;
 }
 
+/** Icon + colour a player picked in the games top bar; shown next to their name at every table. */
+export interface PlayerLook {
+  icon: string;
+  color: string;
+}
+
+/** Accepts only a short icon (emoji / letter, or none) and a #rrggbb colour; anything else is dropped. */
+export function cleanLook(raw: unknown): PlayerLook | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { icon, color } = raw as Record<string, unknown>;
+  if (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) return null;
+  const ic = typeof icon === "string" ? [...icon].slice(0, 4).join("") : "";
+  return { icon: ic, color: color.toLowerCase() };
+}
+
+type LookRoom = { seats: ({ token: string; name: string } | null)[]; spectators?: { token: string; name: string }[]; looks?: Record<string, PlayerLook> };
+
+/** Remember this token's look (dropping looks of tokens that left the room). */
+function setLook(room: LookRoom, token: string, look: PlayerLook | null) {
+  const present = new Set([...room.seats.flatMap((p) => (p ? [p.token] : [])), ...(room.spectators ?? []).map((x) => x.token)]);
+  const looks: Record<string, PlayerLook> = {};
+  for (const [t, l] of Object.entries(room.looks ?? {})) if (present.has(t) && t !== token) looks[t] = l;
+  if (look && present.has(token)) looks[token] = look;
+  if (JSON.stringify(looks) !== JSON.stringify(room.looks ?? {})) room.looks = looks;
+}
+
+/** Looks by player name for the views (tokens never leave the server). */
+function looksByName(room: LookRoom): Record<string, PlayerLook> {
+  const out: Record<string, PlayerLook> = {};
+  for (const p of [...room.seats, ...(room.spectators ?? [])]) {
+    const l = p && room.looks?.[p.token];
+    if (p && l) out[p.name] = l;
+  }
+  return out;
+}
+
 const newId = (len = 8) => randomBytes(len).toString("base64url").slice(0, len);
 
 export class RoomHub<S extends CodedRoom = CodedRoom> {
@@ -149,7 +185,10 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
         for (const conn of r.conns) {
           if (!conn.token) continue;
           const view = this.adapter.view(cur.state, conn.token, conn.role, now);
-          if (view) send(conn.socket, { type: "state", view });
+          if (view) {
+            const looks = looksByName(cur.state as unknown as LookRoom);
+            send(conn.socket, { type: "state", view: typeof view === "object" && Object.keys(looks).length ? { ...view, looks } : view });
+          }
         }
         this.arm(code, r, cur.state, now);
       } while (r.dirty);
@@ -261,9 +300,12 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       const code = cleanCode(msg.code);
       const token = String(msg.token ?? "");
       const name = String(msg.name ?? "");
-      const res = await hub.mutate(code, (room, now) =>
-        msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now),
-      );
+      const look = cleanLook(msg.look);
+      const res = await hub.mutate(code, (room, now) => {
+        const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
+        if (r.ok) setLook(room as unknown as LookRoom, token, look);
+        return r;
+      });
       if (!res.found) return ack(id, { ok: false, error: "Không tìm thấy phòng" });
       if (!res.result.ok) return ack(id, res.result);
       if (conn.code && conn.code !== code) hub.remove(conn);

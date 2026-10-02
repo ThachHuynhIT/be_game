@@ -225,7 +225,7 @@ describe("debt and bankruptcy", () => {
     s.deeds[1] = { owner: "a", houses: 0, mortgaged: false };
     s.ps.a.cash = 100;
     s.ps.a.pos = 33;
-    rollDice(s, "a", T, names, dice(2, 4)); // → 39 with a hotel: 2000
+    rollDice(s, "a", T, names, dice(2, 4)); // → 39 with a hotel: 2800
     expect(s.phase).toBe("debt");
     expect(payDebt(s, "a", T, names).ok).toBe(false);
     expect(declareBankrupt(s, "a", T, names).ok).toBe(true);
