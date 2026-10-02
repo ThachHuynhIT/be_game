@@ -1,5 +1,7 @@
 # be_game
 
+> Tài liệu cho developer (kiến trúc, giao thức, luật từng game, cách thêm game mới): [`docs/GUIDE.md`](docs/GUIDE.md).
+
 > Bảy game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`), **Mèo Nổ** (`/api/meono/*`), **Cờ Tỷ Phú** (`/api/typhu/*`), **Đá Quý** — lối chơi Splendor (`/api/splendor/*`), **Cờ Cá Ngựa** (`/api/cangua/*`), **Ô Ăn Quan** (`/api/oanquan/*`) và **Đấu Súng** — lối chơi Bang! kèm 7 bản mở rộng (`/api/bang/*`), cùng chung hạ tầng hub / Redis / chat. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`), code ở `src/game/`, `src/meono/`, `src/typhu/`, `src/splendor/`, `src/bang/`, `src/cangua/`, `src/oanquan/`. Trên Vercel, các endpoint `/api/<game>/<kind>` dùng chung một function động `api/[game]/[kind].ts` để nằm trong giới hạn 12 function của gói Hobby.
 
 Backend cho các game online trên portfolio, gồm luật chơi, phòng chơi và WebSocket realtime. Phần giao diện nằm trong repo [portfolio](https://github.com/ThachHuynhIT/portfolio) (`/tien-len` …) và kết nối tới backend này qua `NEXT_PUBLIC_TIENLEN_SERVER_URL`.
