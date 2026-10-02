@@ -134,6 +134,7 @@ export function joinTP(
     player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0, points: 0, games: 0 };
     room.seats[free] = player;
   }
+  ensureUniquePieces(room);
   player.lastSeen = now;
   delete player.left;
   const host = findById(room, room.hostId);
@@ -277,6 +278,24 @@ export function pieceOf(room: TPRoom, p: TPPlayer): { emoji: string; color: stri
     if (!picked.some((x) => x.emoji === d.emoji || x.color === d.color)) return d;
   }
   return DEFAULT_PIECES[start % DEFAULT_PIECES.length];
+}
+
+/** Everyone must hold a different emoji and colour: a player who collides with an earlier seat gets a random free piece. */
+export function ensureUniquePieces(room: TPRoom, random: () => number = Math.random) {
+  const taken: { emoji: string; color: string }[] = [];
+  for (const p of room.seats) {
+    if (!p) continue;
+    let piece = pieceOf(room, p);
+    if (taken.some((t) => t.emoji === piece.emoji || t.color === piece.color)) {
+      const emojis = PIECE_EMOJIS.filter((e) => !taken.some((t) => t.emoji === e));
+      const colors = PIECE_COLORS.filter((c) => !taken.some((t) => t.color === c));
+      if (emojis.length && colors.length) {
+        piece = { emoji: emojis[Math.floor(random() * emojis.length)], color: colors[Math.floor(random() * colors.length)] };
+        p.piece = piece;
+      }
+    }
+    taken.push(piece);
+  }
 }
 
 /** Change my token's emoji and colour; both must be unused by everyone else at the table. */
