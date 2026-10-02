@@ -388,6 +388,8 @@ describe("Streaking Kittens pack", () => {
     g.turn = a;
     g.hands[a] = [card("mark"), card("curse")];
     g.hands[b] = [card("taco"), card("melon")];
+    // Safe draws: a shuffled deck could hand A or B an Exploding Kitten and stall the turn change below.
+    g.deck = [card("taco"), card("melon"), card("taco"), card("melon")];
     meoCommand(room, "token-aaaa", { type: "mplay", cards: [g.hands[a][0].id], target: b }, T);
     tickMeo(room, T + 8_000);
     const seenByA = meoView(room, room.seats[0], T + 8_000).seats.find((x) => x?.id === b)!;
