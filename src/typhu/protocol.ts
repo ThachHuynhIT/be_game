@@ -39,6 +39,24 @@ export interface TPSettings {
   doubleRoll: boolean;
 }
 
+/** A player's token: the emoji that walks the board and the colour of their houses / deeds. */
+export interface TPPiece {
+  emoji: string;
+  color: string;
+}
+/** Pieces every seat starts with (by seat index). */
+export const DEFAULT_PIECES: TPPiece[] = [
+  { emoji: "🛵", color: "#ef4444" },
+  { emoji: "🐃", color: "#3b82f6" },
+  { emoji: "🚲", color: "#22c55e" },
+  { emoji: "🚤", color: "#eab308" },
+  { emoji: "🐉", color: "#a855f7" },
+  { emoji: "🎩", color: "#f97316" },
+];
+/** What a player may pick with `{ type: "pick", emoji, color }` — nobody else at the table may hold the same emoji or colour. */
+export const PIECE_EMOJIS = ["🛵", "🐃", "🚲", "🚤", "🐉", "🎩", "🚗", "🐘", "🦅", "🐅", "🚁", "🐒"];
+export const PIECE_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#f97316", "#06b6d4", "#ec4899"];
+
 export interface TPSeatView {
   id: string;
   name: string;
@@ -49,8 +67,10 @@ export interface TPSeatView {
   points: number;
   games: number;
   wins: number;
-  /** Token colour index (stable per seat). */
+  /** Token colour index (stable per seat) — the starting piece is DEFAULT_PIECES[color]. */
   color: number;
+  /** The piece this player plays with (their pick, else a starting piece nobody else holds). */
+  piece: TPPiece;
 }
 
 export interface TPPlayerView {
@@ -138,6 +158,7 @@ export type TPCommand =
       jailRent?: boolean;
       doubleRoll?: boolean;
     }
+  | { type: "pick"; emoji: string; color: string }
   | { type: "kick"; playerId: string }
   | { type: "roll" | "buy" | "skip" | "end" | "payjail" | "jailcard" | "paydebt" | "bankrupt" }
   | { type: "build" | "sell" | "sellland" | "mortgage" | "unmortgage"; pos: number }

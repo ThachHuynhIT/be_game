@@ -51,7 +51,7 @@ import {
   tickGame,
   unmortgage,
 } from "./game";
-import type { TPCommand, TPRoomSummary, TPRoomView, TPSettings } from "./protocol";
+import { DEFAULT_PIECES, PIECE_COLORS, PIECE_EMOJIS, type TPCommand, type TPRoomSummary, type TPRoomView, type TPSettings } from "./protocol";
 
 /** Room lifecycle for Cờ Tỷ Phú — same presence / spectator / scoring rules as the other games. */
 
@@ -65,6 +65,8 @@ export interface TPPlayer {
   wins: number;
   points: number;
   games: number;
+  /** Picked token (emoji + colour); unset = the seat's starting piece. */
+  piece?: { emoji: string; color: string };
 }
 
 export interface TPRoom {
@@ -264,6 +266,34 @@ function kickTP(room: TPRoom, host: TPPlayer, targetId: unknown, now: number): R
   return { ok: true };
 }
 
+/** The piece a seat plays with: its pick, or the starting piece of its seat. */
+export function pieceOf(room: TPRoom, p: TPPlayer): { emoji: string; color: string } {
+  if (p.piece) return p.piece;
+  const picked = room.seats.flatMap((o) => (o && o !== p && o.piece ? [o.piece] : []));
+  const start = Math.max(0, room.seats.indexOf(p));
+  // Own seat's starting piece unless someone picked its emoji or colour; then the next free one.
+  for (let k = 0; k < DEFAULT_PIECES.length; k++) {
+    const d = DEFAULT_PIECES[(start + k) % DEFAULT_PIECES.length];
+    if (!picked.some((x) => x.emoji === d.emoji || x.color === d.color)) return d;
+  }
+  return DEFAULT_PIECES[start % DEFAULT_PIECES.length];
+}
+
+/** Change my token's emoji and colour; both must be unused by everyone else at the table. */
+function pickPiece(room: TPRoom, p: TPPlayer, emoji: unknown, color: unknown): Result {
+  if (typeof emoji !== "string" || !PIECE_EMOJIS.includes(emoji) || typeof color !== "string" || !PIECE_COLORS.includes(color)) {
+    return { ok: false, error: "Quân cờ hoặc màu không hợp lệ" };
+  }
+  for (const o of room.seats) {
+    if (!o || o === p) continue;
+    const used = pieceOf(room, o);
+    if (used.emoji === emoji) return { ok: false, error: "Quân này đã có người dùng" };
+    if (used.color === color) return { ok: false, error: "Màu này đã có người dùng" };
+  }
+  p.piece = { emoji, color };
+  return { ok: true };
+}
+
 const posOf = (msg: TPCommand) => ("pos" in msg && Number.isInteger(msg.pos) ? msg.pos : -1);
 
 export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: number): Result {
@@ -271,6 +301,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
   if (msg.type === "start") return startTP(room, p, now);
   if (msg.type === "kick") return kickTP(room, p, msg.playerId, now);
+  if (msg.type === "pick") return pickPiece(room, p, msg.emoji, msg.color);
   if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
@@ -434,6 +465,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
             games: p.games,
             wins: p.wins,
             color: i,
+            piece: pieceOf(room, p),
           }
         : null,
     ),

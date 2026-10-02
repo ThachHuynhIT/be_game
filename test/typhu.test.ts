@@ -600,3 +600,27 @@ describe("settings", () => {
     expect(tpView(room, room.seats[0], T).settings.first).toBe(6);
   });
 });
+
+describe("token picking", () => {
+  it("lets a player pick an emoji and colour nobody else holds", () => {
+    let n = 0;
+    const room = newTPRoom("PICK");
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    const seatPiece = (token: string) => tpView(room, token, T).seats.find((s) => s?.id === (token === "token-aaaa" ? "p1" : "p2"))!.piece;
+    expect(seatPiece("token-aaaa")).toEqual({ emoji: "🛵", color: "#ef4444" });
+    expect(seatPiece("token-bbbb")).toEqual({ emoji: "🐃", color: "#3b82f6" });
+    // Bình's starting emoji / colour are taken for An.
+    expect(tpCommand(room, "token-aaaa", { type: "pick", emoji: "🐃", color: "#06b6d4" }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "pick", emoji: "🚗", color: "#3b82f6" }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "pick", emoji: "💩", color: "#06b6d4" }, T).ok).toBe(false);
+    expect(tpCommand(room, "token-aaaa", { type: "pick", emoji: "🚗", color: "#06b6d4" }, T).ok).toBe(true);
+    expect(seatPiece("token-aaaa")).toEqual({ emoji: "🚗", color: "#06b6d4" });
+    // An's old starting piece is free again; a third player never gets a duplicate.
+    expect(tpCommand(room, "token-bbbb", { type: "pick", emoji: "🛵", color: "#ef4444" }, T).ok).toBe(true);
+    joinTP(room, "token-cccc", "Cường", T, () => `p${++n}`);
+    const c = tpView(room, "token-cccc", T).seats.find((s) => s?.id === "p3")!.piece;
+    expect([c.emoji, c.color]).not.toContain("🚗");
+    expect(c.emoji === "🛵" || c.color === "#ef4444" || c.color === "#06b6d4" || c.emoji === "🚗").toBe(false);
+  });
+});
