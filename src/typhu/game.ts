@@ -783,13 +783,16 @@ export function sellLandBlocker(s: TPState, id: string, pos: number): string | n
   if (!rulesOf(s).sellLand) return "Luật bàn không cho bán đất";
   const d = s.deeds[pos];
   if (!d || d.owner !== id) return "Đây không phải đất của bạn";
-  if (d.mortgaged) return "Chuộc lại đất trước khi bán";
   const b = BOARD[pos];
   if (b.kind === "prop" && groupPositions(b.group).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) return "Bán hết nhà trong nhóm trước";
   return null;
 }
 
-export const landSalePrice = (s: TPState, pos: number) => landSaleValue(BOARD[pos] as Ownable, rulesOf(s));
+/** Cash from selling `pos` back to the bank. Mortgaged land already paid out its mortgage value, so only the difference is paid. */
+export const landSalePrice = (s: TPState, pos: number) => {
+  const sqr = BOARD[pos] as Ownable;
+  return Math.max(0, landSaleValue(sqr, rulesOf(s)) - (s.deeds[pos]?.mortgaged ? mortgageValue(sqr) : 0));
+};
 
 export function build(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
@@ -826,9 +829,10 @@ export function sellLand(s: TPState, id: string, pos: number, now: number, names
   const why = sellLandBlocker(s, id, pos);
   if (why) return fail(why);
   const price = landSalePrice(s, pos);
+  const wasMortgaged = s.deeds[pos].mortgaged;
   delete s.deeds[pos];
   s.ps[id].cash += price;
-  log(s, now, `🏷️ ${names(id)} bán ${BOARD[pos].name} cho ngân hàng, thu ${money(price)} — ai cũng mua lại được`, "info");
+  log(s, now, `🏷️ ${names(id)} bán ${BOARD[pos].name} cho ngân hàng, thu ${money(price)}${wasMortgaged ? " (trừ phần đã thế chấp)" : ""} — ai cũng mua lại được`, "info");
   return OK;
 }
 

@@ -155,3 +155,23 @@ describe("RoomHub over WebSocket messages", () => {
     expect(new Set(v.seats.map((s) => s!.id)).size).toBe(4);
   });
 });
+
+describe("player look (icon + colour)", () => {
+  it("is relayed by name to everyone; bad looks are ignored and tokens never leak", async () => {
+    const hub = createRoomHub(createMemoryRoomStore());
+    const a = connect(hub);
+    const code = ((await a.request({ type: "create" })) as { code: string }).code;
+    await a.request({ type: "join", code, name: "An", token: "token-aaaaaaaa", look: { icon: "🦊", color: "#F472B6" } });
+    const b = connect(hub);
+    await b.request({ type: "join", code, name: "Bình", token: "token-bbbbbbbb", look: { icon: "x", color: "javascript:1" } });
+    const looks = (v: unknown) => (v as { looks?: Record<string, { icon: string; color: string }> }).looks;
+    const va = await a.view((v) => !!looks(v)?.An);
+    expect(looks(va)).toEqual({ An: { icon: "🦊", color: "#f472b6" } });
+    expect(JSON.stringify(va)).not.toContain("token-");
+    // Changing it mid-game reaches the other player too.
+    expect((await a.request({ type: "look", look: { icon: "🐲", color: "#22d3ee" } })).ok).toBe(true);
+    const vb = await b.view((v) => looks(v)?.An?.icon === "🐲");
+    expect(looks(vb)?.An).toEqual({ icon: "🐲", color: "#22d3ee" });
+    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
+  });
+});
