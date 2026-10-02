@@ -44,7 +44,7 @@ Mỗi bộ là mảng chỉ số đã xáo (`s.chance`, `s.chest`); rút lá đ�
 
 - `charge(payer, amount, to | null, reason, split?)`: đủ tiền → trả ngay; thiếu → mở `debt {amount, to, split?, reason, thenMove?}`, phase `debt` (deadline `DEBT_MS` = 60 s). Chỉ áp dụng cho người đang đi lượt.
 - Tiền trả cho ngân hàng (thuế, phạt, thẻ âm, sửa nhà, phạt ra tù) vào quỹ `pot` khi bật `parkingPot`; tiền trả cho người (`to`) hoặc chia đều (`split`, "khao mọi người") thì không.
-- Trong `debt`: bán nhà (`sell`), thế chấp (`mortgage`), bán đất (`sellland`), trade… rồi `paydebt`; hoặc `bankrupt`. Không được `build`/`unmortgage` khi nợ. **Tự trả**: sau `sell` hoặc `mortgage` thành công mà tiền ≥ nợ → `tpCommand` gọi `payDebt` luôn (không áp dụng cho `sellland`).
+- Trong `debt`: bán nhà (`sell`), thế chấp (`mortgage`), bán đất (`sellland`), trade… rồi `paydebt`; hoặc `bankrupt`. Không được `build`/`unmortgage` khi nợ. **Tự trả**: sau `sell`, `mortgage` hoặc `sellland` thành công mà tiền ≥ nợ → `tpCommand` gọi `payDebt` luôn.
 - **Tự thanh lý** (`autoLiquidate`, khi hết giờ nợ, hoặc người **không đi lượt** phải trả tiền sinh nhật): bán nhà từ lô nhiều nhà nhất, từng căn (`houseRefund`), rồi thế chấp lô rẻ nhất trước, tới khi đủ hoặc hết tài sản. Vẫn thiếu → phá sản (sinh nhật: phá sản cho người được mừng).
 - **Phá sản** (`bankrupt(id, creditor)`): nhà bán lại `builtRefund` (cộng vào tiền mặt), rồi:
   - `bankruptTo = "creditor"` và chủ nợ là người chơi còn sống → **mọi đất** (giữ trạng thái thế chấp) về chủ nợ.
@@ -205,7 +205,7 @@ Summary: `{code, status, players, spectators, games}`.
 
 ## Test
 
-`test/typhu.test.ts` (38 test): bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
+`test/typhu.test.ts` (40 test): bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
 
 Viết test xác định:
 
@@ -224,11 +224,8 @@ Mỗi lần đổ xúc xắc tiêu thụ 2 giá trị (cộng thêm 2 nếu là 
 
 - Luôn dùng `rulesOf(s)` (không đọc `s.rules` trực tiếp) và `tpSettingsOf(room)` — phòng/ván cũ trong Redis thiếu field.
 - `board.ts` phải giữ **không phụ thuộc** để chép nguyên sang portfolio; đổi giá/helper giá thì chép lại.
-- `needGroup = false` + `buildRule = "even"`: lô của người khác tính 0 nhà nên mỗi lô chỉ xây được **1 nhà** khi chưa đủ nhóm; với `chain`, nhà 4/khách sạn cần mọi lô trong nhóm ≥3/≥4 nên cũng cần đủ nhóm.
+- Luật `even` / `chain` chỉ so các lô **của chính mình** trong nhóm (`myGroup`), nên khi `needGroup = false` có thể xây đều trên các lô mình đang có; với `chain`, "mọi lô" cũng là mọi lô của mình.
 - Trade lô có nhà có thể tạo nhóm "lẻ" (nhà nằm trên nhóm không còn đủ chủ) — được phép; luật xây/bán sau đó vẫn tính theo lô của từng chủ.
-- Tự trả nợ chỉ chạy sau `sell`/`mortgage`, **không** sau `sellland` → người chơi phải gửi `paydebt`.
 - `answerTrade` khi re-check thất bại **xoá trade rồi mới trả lỗi** — thay đổi được lưu.
-- Comment của `TPRules.sellLand` và `sellLand()` ghi "half its price", nhưng giá thật là `landSalePct` (mặc định 70%).
-- `land()` có `case "parking"` bị lặp hai lần (nhánh thứ hai không bao giờ chạy). `liquidValue` được export nhưng không dùng.
-- `view.settings` là settings của phòng; với ván cũ dùng `LEGACY_RULES`, luật thật của ván có thể khác cái hiển thị.
+- Khi ván đang chơi, `view.settings` = settings phòng đè bởi `rulesOf(ván)`, nên UI luôn hiện đúng luật ván đang áp dụng (kể cả ván cũ dùng `LEGACY_RULES`).
 - Người phá sản không còn `inPlayingGame` → ghế của họ (nếu offline quá `SEAT_GRACE_MS` hoặc đã `leave`) bị giải phóng khi có người mới `join` giữa ván (`joinTP` gọi `dropGoneSeats`); `nameOf` khi đó chỉ còn tên dự phòng từ `history` (nếu họ từng có ván xong), không thì `"?"`.

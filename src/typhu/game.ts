@@ -135,7 +135,7 @@ export interface TPState {
  *   "chain": house 2 needs 2 lots of the group with a house, house 3 needs 2 lots with 2 houses,
  *   house 4 needs every lot at 3, a hotel needs every lot at 4.
  * - needGroup: owning the whole colour group is required before building.
- * - sellLand: land (with no houses on its group) can be sold back to the bank for half its price.
+ * - sellLand: land (with no houses on its group) can be sold back to the bank for landSalePct of its price.
  * - bankruptTo "bank": a bankrupt player's land goes back on the market (others can buy it
  *   again); "creditor": it all goes to whoever they owed.
  * - goSalary: cash for passing Khởi hành.
@@ -283,18 +283,6 @@ export function netWorth(s: TPState, id: string) {
   return total;
 }
 
-/** Cash a player could raise right now by selling every building and mortgaging everything. */
-export function liquidValue(s: TPState, id: string) {
-  let total = s.ps[id].cash;
-  for (const pos of ownedBy(s, id)) {
-    const d = s.deeds[pos];
-    const b = sq(pos);
-    if (!d.mortgaged) total += mortgageValue(b);
-    if (b.kind === "prop") total += builtRefund(b, d.houses, rulesOf(s));
-  }
-  return total;
-}
-
 // ─── Movement & landing ──────────────────────────────────────────────
 
 function moveTo(s: TPState, id: string, pos: number, now: number, names: NameOf, passGo = true) {
@@ -356,13 +344,6 @@ function land(s: TPState, id: string, now: number, names: NameOf, random: Random
     case "chance":
     case "chest":
       drawDeckCard(s, id, b.kind, now, names, random);
-      return;
-    case "parking":
-      if (s.pot) {
-        p.cash += s.pot;
-        log(s, now, `☕ ${names(id)} nghỉ chân và hốt quỹ ${money(s.pot)}!`, "money");
-        s.pot = 0;
-      }
       return;
     case "parking":
       if (s.pot) {
@@ -732,9 +713,13 @@ function canManage(s: TPState, id: string, pos: number): Result | null {
   return null;
 }
 
-/** Houses on each lot of `pos`'s group that `id` owns (0 for lots owned by others / nobody). */
-function groupHouses(s: TPState, id: string, group: number[]) {
-  return group.map((g) => (s.deeds[g]?.owner === id ? s.deeds[g].houses : 0));
+/**
+ * My lots of a colour group and their houses. Lots owned by others / nobody are left out, so without the
+ * full-group rule the even / chain rules only compare the lots I actually own.
+ */
+function myGroup(s: TPState, id: string, group: number[]) {
+  const lots = group.filter((g) => s.deeds[g]?.owner === id);
+  return { lots, houses: lots.map((g) => s.deeds[g].houses) };
 }
 
 /** Under the chain rule: is a lot allowed to stand at `level` houses, given the whole group? */
@@ -758,11 +743,11 @@ export function buildBlocker(s: TPState, id: string, pos: number): string | null
   const group = groupPositions(b.group);
   if (group.some((g) => s.deeds[g]?.owner === id && s.deeds[g].mortgaged)) return "Có đất trong nhóm đang thế chấp";
   if (d.houses >= MAX_HOUSES) return "Đã có khách sạn";
-  const houses = groupHouses(s, id, group);
+  const { lots, houses } = myGroup(s, id, group);
   if (r.buildRule === "even") {
     if (d.houses > Math.min(...houses)) return "Phải xây đều các ô trong nhóm";
   } else {
-    const after = houses.map((h, i) => (group[i] === pos ? h + 1 : h));
+    const after = houses.map((h, i) => (lots[i] === pos ? h + 1 : h));
     if (!chainAllows(d.houses + 1, after)) {
       return (
         ["", "", "Nhà 2: cần ít nhất 2 ô trong nhóm đã có nhà", "Nhà 3: cần ít nhất 2 ô trong nhóm đã có 2 nhà", "Nhà 4: mọi ô trong nhóm phải có 3 nhà", "Khách sạn: mọi ô trong nhóm phải có 4 nhà"][
@@ -782,13 +767,13 @@ export function sellBlocker(s: TPState, id: string, pos: number): string | null 
   const d = s.deeds[pos];
   if (b.kind !== "prop" || !d || d.owner !== id || d.houses === 0) return "Không có nhà để bán";
   const group = groupPositions(b.group);
-  const houses = groupHouses(s, id, group);
+  const { lots, houses } = myGroup(s, id, group);
   if (rulesOf(s).buildRule === "even") {
     if (d.houses < Math.max(...houses)) return "Phải bán đều các ô trong nhóm";
     return null;
   }
   // Chain: after the sale every lot must still meet the rule for the houses it keeps.
-  const after = houses.map((h, i) => (group[i] === pos ? h - 1 : h));
+  const after = houses.map((h, i) => (lots[i] === pos ? h - 1 : h));
   if (!after.every((h) => chainAllows(h, after))) return "Bán nhà ở ô cao hơn trong nhóm trước";
   return null;
 }
@@ -834,7 +819,7 @@ export function sellHouse(s: TPState, id: string, pos: number, now: number, name
   return OK;
 }
 
-/** Sell a piece of land back to the bank for half its price; it's back on the market. */
+/** Sell a piece of land back to the bank for landSalePct of its price; it's back on the market. */
 export function sellLand(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
   if (bad) return bad;

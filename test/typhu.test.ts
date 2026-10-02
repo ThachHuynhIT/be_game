@@ -385,6 +385,39 @@ describe("table settings", () => {
     expect(s.ps.a.cash).toBe(1500 + 200 - 260 + 360);
   });
 
+  it("without the full-group rule, building evenly only compares the lots I own", () => {
+    const s = withRules({ needGroup: false });
+    s.deeds[6] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[8] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[9] = { owner: "b", houses: 0, mortgaged: false };
+    s.phase = "end";
+    for (let i = 0; i < 2; i++) {
+      expect(build(s, "a", 6, T, names).ok).toBe(true);
+      expect(build(s, "a", 8, T, names).ok).toBe(true);
+    }
+    expect(s.deeds[6].houses).toBe(2);
+    expect(buildBlocker(s, "a", 6)).toBeNull();
+    expect(build(s, "a", 6, T, names).ok).toBe(true);
+    expect(buildBlocker(s, "a", 6)).toBe("Phải xây đều các ô trong nhóm");
+  });
+
+  it("selling land while in debt pays the debt once there's enough cash", () => {
+    let n = 0;
+    const room = newTPRoom("DEBTL");
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
+    const g = room.current!;
+    g.turn = "p1";
+    g.deeds[39] = { owner: "p1", houses: 0, mortgaged: false };
+    g.ps.p1.cash = 10;
+    g.phase = "debt";
+    g.debt = { amount: 100, to: "p2", reason: "tiền thuê" };
+    expect(tpCommand(room, "token-aaaa", { type: "sellland", pos: 39 }, T).ok).toBe(true);
+    expect(g.debt).toBeNull();
+    expect(g.ps.p2.cash).toBe(1500 + 100);
+  });
+
   it("owners in jail collect no rent when jailRent is off", () => {
     const s = withRules({ jailRent: false });
     s.deeds[3] = { owner: "b", houses: 0, mortgaged: false };

@@ -38,6 +38,7 @@ import {
   newTPGame,
   nextGameTickAt,
   payDebt,
+  rulesOf,
   payJail,
   proposeTrade,
   rollDice,
@@ -327,7 +328,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   }
   if (!res.ok) return res;
   // Raised enough while in debt → settle it straight away.
-  if ((msg.type === "sell" || msg.type === "mortgage") && g.phase === "debt" && g.debt && g.ps[p.id].cash >= g.debt.amount) {
+  if ((msg.type === "sell" || msg.type === "mortgage" || msg.type === "sellland") && g.phase === "debt" && g.debt && g.ps[p.id].cash >= g.debt.amount) {
     payDebt(g, p.id, now, names);
   }
   afterChange(room, now);
@@ -418,7 +419,8 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     meId: player?.id ?? "",
     role: player ? "player" : "spectator",
     serverTime: now,
-    settings: tpSettingsOf(room),
+    // While a game runs, show the rules it actually plays with (older saved games may differ from the room settings).
+    settings: room.current?.status === "playing" ? { ...tpSettingsOf(room), ...rulesOf(room.current) } : tpSettingsOf(room),
     seats: room.seats.map((p, i) =>
       p
         ? {
