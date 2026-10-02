@@ -168,5 +168,10 @@ describe("player look (icon + colour)", () => {
     const va = await a.view((v) => !!looks(v)?.An);
     expect(looks(va)).toEqual({ An: { icon: "🦊", color: "#f472b6" } });
     expect(JSON.stringify(va)).not.toContain("token-");
+    // Changing it mid-game reaches the other player too.
+    expect((await a.request({ type: "look", look: { icon: "🐲", color: "#22d3ee" } })).ok).toBe(true);
+    const vb = await b.view((v) => looks(v)?.An?.icon === "🐲");
+    expect(looks(vb)?.An).toEqual({ icon: "🐲", color: "#22d3ee" });
+    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
   });
 });

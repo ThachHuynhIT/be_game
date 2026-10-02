@@ -328,6 +328,13 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       return ack(id, { ok: true });
     }
 
+    if (msg.type === "look") {
+      const look = cleanLook(msg.look);
+      if (!look) return ack(id, { ok: false, error: "Biểu tượng/màu không hợp lệ" });
+      const res = await hub.mutate(code, (room) => setLook(room as unknown as LookRoom, token, look));
+      return ack(id, res.found ? { ok: true } : { ok: false, error: "Không tìm thấy phòng" });
+    }
+
     if (msg.type === "emoji") {
       const now = Date.now();
       if (now - lastEmojiAt < EMOJI_COOLDOWN_MS) return ack(id, { ok: false, error: "Chậm lại một chút" });
