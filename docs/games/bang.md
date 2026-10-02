@@ -8,7 +8,7 @@ Hạ tầng chung (hub, adapter, store, giao thức WS, chat, emoji, khán giả
 | File | Vai trò |
 |---|---|
 | `src/bang/cards.ts` | Dữ liệu thuần: `PACKS`, `EXPANSIONS`, `CARD_TYPES` (71 loại lá), `DECK_SPEC` → `CARDS` (167 lá vật lý, id = vị trí), `CARD_PACK`, `deckFor`, `ROLES_FOR`, `THREE_PLAYER_TARGET`, `CHARACTERS` (63), `EVENTS` (38), `GEAR` (12) + `GEAR_DECK`, tuỳ chọn cài đặt. Chép nguyên sang portfolio (`src/lib/bang/cards.ts`), **không import gì** |
-| `src/bang/game.ts` | Lõi máy trạng thái `BangState`: chọn nhân vật (`pickCharacter`/`begin`), lượt (`startTurn`, `startOfTurn`, `drawPrompt`, `drawPhase`, `passTurn`), hàng chờ `queue` và vòng xử lý `run()`, phản ứng (`prepareReact`, `canAnswer`, `avoided`, `took`), sát thương / chết / thắng (`processHurt`, `applyDamage`, `dying`, `kill`, `checkWin`, `finish`, `scoreBang`), rút! (`flip`, `effSuit`), khoảng cách (`distance`, `weaponRange`, `handLimit`), sự kiện (`revealEvent`), `tickGame`, `forfeitPlayer` |
+| `src/bang/game.ts` | Lõi máy trạng thái `BangState`: chọn nhân vật (`pickCharacter`/`begin`), lượt (`startTurn`, `startOfTurn`, `drawPrompt`, `drawPhase`, `passTurn`), hàng chờ `queue` và vòng xử lý `run()`, phản ứng (`prepareReact`, `canAnswer`, `avoided`, `took`), sát thương / chết / thắng (`processHurt`, `applyDamage`, `dying`, `kill`, `checkWin`, `finish`), rút! (`flip`, `effSuit`), khoảng cách (`distance`, `weaponRange`, `handLimit`), sự kiện (`revealEvent`), `tickGame`, `forfeitPlayer` |
 | `src/bang/actions.ts` | Mọi thứ người chơi làm: `playCard` (+ `validate`, `resolve`), `applyEffect`, `useCard`, `useAbility`, `buyGear` (+ `checkGear`, `gainGear`), `drawCommand`, `respond` (+ `answerReact`), `endTurn`, tự chơi `autoAnswer`/`autoDiscard`, `bangsLeft`, `abilityList` |
 | `src/bang/room.ts` | Vòng đời phòng `BangRoom` (8 ghế), `bangCommand` (lọc kiểu tham số), cài đặt, kick, ghi kết quả, `tickBang`, `nextBangTickAt`, view riêng từng người (`gameView`, `promptView`, `bangView`), `bangSummary` |
 | `src/bang/protocol.ts` | Kiểu dây (chép sang portfolio): `BangSettings`, `BangPlayerView`, `PromptView`, `DrawMode`, `BangGameView`, `BangRoomView`, `PickSpec`, `BangCommand`, `BANG_WS_PATH` |
@@ -87,7 +87,7 @@ Mọi thứ chờ người chơi trả lời là **dữ liệu** trong `s.queue`
 - `"missed"`: bị bắn — trả bằng `need` lá Trượt! (`missedCards`: lá `isMissed` trên tay, mọi lá với Ê-lê-na, BANG! với Cô Tai Ương hoặc khi `showdown`, lá xanh lá `isMissed` trước mặt đã hết `fresh`; Ông Bự không có lá nào).
 - `"bang"`: Da Đỏ! / Đấu Tay Đôi / Cơn Giận Đô-rô-ti — trả bằng 1 lá BANG! (`beatCards`: `isBang`, Trượt! với Cô Tai Ương, mọi lá khi `showdown`).
 - `"evade"`: cửa sổ né trước Hoảng Loạn / Quậy Phá / Bẻ Khoá / Giật Đồ / Chai Rượu / Bạn Đồng Hành — chỉ tạo khi mục tiêu có Chuồn (`escape`) hoặc là Mích (`mick`) có lá Trượt!.
-- Cờ phụ: `shot` (là phát bắn kiểu BANG!: Treo Thưởng, Súng Hoa Cải, Mê-ri Máu, Súng Nòng Dài, Súng Kíp áp dụng), `unmissable` (Súng Hai Nòng + lá ♦), `noGear` (Súng Săn Lớn), `evadable` (Chuồn/Mích hủy được: Da Đỏ!, Đấu Tay Đôi), `duel`, `group`, `targetCard` (Đạn Nảy), `card` (lá gây ra).
+- Cờ phụ: `shot` (là phát bắn kiểu BANG!: Treo Thưởng, Súng Hoa Cải, Mê-ri Máu, Súng Nòng Dài, Súng Kíp áp dụng), `unmissable` (Súng Hai Nòng + BANG! ♦, hoặc BANG! của Cô-lô-ra-đô rút! ra ♠), `noGear` (Súng Săn Lớn), `evadable` (Chuồn/Mích hủy được: Da Đỏ!, chỉ prompt Đấu Tay Đôi đầu tiên — các lượt đáp qua lại không còn cờ này), `duel`, `group`, `targetCard` (Đạn Nảy), `card` (lá gây ra).
 
 Trình tự một phát bắn:
 
@@ -141,7 +141,7 @@ Lệnh `settings` (chỉ chủ phòng, khi không có ván hoặc ván đã `end
 | `turnSeconds` | `TURN_SECONDS_OPTIONS = [45, 60, 90, 120]` | `DEFAULT_TURN_SECONDS = 60` | Hạn pha đánh bài (`turnMs`), **gia hạn lại sau mỗi hành động** | `setSettings` |
 | `respondSeconds` | `RESPOND_SECONDS_OPTIONS = [10, 15, 20, 30]` | `DEFAULT_RESPOND_SECONDS = 15` | Hạn mỗi prompt (kể cả prompt rút bài) | `setSettings` |
 | `first` | số nguyên 1…20 | `2` | Điểm mỗi người thắng | `checkRankPoints` |
-| `second` | số nguyên 0…`first` (tự kẹp về `first` nếu lớn hơn) | `1` | **Không dùng** trong `scoreBang` | `checkRankPoints` |
+| `second` | số nguyên 0…`first` (tự kẹp về `first` nếu lớn hơn) | `1` | Điểm hạng Nhì trong `scoreByRank` | `checkRankPoints` |
 
 Hạn chọn nhân vật cố định `PICK_MS = 30s`, không đổi được.
 
@@ -215,6 +215,7 @@ Trả lời từng loại prompt (`respond`):
 | `keep` (Kít, Đát) | `cards` = đúng `keep` lá trong `cards` |
 | `discard` `bandidas` | `cards` = đúng `count` lá, hoặc `take: true` mất `orLose` máu (tự mất máu nếu không đủ bài) |
 | `discard` `poker` | `card` = 1 lá úp vào pot |
+| `keep` `poker` | `cards` = đúng 2 lá chọn từ pot (người đánh Xì Phé; hết giờ lấy 2 lá đầu) |
 | `copy` (Vê) | `choice` = 1 `CharKey` trong `options` |
 
 ## View (server → client)
@@ -235,7 +236,7 @@ Trả lời từng loại prompt (`respond`):
 ## Timer, hết giờ, mất kết nối
 
 - Hằng số: `PICK_MS = 30_000`, `TURN_MS = 60_000`, `RESPOND_MS = 15_000` (hai cái sau bị cài đặt ghi đè qua `turnMs`/`respondMs`), `ABSENT_MS = 2_500`.
-- `s.deadline` luôn là hạn của thứ đang chờ: pha chọn nhân vật; prompt đầu hàng (đặt khi lên đầu); hoặc pha đánh bài (`turn.deadline`, được `busy()` đẩy lùi `turnMs` sau mỗi `play`/`use`/`ability`/`buy`).
+- `s.deadline` luôn là hạn của thứ đang chờ: pha chọn nhân vật; prompt đầu hàng (đặt khi lên đầu); hoặc pha đánh bài (`turn.deadline`, được `busy()` đẩy lùi `turnMs` sau mỗi `play`/`use`/`ability`/`buy` **thành công**; lệnh bị từ chối không gia hạn).
 - `tickGame`:
   - `picking`: hết `PICK_MS` (hoặc người vắng mặt quá `ABSENT_MS` tính từ `phaseAt`) → chọn ngẫu nhiên 1 trong 2 cho người đó.
   - `playing`: lặp tối đa 50 lần: người đang được chờ (`waitingFor`: `to` của prompt đầu hàng, hoặc người có lượt) nếu quá hạn hoặc vắng mặt quá `ABSENT_MS` → `autoAnswer` rồi `run()`.
@@ -246,7 +247,7 @@ Trả lời từng loại prompt (`respond`):
 ## Kết thúc ván & tính điểm
 
 - `finish(winners)`: `finished` = người thắng rồi người thua; trong mỗi nhóm người còn sống đứng trước, người chết sau đứng trên người chết trước (`diedAt`). `queue`, `turn`, `deadline` bị xoá.
-- `scoreBang(s, first)`: mỗi người thắng `+first`; tổng `first × số người thắng` được chia cho người thua theo thứ tự `finished`, mỗi người `−ceil(phần còn lại / số người thua còn lại)` (người thua xếp trên trả phần làm tròn lên). Không có người thua → mọi người 0. Tổng luôn bằng 0.
+- Chấm điểm: `afterChange` gọi `scoreByRank(finished, {first, second})` (dùng chung với splendor/typhu). `finished` = phe thắng (sống lâu hơn xếp trên) rồi phe thua theo thứ tự chết (chết muộn xếp trên); người bị kick tính như người chết. Nhất/Nhì lấy từ cài đặt phòng, hai hạng cuối bị trừ đối xứng, tổng luôn bằng 0.
 - `afterChange` (room): cộng `points`, `games`, `wins` (mọi người trong `winners`, không chỉ hạng 0); `GameRecord { id: "<code>-<gameSeq>", at, instantWin: null, results[{id, name, rank (= vị trí trong finished), delta}] }`; hub ghi bảng xếp hạng.
 
 ## Test
@@ -272,15 +273,7 @@ Viết test tất định:
 ## Lưu ý / bẫy thường gặp
 
 - **State phải là JSON thuần**: hiệu ứng chờ là dữ liệu trong `queue`, không phải closure. Thêm cơ chế mới = thêm `QEntry` kind + xử lý trong `run()` / `respond()` / `autoAnswer()` / `salvage()` / `promptView()` (và `conserved()` trong test nếu mục giữ lá).
-- `id` lá = vị trí trong `CARDS` (thứ tự `DECK_SPEC`). Chèn/xoá dòng giữa `DECK_SPEC` sẽ đổi id của mọi lá sau đó → hỏng ván đang lưu. Ranh giới pack trong `buildCards` dựa vào khoá dòng đầu mỗi phần (`punch` → dodge, `aim` → valley, `reload` → armed). Comment trong `buildCards` ghi "80 / 40 / 24 / 24" nhưng phần armed thực tế có **23** lá (README ghi đúng 23).
+- `id` lá = vị trí trong `CARDS` (thứ tự `DECK_SPEC`). Chèn/xoá dòng giữa `DECK_SPEC` sẽ đổi id của mọi lá sau đó → hỏng ván đang lưu. Ranh giới pack trong `buildCards` dựa vào khoá dòng đầu mỗi phần (`punch` → dodge, `aim` → valley, `reload` → armed). Số lá mỗi phần: 80 / 40 / 24 / 23.
 - `cards.ts` và `protocol.ts` được chép sang frontend: sửa thì đồng bộ.
-- Nhân vật **Cô-lô-ra-đô (`colorado`) chưa được cài đặt**: có trong `CHARACTERS` (pack valley, có thể được chia) nhưng không có dòng code nào xử lý kỹ năng.
-- `busy()` (gia hạn pha đánh) chạy **trước** khi kiểm tra hợp lệ trong `playCard`/`useCard`/`useAbility`/`buyGear`; vì hub lưu mọi thay đổi state kể cả khi lệnh lỗi, một lệnh sai vẫn gia hạn `turn.deadline`.
-- Prompt Đấu Tay Đôi được copy (`{...q}`) khi đẩy sang người kia nên cờ `evadable` đi theo mọi lượt qua lại (comment trong `QEntry` nói chỉ prompt đầu tiên).
-- Súng Săn Lớn (`noGear`) chỉ bỏ qua Thùng Gỗ và lá Trượt! xanh lá của mục tiêu — **không** bỏ qua Ngựa Hoang / Hang Ẩn Nấp khi tính tầm (khác lời mô tả lá), và Giò Đỏ May vẫn rút!.
-- Súng Hai Nòng làm "không thể né" mọi phát `shot()` có lá ♦ (cả Dao Găm, Súng Ổ Xoay, Súng Bỏ Túi, Súng Trường Xa…), không chỉ BANG!. Sờ Lép áp dụng cho mọi `shot()` (kể cả Rìu Ném), nhưng không cho Súng Máy / Đại Bác / Đốm Chuông (tạo react trực tiếp).
-- Xì Phé: nếu không có lá A, người đánh nhận **2 lá đầu tiên** của pot (theo thứ tự úp), không được chọn.
-- Xám Nhiều Mặt không thêm nhân vật đã mượn vào `usedChars` (comment nói có), nên có thể mượn lại cùng nhân vật ở lượt sau, hoặc nhân vật đang được Vê mượn.
-- Giốt Mua Chịu lấy trang bị loại `keep` mình đã có thì vàng mất mà không nhận gì; Truy Nã qua Giốt tự gắn lên người sống đầu tiên khác mình trong `order`. Chai Rượu chế độ `beer` không bị Say Xỉn / Mục Sư chặn.
-- `finish()` có đoạn nối `forfeited` không nằm trong `order` — luôn rỗng vì `order` không bao giờ xoá ai; người bị kick được xếp như người chết bình thường.
-- `second` trong cài đặt chỉ để đồng bộ giao diện; `PACKS.dodge.blurb` nói "tới 8 người" nhưng 8 người vẫn chơi được chỉ với bộ gốc (`MAX_PLAYERS = 8` cố định; bộ gốc có đúng 16 nhân vật = 8 × 2).
+- `second` (Nhì) được dùng khi tính điểm (xem `scoreByRank` ở mục chấm điểm). 8 người chơi được chỉ với bộ gốc (`MAX_PLAYERS = 8`, bộ gốc có đúng 16 nhân vật = 8 × 2), nên blurb Thị trấn Né Đạn không còn nói "tới 8 người".
+- Giốt Mua Chịu mua Truy Nã: tự gắn lên người sống đầu tiên khác mình (lá trên cùng `shopDeck` không lộ nên không thể chọn mục tiêu trước).

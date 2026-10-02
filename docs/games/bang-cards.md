@@ -67,7 +67,7 @@ Màu: `brown` đánh rồi bỏ · `blue` đặt trước mặt · `green` đặ
 | `escape` | Chuồn | 2 | brown | Không đánh trong lượt; trả lời prompt `evade` / `evadable` để hủy lá nhắm vào mình |
 | `fanning` | Bắn Quạt | 1 | brown, `range` | BANG!: `target` trong tầm + `target2` tuỳ chọn ở khoảng cách ≤ 1 **từ target** |
 | `lastcall` | Ly Cuối | 1 | brown | +1 máu kể cả khi 2 người; tự dùng khi sắp chết (sau Bia) |
-| `poker` | Xì Phé | 1 | brown | Mỗi người khác có bài úp 1 lá; không có A → người đánh lấy 2 lá đầu của pot |
+| `poker` | Xì Phé | 1 | brown | Mỗi người khác úp 1 lá vào pot; không có A → người đánh nhận prompt `keep` (`cause: "poker"`, `keep: 2`) để **chọn 2 lá** trong pot (pot ≤ 2 lá thì lấy hết); hết giờ → `autoAnswer` lấy 2 lá đầu; lá còn lại bỏ đi |
 | `saved` | Cứu Nguy | 2 | brown | Ngoài lượt: khi người khác sắp mất máu, prompt `save`; chặn 1 máu, nếu họ lẽ ra chết (`life ≤ amount`) thì rút 2 |
 | `tomahawk` | Rìu Ném | 1 | brown, `dist2` | Bắn (không `shot`, không tính BANG!) |
 | `tornado` | Lốc Xoáy | 1 | brown | Mọi người sống (từ mình) bỏ **ngẫu nhiên** 1 lá trên tay rồi rút 2 |
@@ -92,8 +92,8 @@ Màu: `brown` đánh rồi bỏ · `blue` đặt trước mặt · `green` đặ
 | `squaw` | Giật Đồ | 1 | brown, `any` | `pick` 1 lá trước mặt: bỏ; `mode: "take"` + đủ 2 đạn → lấy về tay (thiếu đạn thì lặng lẽ thành bỏ) |
 | `bandolier` | Đai Đạn | 1 | blue, `load 2` | `use` tốn 1 đạn: +1 BANG! trong lượt |
 | `belltower` | Tháp Chuông | 1 | blue, `load 2` | `use` tốn 1 đạn: lá kế tiếp bỏ qua khoảng cách |
-| `bigfifty` | Súng Săn Lớn | 1 | blue, tầm 3, `load 2` | `use` tốn 1 đạn: BANG! kế tiếp `noGear` (bỏ qua Thùng Gỗ & Trượt! xanh lá của mục tiêu) |
-| `doublebarrel` | Súng Hai Nòng | 1 | blue, tầm 1 | `shot` bằng lá ♦ không thể né |
+| `bigfifty` | Súng Săn Lớn | 1 | blue, tầm 3, `load 2` | `use` tốn 1 đạn: BANG! kế tiếp `noGear` (bỏ qua Thùng Gỗ & Trượt! xanh lá của mục tiêu) và, khi chọn mục tiêu, bỏ qua Ngựa Hoang / Hang Ẩn Nấp (`distance(…, ignoreCards)`; Paul vẫn tính) |
+| `doublebarrel` | Súng Hai Nòng | 1 | blue, tầm 1 | Chỉ lá BANG! (`bang`, Đấm, Bắn Quạt, Bắn Nhanh, Súng Kíp, lá dùng như BANG!) chất ♦ là `unmissable`; Dao Găm, Súng Ổ Xoay… không bị ảnh hưởng |
 | `buntline` | Súng Nòng Dài | 1 | blue, tầm 2, `load 2` | `shot` bị né → tự tốn 1 đạn, người kia bỏ ngẫu nhiên 1 lá |
 
 \+ base: `bang` ×3, `missed` ×2, `beer`, `stagecoach`.
@@ -118,7 +118,7 @@ Cột "Kích hoạt": *thụ động* = code tự áp; `ability <name>` = lệnh
 | `pedro` | Pê Nhặt Rác | 4 | `draw pedro` | Lá đầu lấy từ đỉnh đống bỏ |
 | `rose` | Rô Mắt Ưng | 4 | thụ động | Như Ống Ngắm |
 | `sid` | Sít Liều Mạng | 4 | `ability sid` (`cards` 2 lá), bất cứ lúc nào | Bỏ 2 → +1 máu (không khi đầy); khi sắp chết tự bỏ 2 lá đầu tay |
-| `slab` | Sờ Lép Sát Thủ | 4 | thụ động | Mọi `shot()` của hắn cần ≥ 2 Trượt! |
+| `slab` | Sờ Lép Sát Thủ | 4 | thụ động | Chỉ phát bắn của lá BANG! (`shot(…, {bang: true})`: cả Chai Rượu chế độ `bang`) cần ≥ 2 Trượt!; Rìu Ném, Dao Găm, Súng Máy, Đại Bác… không |
 | `suzy` | Su Xinh | 4 | thụ động | Hết bài trên tay → rút 1 (kiểm tra sau hầu hết thao tác) |
 | `vulture` | Kền Kền | 4 | thụ động | Người chết → hắn lấy hết bài tay + trước mặt |
 | `willy` | Uy Nhóc | 4 | thụ động | BANG! không giới hạn |
@@ -150,7 +150,7 @@ Cột "Kích hoạt": *thụ động* = code tự áp; `ability <name>` = lệnh
 | `bigspencer` | Ông Bự | 9 | thụ động | Khởi đầu 5 lá; `missedCards` luôn rỗng (cả lá xanh lá) |
 | `flint` | Phờ-lin Đổi Chác | 4 | `ability flint` (`card`, `target`) | Đưa 1 lá, lấy ngẫu nhiên tối đa 2 lá trên tay họ; 1 lần/lượt |
 | `gary` | Ga Nhặt Nhạnh | 5 | thụ động | Lá người khác bỏ ở `endTurn` (kể cả bỏ thêm lấy vàng) về tay hắn |
-| `greygory` | Xám Nhiều Mặt | 4 | thụ động đầu lượt | Mượn 2 nhân vật ngẫu nhiên (pack đã bật, không có trong `usedChars`) |
+| `greygory` | Xám Nhiều Mặt | 4 | thụ động đầu lượt | Mượn 2 nhân vật ngẫu nhiên (pack đã bật, không có trong `usedChars`) và thêm chúng vào `usedChars` |
 | `johnpain` | Giôn Đau Đớn | 4 | thụ động | Tay < 6: lá được chọn của mọi lần rút! về tay hắn |
 | `leevan` | Li Bắn Lại | 4 | `ability leevan` (`card` BANG!-type) | Bỏ 1 BANG! → lặp lá nâu không-BANG! vừa đánh (`lastBrown`, cùng mục tiêu, kiểm tra lại) |
 | `teren` | Tê Rèn Lì | 3 | thụ động | Khi bị hạ: rút! không ♠ → còn 1 máu + rút 1 |
@@ -163,7 +163,7 @@ Cột "Kích hoạt": *thụ động* = code tự áp; `ability <name>` = lệnh
 | `donbell` | Đông Chuông | 4 | thụ động cuối lượt | Rút! ♥/♦ → thêm 1 lượt (không nếu đã là lượt thêm hoặc Báo Thù đã cho) |
 | `dutch` | Đát Tham Vàng | 4 | thụ động (rút thường) | Prompt `keep`: xem `n`, giữ `n−1`, +1 vàng |
 | `jacky` | Giắc-ki Hào Phóng | 4 | `ability jacky` | 2 vàng → +1 BANG!; không giới hạn |
-| `josh` | Giốt Mua Chịu | 4 | `ability josh` | 2 vàng → lá trên cùng `shopDeck` (Chai Rượu = Bia, Bạn Đồng Hành = Tạp Hoá, Truy Nã = người sống đầu tiên khác mình) |
+| `josh` | Giốt Mua Chịu | 4 | `ability josh` | 2 vàng → lá trên cùng `shopDeck`; từ chối (không mất vàng) nếu là trang bị `keep` đã có. Chai Rượu = Bia, Bạn Đồng Hành = Tạp Hoá, Truy Nã **tự** gắn lên người sống đầu tiên khác mình (lá trên cùng không lộ nên không chọn trước được) |
 | `madam` | Bà Chủ Quán | 4 | thụ động | Mỗi lần ai uống Bia (kể cả mình) rút 1 |
 | `luzena` | Lu Buôn Bán | 4 | thụ động | Món đầu mỗi lượt rẻ hơn 1 |
 | `raddie` | Rết Đổi Vàng | 4 | `ability raddie` | 1 vàng → rút 1; 2 lần/lượt |
@@ -174,7 +174,7 @@ Cột "Kích hoạt": *thụ động* = code tự áp; `ability <name>` = lệnh
 | key | Tên | Máu | Kích hoạt | Code làm gì |
 |---|---|---|---|---|
 | `blackflower` | Hoa Đen | 4 | `ability blackflower` (`card` ♣, `target`) | Bắn người trong tầm, không tính BANG!; 1 lần/lượt |
-| `colorado` | Cô-lô-ra-đô | 4 | — | **Chưa cài đặt** (không có code xử lý) |
+| `colorado` | Cô-lô-ra-đô | 4 | thụ động khi đánh BANG! | Mỗi lá BANG! (`bang`, Đấm, Bắn Quạt, Bắn Nhanh, Súng Kíp) hắn đánh: rút! (`flip`), ra ♠ → mọi phát bắn của lá đó `unmissable` |
 | `derspot` | Đốm Chuông | 4 | `ability derspot` (`card` = lá `bang`) | Lá đó như Súng Máy; tính 1 BANG!; 1 lần/lượt |
 | `evelyn` | Ê-vơ-lin Nóng Súng | 4 | `draw evelyn` (`targets` 1–2) | Mỗi lá bỏ rút = 1 phát bắn vào 1 người trong tầm |
 | `henry` | Hen-ri Gai Góc | 4 | thụ động | Ai lấy/bắt hắn bỏ lá (Hoảng Loạn, Quậy Phá, Bẻ Khoá, Giật Đồ, Ẩu Đả, Giét, Pát, Phờ-lin…) bị hắn bắn 1 phát |
@@ -244,7 +244,7 @@ Lật ở đầu lượt "leader" (bước 0). ✦ = final (đặt cuối, ở l
 
 | key | Tên | Giá | Loại | Code làm gì |
 |---|---|---|---|---|
-| `bottle` | Chai Rượu | 2 | instant | `mode`: `panic` (dist1, `pick`, có cửa sổ né) · `beer` (+1, không khi đầy) · `bang` (bắn trong tầm, không tính BANG!) |
+| `bottle` | Chai Rượu | 2 | instant | `mode`: `panic` (dist1, `pick`, có cửa sổ né) · `beer` (+1; không khi đầy máu, cũng bị Say Xỉn / Mục Sư / chỉ còn 2 người chặn như Bia) · `bang` (bắn trong tầm, không tính BANG! nhưng Sờ Lép áp dụng) |
 | `pardner` | Bạn Đồng Hành | 2 | instant | `mode`: `store` (Tạp Hoá) · `duel` · `cat` (Quậy Phá, `pick`) |
 | `rum` | Rượu Rum | 3 | instant | Lật 4 lá, +1 máu mỗi chất khác nhau |
 | `unionpacific` | Đường Sắt | 4 | instant | Rút 4 |

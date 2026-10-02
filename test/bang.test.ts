@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARDS, CARD_PACK, type CardKey, type CharKey, EXPANSIONS, type Pack, ROLES_FOR, type Role, type Suit, deckFor } from "../src/bang/cards";
-import { type BangState, distance, kill, newBangGame, pickCharacter, run, startTurn, tickGame } from "../src/bang/game";
+import { type BangState, distance, finish, kill, newBangGame, pickCharacter, run, shot, startTurn, tickGame } from "../src/bang/game";
 import { abilityList, buyGear, drawCommand, endTurn, playCard, respond, useAbility, useCard } from "../src/bang/actions";
 import { type BangRoom, bangCommand, bangView, joinBang, newBangRoom, tickBang } from "../src/bang/room";
 
@@ -544,6 +544,170 @@ function seeded(seed: number) {
     return ((x >>> 0) % 1_000_000) / 1_000_000;
   };
 }
+
+describe("bug fixes", () => {
+  const P4 = ["sheriff", "outlaw", "outlaw", "renegade"] as Role[];
+
+  it("Cô-lô-ra-đô: ♠ on the draw makes his BANG! unmissable, other suits don't", () => {
+    const s = rig(["colorado", "kit", "suzy", "paul"], P4);
+    const m = give(s, "b", "missed");
+    const bang = give(s, "a", "bang");
+    top(s, "S");
+    playCard(s, "a", { card: bang, target: "b" }, T, names);
+    expect(s.queue).toHaveLength(0);
+    expect(s.ps.b.life).toBe(3);
+    expect(hand(s, "b")).toContain(m);
+
+    const s2 = rig(["colorado", "kit", "suzy", "paul"], P4);
+    give(s2, "b", "missed");
+    const bang2 = give(s2, "a", "bang");
+    top(s2, "H");
+    playCard(s2, "a", { card: bang2, target: "b" }, T, names);
+    expect(s2.queue[0]).toMatchObject({ kind: "react", to: "b", answer: "missed" });
+    expect((s2.queue[0] as { unmissable?: boolean }).unmissable).toBeFalsy();
+  });
+
+  it("invalid commands do not extend the turn deadline, valid ones do", () => {
+    const s = rig(["sid", "kit", "suzy", "paul"], P4);
+    s.turn!.deadline = 123;
+    expect(playCard(s, "a", { card: 0, target: "b" }, T + 5000, names).ok).toBe(false);
+    expect(useAbility(s, "a", { name: "doc" }, T + 5000, names).ok).toBe(false);
+    expect(buyGear(s, "a", { slot: 0 }, T + 5000, names).ok).toBe(false);
+    expect(useCard(s, "a", { card: 0 }, T + 5000, names).ok).toBe(false);
+    expect(s.turn!.deadline).toBe(123);
+    expect(playCard(s, "a", { card: give(s, "a", "bang"), target: "b" }, T + 5000, names).ok).toBe(true);
+    expect(s.turn!.deadline).toBe(T + 5000 + s.turnMs);
+  });
+
+  it("only the first Đấu Tay Đôi prompt is evadable", () => {
+    const s = rig(["sid", "kit", "suzy", "paul"], P4);
+    const b1 = give(s, "b", "bang");
+    give(s, "a", "bang");
+    playCard(s, "a", { card: give(s, "a", "duel"), target: "b" }, T, names);
+    expect((s.queue[0] as { evadable?: boolean }).evadable).toBe(true);
+    respond(s, "b", { cards: [b1] }, T, names);
+    expect(s.queue[0]).toMatchObject({ to: "a", answer: "bang" });
+    expect((s.queue[0] as { evadable?: boolean }).evadable).toBeFalsy();
+  });
+
+  it("Xám Nhiều Mặt marks borrowed characters as used", () => {
+    const s = rig(["greygory", "kit", "suzy", "paul"], P4, ["dodge", "valley", "wws"]);
+    s.ps.a.borrowed = [];
+    startTurn(s, "a", T, false);
+    run(s, T, names);
+    const b = s.ps.a.borrowed;
+    expect(b).toHaveLength(2);
+    for (const k of b) expect(s.usedChars).toContain(k);
+  });
+
+  it("Súng Săn Lớn ignores the target's Mustang / Hang Ẩn Nấp when targeting", () => {
+    const s = rig(["sid", "kit", "suzy", "pedro", "rose", "pixie"], ["sheriff", "outlaw", "outlaw", "renegade", "deputy", "outlaw"], ["armed", "dodge"]);
+    const big = put(s, "a", "bigfifty");
+    s.ps.a.play.find((c) => c.id === big)!.cubes = 2;
+    put(s, "d", "mustang");
+    put(s, "d", "hideout");
+    const b = give(s, "a", "bang");
+    expect(playCard(s, "a", { card: b, target: "d" }, T, names).ok).toBe(false);
+    expect(useCard(s, "a", { card: big }, T, names).ok).toBe(true);
+    expect(E(playCard(s, "a", { card: b, target: "d" }, T, names))).toBe("");
+  });
+
+  it("Súng Hai Nòng and Sờ Lép only affect BANG! cards", () => {
+    const s = rig(["slab", "kit", "suzy", "paul"], P4, ["armed"]);
+    put(s, "a", "doublebarrel");
+    const dBang = give(s, "a", "bang", "D");
+    const knife = CARDS.findIndex((c) => c.key === "knife" && c.suit === "D");
+    const asBang = shot(s, "a", "b", T, { cause: "BANG!", card: dBang, bang: true });
+    expect(asBang.unmissable).toBe(true);
+    expect(asBang.need).toBe(2);
+    const other = shot(s, "a", "b", T, { cause: "Dao", card: knife });
+    expect(other.unmissable).toBeFalsy();
+    expect(other.need).toBe(1);
+    // Gatling is not a BANG!: one Trượt! still enough.
+    give(s, "b", "missed");
+    playCard(s, "a", { card: give(s, "a", "gatling") }, T, names);
+    expect(s.queue[0]).toMatchObject({ to: "b", need: 1 });
+  });
+
+  it("Xì Phé: the player chooses 2 cards from the pot; timeout takes the first 2", () => {
+    const mk = () => {
+      const s = rig(["sid", "kit", "suzy", "paul"], P4, ["valley"]);
+      const pot: number[] = [];
+      for (const id of ["b", "c", "d"]) {
+        const c = s.deck.find((x) => CARDS[x].key === "missed" && CARDS[x].rank < 14 && !pot.includes(x))!;
+        s.deck.splice(s.deck.indexOf(c), 1);
+        s.ps[id].hand.push(c);
+        pot.push(c);
+      }
+      playCard(s, "a", { card: give(s, "a", "poker") }, T, names);
+      for (const [i, id] of ["b", "c", "d"].entries()) respond(s, id, { card: pot[i] }, T, names);
+      return { s, pot };
+    };
+    const { s, pot } = mk();
+    expect(s.queue[0]).toMatchObject({ kind: "keep", to: "a", keep: 2, cause: "poker" });
+    expect(respond(s, "a", { cards: [pot[2]] }, T, names).ok).toBe(false);
+    expect(respond(s, "a", { cards: [pot[2], pot[0]] }, T, names).ok).toBe(true);
+    expect(hand(s, "a")).toEqual(expect.arrayContaining([pot[2], pot[0]]));
+    expect(s.discard).toContain(pot[1]);
+    conserved(s);
+    const t = mk();
+    tickGame(t.s, (t.s.deadline ?? T) + 1, names, () => false);
+    expect(hand(t.s, "a")).toEqual(expect.arrayContaining([t.pot[0], t.pot[1]]));
+    conserved(t.s);
+  });
+
+  it("Giốt Mua Chịu can't buy a keep item he already owns (no gold spent)", () => {
+    const s = rig(["josh", "kit", "suzy", "paul"], P4, ["goldrush"]);
+    s.ps.a.gold = 5;
+    s.ps.a.gear.push({ key: "ace" });
+    s.shopDeck.unshift("ace");
+    expect(useAbility(s, "a", { name: "josh" }, T, names).ok).toBe(false);
+    expect(s.ps.a.gold).toBe(5);
+    expect(s.shopDeck[0]).toBe("ace");
+    s.shopDeck.unshift("horseshoe");
+    expect(useAbility(s, "a", { name: "josh" }, T, names).ok).toBe(true);
+    expect(s.ps.a.gold).toBe(3);
+  });
+
+  it("Chai Rượu as beer respects Say Xỉn and Mục Sư", () => {
+    for (const ev of ["hangover", "reverend"] as const) {
+      const s = rig(["sid", "kit", "suzy", "paul"], P4, ["goldrush", "wws"]);
+      s.event = ev;
+      s.shop[0] = "bottle";
+      s.ps.a.gold = 5;
+      s.ps.a.life = 2;
+      expect(buyGear(s, "a", { slot: 0, mode: "beer" }, T, names).ok).toBe(false);
+      expect(s.ps.a.gold).toBe(5);
+      expect(s.ps.a.life).toBe(2);
+    }
+  });
+
+  it("scores with the room's Nhất / Nhì setting", () => {
+    const room: BangRoom = newBangRoom("BANG2");
+    const toks = ["tok-aaaaaaaa", "tok-bbbbbbbb", "tok-cccccccc", "tok-dddddddd"];
+    let n = 0;
+    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`);
+    expect(bangCommand(room, toks[0], { type: "settings", first: 5, second: 3 }, T).ok).toBe(true);
+    expect(bangCommand(room, toks[0], { type: "start" }, T).ok).toBe(true);
+    const g = room.current!;
+    for (const id of g.order) pickCharacter(g, id, g.picks[id][0], T, names);
+    const l2 = g.order.find((id) => id !== room.hostId)!;
+    const [w1, w2, l1] = g.order.filter((id) => id !== l2);
+    g.ps[w1].role = "sheriff";
+    g.ps[w2].role = "deputy";
+    g.ps[l1].role = "outlaw";
+    g.ps[l2].role = "renegade";
+    g.ps[l1].dead = true;
+    g.ps[l1].diedAt = 1;
+    // l2 is offline and kicked: the law wins, the game is recorded with Nhất 5 / Nhì 3.
+    expect(bangCommand(room, toks[0], { type: "kick", playerId: l2 }, T + 10 * 60_000).ok).toBe(true);
+    expect(g.status).toBe("ended");
+    const pts = room.seats.filter((st) => st).map((st) => st!.points);
+    expect(pts.reduce((a, b) => a + b, 0)).toBe(0);
+    expect(Math.max(...pts)).toBe(5);
+    expect(pts.filter((p) => p === 3)).toHaveLength(1);
+  });
+});
 
 describe("random games", () => {
   it("play to the end with every pack, conserving cards", () => {

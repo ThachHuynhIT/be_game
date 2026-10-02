@@ -116,7 +116,7 @@ export type QEntry =
   | { kind: "save"; to: string; target: string; from: string | null; amount: number; shot?: boolean; asked: string[]; deadline: number }
   | { kind: "store"; to: string; cards: number[]; order: string[]; deadline: number }
   | { kind: "pick"; to: string; from: string; mode: "take" | "discard"; cause: string; deadline: number }
-  | { kind: "keep"; to: string; cards: number[]; keep: number; cause: "kit" | "dutch"; deadline: number }
+  | { kind: "keep"; to: string; cards: number[]; keep: number; cause: "kit" | "dutch" | "poker"; deadline: number }
   | { kind: "discard"; to: string; count: number; orLose: number; cause: "bandidas" | "poker"; pool?: string; deadline: number }
   | { kind: "pokerEnd"; to: string; pool: number[] }
   | { kind: "copy"; to: string; options: CharKey[]; deadline: number }
@@ -244,7 +244,7 @@ export function weaponRange(s: BangState, id: string): number {
 }
 
 /** Seat distance from `a` to `b` among players still in the game, with Mustang / Scope etc. */
-export function distance(s: BangState, a: string, b: string): number {
+export function distance(s: BangState, a: string, b: string, ignoreCards = false): number {
   if (a === b) return 0;
   if (has(s, "ambush")) return 1;
   const ring = presentIds(s);
@@ -253,8 +253,8 @@ export function distance(s: BangState, a: string, b: string): number {
   if (i < 0 || j < 0) return 99;
   const raw = Math.min(Math.abs(i - j), ring.length - Math.abs(i - j));
   let d = raw;
-  if (inPlay(s, b, "mustang")) d += 1;
-  if (inPlay(s, b, "hideout")) d += 1;
+  if (!ignoreCards && inPlay(s, b, "mustang")) d += 1;
+  if (!ignoreCards && inPlay(s, b, "hideout")) d += 1;
   if (hasAb(s, b, "paul")) d += 1;
   if (inPlay(s, a, "scope")) d -= 1;
   if (inPlay(s, a, "binocular")) d -= 1;
@@ -571,27 +571,11 @@ export function finish(s: BangState, winners: string[], now: number, names: Name
   const losers = s.order.filter((id) => !winners.includes(id));
   // Winners first (alive before dead), then the rest, the last to die higher.
   const byDeath = (a: string, b: string) => (s.ps[b].diedAt ?? 999) - (s.ps[a].diedAt ?? 999);
-  s.finished = [...winners.slice().sort(byDeath), ...losers.slice().sort(byDeath), ...(s.forfeited ?? []).filter((f) => !s.order.includes(f))];
+  s.finished = [...winners.slice().sort(byDeath), ...losers.slice().sort(byDeath)];
   s.turn = null;
   s.queue = [];
   s.deadline = null;
   log(s, now, `🏆 Thắng: ${winners.map(names).join(", ") || "không ai"}`, "event");
-}
-
-/** Winners each get `first`; the losers share the same total (sum is zero). */
-export function scoreBang(s: BangState, first: number): Record<string, number> {
-  const out: Record<string, number> = {};
-  const winners = s.winners;
-  const losers = s.finished.filter((id) => !winners.includes(id));
-  for (const w of winners) out[w] = first;
-  let total = first * winners.length;
-  losers.forEach((l, i) => {
-    const share = Math.floor(total / (losers.length - i)) + (total % (losers.length - i) ? 1 : 0);
-    out[l] = -share;
-    total -= share;
-  });
-  if (!losers.length) for (const w of winners) out[w] = 0;
-  return out;
 }
 
 // ─── Setup ──────────────────────────────────────────────────────────
@@ -877,7 +861,8 @@ export function avoided(s: BangState, q: Extract<QEntry, { kind: "react" }>, now
   }
   if (q.answer === "bang" && q.duel) {
     // Đấu Tay Đôi: now the other one must answer.
-    now_(s, { ...q, to: q.duel, duel: q.to, from: q.to, rolled: false, deadline: until(s, now) });
+    const { evadable: _first, ...rest } = q;
+    now_(s, { ...rest, to: q.duel, duel: q.to, from: q.to, rolled: false, deadline: until(s, now) });
     return;
   }
   if (q.cause === "Cò Quay Nga") {
@@ -941,10 +926,9 @@ function processHurt(s: BangState, h: Extract<QEntry, { kind: "hurt" }>, now: nu
 function pokerEnd(s: BangState, e: Extract<QEntry, { kind: "pokerEnd" }>, now: number, names: NameOf) {
   const aces = e.pool.some((c) => cardDef(c).rank === 14);
   if (!aces && present(s, e.to)) {
-    const take = e.pool.slice(0, 2);
-    s.ps[e.to].hand.push(...take);
-    toDiscard(s, ...e.pool.slice(2));
-    log(s, now, `${names(e.to)} lấy ${take.length} lá từ ván Xì Phé`, "info");
+    log(s, now, `${names(e.to)} lấy ${Math.min(2, e.pool.length)} lá từ ván Xì Phé`, "info");
+    if (e.pool.length <= 2) s.ps[e.to].hand.push(...e.pool);
+    else now_(s, { kind: "keep", to: e.to, cards: e.pool, keep: 2, cause: "poker", deadline: until(s, now) });
   } else {
     toDiscard(s, ...e.pool);
     log(s, now, "Có lá A trong ván Xì Phé — không ai được gì", "info");
@@ -1040,6 +1024,7 @@ function startOfTurn(s: BangState, now: number, names: NameOf, random: Random): 
           random,
         ).slice(0, 2);
         p.borrowed = pool;
+        s.usedChars.push(...pool);
         if (pool.length) log(s, now, `${names(id)} mượn sức mạnh: ${pool.map((k) => CHARACTERS[k].name).join(", ")}`, "info");
       }
       return true;
@@ -1299,13 +1284,14 @@ export function shot(
   from: string,
   to: string,
   now: number,
-  opts: { cause: string; card?: number | null; dmg?: number; need?: number; noGear?: boolean; targetCard?: number },
+  opts: { cause: string; card?: number | null; dmg?: number; need?: number; noGear?: boolean; targetCard?: number; bang?: boolean; unmissable?: boolean },
 ): Extract<QEntry, { kind: "react" }> {
   let need = opts.need ?? 1;
-  if (hasAb(s, from, "slab")) need = Math.max(need, 2);
-  let unmissable = false;
+  // Sờ Lép, Súng Hai Nòng: only for BANG! cards (`bang`).
+  if (opts.bang && hasAb(s, from, "slab")) need = Math.max(need, 2);
+  let unmissable = !!opts.unmissable;
   const card = opts.card ?? null;
-  if (card !== null && inPlay(s, from, "doublebarrel") && cardDef(card).suit === "D") unmissable = true;
+  if (opts.bang && card !== null && inPlay(s, from, "doublebarrel") && cardDef(card).suit === "D") unmissable = true;
   return {
     kind: "react",
     to,

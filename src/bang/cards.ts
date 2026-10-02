@@ -16,7 +16,7 @@ export const EXPANSIONS: Exclude<Pack, "base">[] = ["dodge", "highnoon", "fistfu
 
 export const PACKS: Record<Pack, { name: string; emoji: string; blurb: string }> = {
   base: { name: "Bộ gốc", emoji: "🤠", blurb: "Cảnh sát trưởng, phó, kẻ cướp và kẻ phản bội." },
-  dodge: { name: "Thị trấn Né Đạn", emoji: "🏙️", blurb: "Lá xanh lá (dùng từ lượt sau), lá phải bỏ kèm 1 lá, 15 nhân vật, tới 8 người." },
+  dodge: { name: "Thị trấn Né Đạn", emoji: "🏙️", blurb: "Lá xanh lá (dùng từ lượt sau), lá phải bỏ kèm 1 lá, 15 nhân vật." },
   highnoon: { name: "Giữa Trưa", emoji: "🌞", blurb: "Bộ lá sự kiện: mỗi vòng một luật mới, kết thúc bằng Giữa Trưa." },
   fistful: { name: "Nắm Bài", emoji: "✊", blurb: "Bộ lá sự kiện thứ hai: phục kích, cò quay, bắn tỉa… kết thúc bằng Nắm Bài." },
   wws: { name: "Gánh Xiếc Miền Tây", emoji: "🎪", blurb: "Sự kiện gánh xiếc và 8 nhân vật kỳ quặc." },
@@ -262,7 +262,7 @@ const DECK_SPEC: [CardKey, string][] = [
   ["beer", "4H"],
   ["panic", "2D"],
   ["catbalou", "4S"],
-  // armed & dangerous (24)
+  // armed & dangerous (23)
   ["reload", "4C QH"],
   ["quickshot", "7C JD"],
   ["flintlock", "AS 6D"],
@@ -281,7 +281,7 @@ const DECK_SPEC: [CardKey, string][] = [
   ["stagecoach", "4D"],
 ];
 
-/** Which pack each DECK_SPEC line belongs to (by position: 80 / 40 / 24 / 24). */
+/** Which pack each DECK_SPEC line belongs to (by position: 80 / 40 / 24 / 23). */
 function buildCards(): { cards: CardDef[]; packOf: Pack[] } {
   const cards: CardDef[] = [];
   const packOf: Pack[] = [];

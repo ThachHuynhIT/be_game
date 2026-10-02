@@ -74,9 +74,10 @@ export interface PlayArgs {
 
 // ─── Shared checks ─────────────────────────────────────────────────
 
-/** Every action pushes the play-phase clock back. */
-function busy(s: BangState, now: number) {
-  if (s.turn) s.turn.deadline = now + s.turnMs;
+/** Every successful action pushes the play-phase clock back (rejected commands don't). */
+function busy(s: BangState, now: number, turn: BangState["turn"], res: Result): Result {
+  if (res.ok && turn && s.turn === turn) turn.deadline = now + s.turnMs;
+  return res;
 }
 
 /** It's your turn, you're in the play phase and nothing is waiting. */
@@ -104,13 +105,14 @@ function immune(s: BangState, by: string, target: string, card: number | null): 
 type Reach = "range" | "dist1" | "dist2" | "any" | "anyone";
 
 /** Validate a target for a card with the given reach. */
-function checkTarget(s: BangState, by: string, target: string | undefined, reach: Reach, card: number | null): string | null {
+function checkTarget(s: BangState, by: string, target: string | undefined, reach: Reach, card: number | null, bangShot = false): string | null {
   if (!target || !s.ps[target]) return "Hãy chọn người";
   if (reach === "anyone") return alive(s, target) ? null : "Người đó đã chết";
   if (target === by) return "Không chọn chính mình";
   if (!present(s, target)) return "Người đó đã bị loại";
   const bell = !!s.turn?.bellTower;
-  const d = distance(s, by, target);
+  // Súng Săn Lớn: the next BANG! ignores the target's Mustang-type cards.
+  const d = distance(s, by, target, bangShot && !!s.turn?.bigFifty && s.turn.player === by);
   if (!bell) {
     if (reach === "range" && d > weaponRange(s, by)) return `Ngoài tầm súng (khoảng cách ${d}, tầm ${weaponRange(s, by)})`;
     if (reach === "dist1" && d > 1) return `Phải ở khoảng cách 1 (đang là ${d})`;
@@ -203,9 +205,13 @@ function spendCubes(s: BangState, id: string, n: number): boolean {
 // ─── Playing a card from your hand ─────────────────────────────────
 
 export function playCard(s: BangState, id: string, a: PlayArgs, now: number, names: NameOf, random: Random = Math.random): Result {
+  const turn = s.turn;
+  return busy(s, now, turn, playCardInner(s, id, a, now, names, random));
+}
+
+function playCardInner(s: BangState, id: string, a: PlayArgs, now: number, names: NameOf, random: Random): Result {
   const bad = myMove(s, id);
   if (bad) return fail(bad);
-  busy(s, now);
   const p = s.ps[id];
   const card = a.card;
   if (!p.hand.includes(card)) return fail("Bạn không có lá đó");
@@ -320,15 +326,15 @@ function validate(s: BangState, id: string, key: CardKey, card: number | null, a
     case "bang":
     case "flintlock": {
       if (has(s, "ricochet") && a.pick?.zone === "play") {
-        const err = checkTarget(s, id, a.target, "range", card);
+        const err = checkTarget(s, id, a.target, "range", card, true);
         return err ?? checkPick(s, a.target!, a.pick, ["play"]);
       }
-      return checkTarget(s, id, a.target, "range", card);
+      return checkTarget(s, id, a.target, "range", card, true);
     }
     case "punch":
-      return checkTarget(s, id, a.target, "dist1", card);
+      return checkTarget(s, id, a.target, "dist1", card, true);
     case "fanning": {
-      const err = checkTarget(s, id, a.target, "range", card);
+      const err = checkTarget(s, id, a.target, "range", card, true);
       if (err) return err;
       if (a.target2) {
         if (a.target2 === id || a.target2 === a.target || !present(s, a.target2)) return "Người thứ hai không hợp lệ";
@@ -338,10 +344,10 @@ function validate(s: BangState, id: string, key: CardKey, card: number | null, a
       return null;
     }
     case "quickshot": {
-      const err = checkTarget(s, id, a.target, "range", card);
+      const err = checkTarget(s, id, a.target, "range", card, true);
       if (err) return err;
       if (!a.target2 || a.target2 === a.target) return "Bắn Nhanh: chọn 2 người khác nhau";
-      return checkTarget(s, id, a.target2, "range", card);
+      return checkTarget(s, id, a.target2, "range", card, true);
     }
     case "springfield":
       return checkTarget(s, id, a.target, "any", card);
@@ -391,8 +397,11 @@ function resolve(
   random: Random,
 ) {
   const t = s.turn;
+  const isBangCard = ["bang", "punch", "fanning", "quickshot", "flintlock"].includes(key);
   const noGear = !!t?.bigFifty;
-  if (noGear && t && ["bang", "punch", "fanning", "quickshot", "flintlock"].includes(key)) t.bigFifty = false;
+  if (noGear && t && isBangCard) t.bigFifty = false;
+  // Cô-lô-ra-đô: his BANG! draws! first; a ♠ makes it unmissable.
+  const unmissable = isBangCard && hasAb(s, id, "colorado") && flip(s, id, (c) => effSuit(s, c) === "S", "Cô-lô-ra-đô", now, names, random);
   const others = () => {
     const out: string[] = [];
     const n = s.order.length;
@@ -407,21 +416,21 @@ function resolve(
     case "bang":
     case "flintlock":
       if (has(s, "ricochet") && a.pick?.zone === "play") {
-        later(s, { ...shot(s, id, a.target!, now, { cause: "Đạn Nảy", card, need: mod.need, targetCard: a.pick.card }), shot: false });
+        later(s, { ...shot(s, id, a.target!, now, { cause: "Đạn Nảy", card, need: mod.need, targetCard: a.pick.card, bang: true, unmissable }), shot: false });
         return;
       }
-      later(s, shot(s, id, a.target!, now, { cause: CARD_TYPES[key].name, card, dmg: mod.dmg, need: mod.need, noGear }));
+      later(s, shot(s, id, a.target!, now, { cause: CARD_TYPES[key].name, card, dmg: mod.dmg, need: mod.need, noGear, bang: true, unmissable }));
       return;
     case "punch":
-      later(s, shot(s, id, a.target!, now, { cause: "Đấm", card, dmg: mod.dmg, noGear }));
+      later(s, shot(s, id, a.target!, now, { cause: "Đấm", card, dmg: mod.dmg, noGear, bang: true, unmissable }));
       return;
     case "fanning":
-      later(s, shot(s, id, a.target!, now, { cause: "Bắn Quạt", card, dmg: mod.dmg, need: mod.need, noGear }));
-      if (a.target2) later(s, shot(s, id, a.target2, now, { cause: "Bắn Quạt", card, noGear }));
+      later(s, shot(s, id, a.target!, now, { cause: "Bắn Quạt", card, dmg: mod.dmg, need: mod.need, noGear, bang: true, unmissable }));
+      if (a.target2) later(s, shot(s, id, a.target2, now, { cause: "Bắn Quạt", card, noGear, bang: true, unmissable }));
       return;
     case "quickshot":
-      later(s, shot(s, id, a.target!, now, { cause: "Bắn Nhanh", card, dmg: mod.dmg, need: mod.need, noGear }));
-      later(s, shot(s, id, a.target2!, now, { cause: "Bắn Nhanh", card, noGear }));
+      later(s, shot(s, id, a.target!, now, { cause: "Bắn Nhanh", card, dmg: mod.dmg, need: mod.need, noGear, bang: true, unmissable }));
+      later(s, shot(s, id, a.target2!, now, { cause: "Bắn Nhanh", card, noGear, bang: true, unmissable }));
       return;
     case "springfield":
     case "pepperbox":
@@ -583,9 +592,13 @@ function loseGhost(s: BangState, owner: string, card: number, now: number, names
 // ─── Cards in front of you ─────────────────────────────────────────
 
 export function useCard(s: BangState, id: string, a: { card: number; target?: string; pick?: PickSpec }, now: number, names: NameOf, random: Random = Math.random): Result {
+  const turn = s.turn;
+  return busy(s, now, turn, useCardInner(s, id, a, now, names, random));
+}
+
+function useCardInner(s: BangState, id: string, a: { card: number; target?: string; pick?: PickSpec }, now: number, names: NameOf, random: Random): Result {
   const bad = myMove(s, id);
   if (bad) return fail(bad);
-  busy(s, now);
   const p = s.ps[id];
   const c = p.play.find((x) => x.id === a.card);
   if (!c) return fail("Lá đó không ở trước mặt bạn");
@@ -646,6 +659,11 @@ function handCards(s: BangState, id: string, cards: number[] | undefined, n: num
 }
 
 export function useAbility(s: BangState, id: string, a: AbilityArgs, now: number, names: NameOf, random: Random = Math.random): Result {
+  const turn = a.name === "sid" ? null : s.turn;
+  return busy(s, now, turn, useAbilityInner(s, id, a, now, names, random));
+}
+
+function useAbilityInner(s: BangState, id: string, a: AbilityArgs, now: number, names: NameOf, random: Random): Result {
   const p = s.ps[id];
   // Sít Liều Mạng may heal at any time, even outside his turn.
   if (a.name === "sid") {
@@ -663,7 +681,6 @@ export function useAbility(s: BangState, id: string, a: AbilityArgs, now: number
   }
   const bad = myMove(s, id);
   if (bad) return fail(bad);
-  busy(s, now);
   const t = s.turn!;
   const need = (key: CharKey) => (hasAb(s, id, key) ? null : "Bạn không có sức mạnh này");
   let err: string | null = null;
@@ -766,6 +783,11 @@ export function useAbility(s: BangState, id: string, a: AbilityArgs, now: number
     case "josh": {
       err = need("josh") ?? (!s.packs.includes("goldrush") ? "Không chơi Cơn Sốt Vàng" : p.gold < 2 ? "Cần 2 vàng" : !s.shopDeck.length ? "Hết trang bị" : null);
       if (err) break;
+      const top = s.shopDeck[0];
+      if (GEAR[top].kind === "keep" && top !== "wanted" && hasGear(s, id, top)) {
+        err = "Bạn đã có món này";
+        break;
+      }
       p.gold -= 2;
       const gear = s.shopDeck.shift()!;
       err = gainGear(s, id, gear, { mode: gear === "bottle" ? "beer" : gear === "pardner" ? "store" : undefined, target: gear === "wanted" ? s.order.find((o) => o !== id && alive(s, o)) : undefined }, now, names, random);
@@ -925,9 +947,13 @@ export function gearCost(s: BangState, id: string, key: GearKey): number {
 }
 
 export function buyGear(s: BangState, id: string, a: { slot: number; target?: string; pick?: PickSpec; mode?: string }, now: number, names: NameOf, random: Random = Math.random): Result {
+  const turn = s.turn;
+  return busy(s, now, turn, buyGearInner(s, id, a, now, names, random));
+}
+
+function buyGearInner(s: BangState, id: string, a: { slot: number; target?: string; pick?: PickSpec; mode?: string }, now: number, names: NameOf, random: Random): Result {
   const bad = myMove(s, id);
   if (bad) return fail(bad);
-  busy(s, now);
   if (!s.packs.includes("goldrush")) return fail("Không chơi Cơn Sốt Vàng");
   const key = s.shop[a.slot];
   if (!key) return fail("Không có món đó");
@@ -954,7 +980,7 @@ function checkGear(s: BangState, id: string, key: GearKey, a: { target?: string;
   if (key === "bottle") {
     if (a.mode === "panic") return checkTarget(s, id, a.target, "dist1", null) ?? checkPick(s, a.target!, a.pick);
     if (a.mode === "bang") return checkTarget(s, id, a.target, "range", null);
-    if (a.mode === "beer") return s.ps[id].life >= s.ps[id].max ? "Bạn đang đầy máu" : null;
+    if (a.mode === "beer") return s.ps[id].life >= s.ps[id].max ? "Bạn đang đầy máu" : has(s, "reverend") ? "Mục Sư: không được uống Bia" : has(s, "hangover") ? "Say Xỉn: Bia không có tác dụng" : !beerWorks(s) ? "Chỉ còn 2 người: Bia vô dụng" : null;
     return "Chọn cách dùng Chai Rượu";
   }
   if (key === "pardner") {
@@ -976,7 +1002,7 @@ function gainGear(s: BangState, id: string, key: GearKey, a: { target?: string; 
   switch (key) {
     case "bottle":
       if (a.mode === "panic") aimedEffect(s, id, "bottle-panic", a.target!, a.pick, "Chai Rượu", now, null);
-      else if (a.mode === "bang") later(s, shot(s, id, a.target!, now, { cause: "Chai Rượu" }));
+      else if (a.mode === "bang") later(s, shot(s, id, a.target!, now, { cause: "Chai Rượu", bang: true }));
       else {
         heal(s, id, 1);
         beerSideEffects(s, id, now, names, random);
@@ -1114,6 +1140,7 @@ export function respond(s: BangState, id: string, a: RespondArgs, now: number, n
       p.hand.push(...keep);
       const rest = head.cards.filter((c) => !keep.includes(c));
       if (head.cause === "kit") s.deck.unshift(...rest);
+      else if (head.cause === "poker") toDiscard(s, ...rest);
       else {
         toDiscard(s, ...rest);
         p.gold += 1;

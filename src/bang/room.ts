@@ -10,7 +10,7 @@ import {
   pruneSpectators,
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
-import { DEFAULT_RANK_POINTS, checkRankPoints } from "../game/scoring";
+import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
 import {
   DEFAULT_RESPOND_SECONDS,
   DEFAULT_TURN_SECONDS,
@@ -21,7 +21,7 @@ import {
   TURN_SECONDS_OPTIONS,
 } from "./cards";
 import { abilityList, bangsLeft, buyGear, drawCommand, endTurn, playCard, respond, useAbility, useCard } from "./actions";
-import { type BangState, type Result, distance, forfeitPlayer, isInteractive, newBangGame, nextGameTickAt, pickCharacter, present, scoreBang, tickGame, weaponRange } from "./game";
+import { type BangState, type Result, distance, forfeitPlayer, isInteractive, newBangGame, nextGameTickAt, pickCharacter, present, tickGame, weaponRange } from "./game";
 import type { BangCommand, BangGameView, BangRoomSummary, BangRoomView, BangSettings, PromptView } from "./protocol";
 
 /** Room lifecycle for Đấu Súng — same presence / spectator / scoring rules as the other games. */
@@ -247,7 +247,7 @@ function afterChange(room: BangRoom, now: number) {
   const g = room.current;
   if (!g || g.status !== "ended" || g.recorded) return;
   g.recorded = true;
-  const deltas = scoreBang(g, bangSettingsOf(room).first);
+  const deltas = scoreByRank(g.finished, bangSettingsOf(room));
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,

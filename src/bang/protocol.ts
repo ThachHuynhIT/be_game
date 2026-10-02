@@ -14,7 +14,7 @@ export interface BangSettings {
   packs: Exclude<Pack, "base">[];
   turnSeconds: number;
   respondSeconds: number;
-  /** Points each winner gets; the losers share the loss so a game sums to zero. */
+  /** Points for Nhất / Nhì (shared rank scoring: winners first, then the rest by death order; sums to zero). */
   first: number;
   second: number;
 }
