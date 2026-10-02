@@ -213,7 +213,7 @@ export function makeMove(s: OQState, id: string, cell: unknown, dir: unknown, no
   const steps: OQStep[] = [];
   sow(s, id, cell, dir, steps);
   s.moves += 1;
-  s.lastMove = { seq: s.logSeq + 1, player: id, cell, dir, before, steps, ...(auto ? { auto: true } : {}) };
+  s.lastMove = { seq: s.logSeq + 1, at: now, player: id, cell, dir, before, steps, ...(auto ? { auto: true } : {}) };
 
   const caps = steps.filter((x): x is Extract<OQStep, { k: "capture" }> => x.k === "capture");
   const gotDan = caps.reduce((t, x) => t + x.dan, 0);

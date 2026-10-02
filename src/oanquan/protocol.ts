@@ -36,6 +36,8 @@ export type OQStep =
 
 export interface OQMove {
   seq: number;
+  /** When the move was made — with `seq` it identifies a move across games (seq restarts every game). */
+  at?: number;
   player: string;
   cell: number;
   /** +1 = toward higher square numbers ("phải" for the mover), −1 = "trái". */
