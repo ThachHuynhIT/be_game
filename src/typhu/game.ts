@@ -250,6 +250,9 @@ const ownedBy = (s: TPState, id: string) =>
 
 const sq = (pos: number) => BOARD[pos] as Ownable;
 
+/** Most houses a lot may have while its owner does not hold the whole colour group. */
+const MAX_PARTIAL_HOUSES = 3;
+
 function ownsGroup(s: TPState, id: string, pos: number) {
   const b = BOARD[pos];
   if (b.kind !== "prop") return false;
@@ -756,6 +759,8 @@ export function buildBlocker(s: TPState, id: string, pos: number): string | null
       );
     }
   }
+  // Without the whole colour group (rule "no full group needed") the lot stops at 3 houses: house 4 / hotel need the full group.
+  if (!ownsGroup(s, id, pos) && d.houses >= MAX_PARTIAL_HOUSES) return "Chưa đủ nhóm màu: tối đa 3 nhà, nhà 4 / khách sạn cần sở hữu cả nhóm";
   const cost = houseCost(b, d.houses + 1, rulesOf(s));
   if (s.ps[id].cash < cost) return `Cần ${money(cost)} để xây`;
   return null;

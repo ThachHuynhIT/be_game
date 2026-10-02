@@ -640,3 +640,21 @@ describe("unique pieces", () => {
     expect(new Set(ps.map((p) => p.color)).size).toBe(3);
   });
 });
+
+describe("building without the full group", () => {
+  it("stops at 3 houses until the whole colour group is owned", () => {
+    const s = game();
+    s.rules = { ...s.rules!, needGroup: false };
+    s.ps.a.cash = 100000;
+    for (const p of [16, 18]) s.deeds[p] = { owner: "a", houses: 0, mortgaged: false }; // orange has 3 lots; 19 is not mine
+    for (let i = 0; i < 3; i++) {
+      expect(build(s, "a", 16, T, names).ok).toBe(true);
+      expect(build(s, "a", 18, T, names).ok).toBe(true);
+    }
+    expect(buildBlocker(s, "a", 16)).toContain("tối đa 3 nhà");
+    expect(build(s, "a", 16, T, names).ok).toBe(false);
+    s.deeds[19] = { owner: "a", houses: 0, mortgaged: false };
+    for (const p of [19, 19, 19]) build(s, "a", p, T, names);
+    expect(buildBlocker(s, "a", 16)).toBeNull();
+  });
+});
