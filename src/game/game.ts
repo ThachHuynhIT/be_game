@@ -1,6 +1,7 @@
 import { type Card, RANK_TWO, newDeck, rankOf, shuffle, sortCards } from "./cards";
 import { type Combo, canBeat, detectCombo, isChop } from "./combos";
 import { type InstantWinReason, detectInstantWin } from "./rules";
+import type { TLMove } from "./protocol";
 import { type ChopScore, chopPoints } from "./scoring";
 
 export const HAND_SIZE = 13;
@@ -47,6 +48,17 @@ export interface GameState {
   autoPass?: boolean;
   /** Room setting: points for Nhất / Nhì this game (the rest is derived, see scoring.ts). */
   points?: { first: number; second: number };
+  /** Move history for Lịch sử ván, oldest first (missing on older saved games). */
+  moves?: TLMove[];
+}
+
+/** Longest history kept (a 4-player game is ~150 lines). */
+const MOVES_LIMIT = 400;
+
+function record(s: GameState, m: Omit<TLMove, "id">) {
+  const list = (s.moves ??= []);
+  list.push({ id: (list.at(-1)?.id ?? 0) + 1, ...m });
+  if (list.length > MOVES_LIMIT) list.splice(0, list.length - MOVES_LIMIT);
 }
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -154,6 +166,7 @@ function advance(s: GameState, actor: string | null) {
     s.lastPlay = null;
     s.passed = [];
     s.autoPassed = [];
+    if (s.turn) record(s, { kind: "round", player: s.turn });
     return;
   }
   // `actor` null = nobody acted (a forfeit off-turn): keep the current turn.
@@ -168,6 +181,7 @@ function autoPassHopeless(s: GameState) {
   if (hasBeatingPlay(s.hands[p], s.lastPlay.combo)) return;
   s.autoPassed = [...(s.autoPassed ?? []), p];
   s.passed.push(p);
+  record(s, { kind: "pass", player: p, auto: true });
   advance(s, p);
 }
 
@@ -238,14 +252,17 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
     s.chops = [...(s.chops ?? []), { from: prevPlayer, to: playerId, points }];
   }
   s.mustInclude = null;
+  record(s, { kind: "play", player: playerId, cards: [...combo.cards], ...(chop ? { chop: true } : {}), ...(s.lastPlay.chopPoints ? { chopPoints: s.lastPlay.chopPoints } : {}) });
   if (s.hands[playerId].length === 0) {
     s.finished.push(playerId);
+    record(s, { kind: "out", player: playerId, rank: s.finished.length - 1 });
     // Chết cháy: when the first player goes out, anyone who has not played a single card is burned.
     if (s.finished.length === 1) {
       const burned = activePlayers(s).filter((p) => s.hands[p].length === HAND_SIZE);
       if (burned.length) {
         s.burned = burned;
         s.passed = s.passed.filter((p) => !burned.includes(p));
+        for (const p of burned) record(s, { kind: "burned", player: p });
       }
     }
   }
@@ -253,18 +270,19 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
   return { ok: true };
 }
 
-export function pass(s: GameState, playerId: string): ActionResult {
+export function pass(s: GameState, playerId: string, auto = false): ActionResult {
   if (s.status !== "playing") return { ok: false, error: "Ván đã kết thúc" };
   if (s.turn !== playerId) return { ok: false, error: "Chưa đến lượt bạn" };
   if (!s.lastPlay) return { ok: false, error: "Bạn đang mở vòng, không được bỏ lượt" };
   s.passed.push(playerId);
+  record(s, { kind: "pass", player: playerId, ...(auto ? { auto: true } : {}) });
   advance(s, playerId);
   return { ok: true };
 }
 
 /** Timeout / absent player: pass if possible, otherwise lead the lowest single (or the required card). */
 export function autoAction(s: GameState, playerId: string): ActionResult {
-  if (s.lastPlay) return pass(s, playerId);
+  if (s.lastPlay) return pass(s, playerId, true);
   const card = s.mustInclude ?? Math.min(...s.hands[playerId]);
   return play(s, playerId, [card]);
 }
@@ -275,6 +293,7 @@ export function forfeit(s: GameState, playerId: string): ActionResult {
   if (!s.players.includes(playerId) || isOut(s, playerId)) return { ok: false, error: "Người chơi không còn trong ván" };
   s.forfeited = [...(s.forfeited ?? []), playerId];
   s.passed = s.passed.filter((p) => p !== playerId);
+  record(s, { kind: "forfeit", player: playerId });
   if (s.mustInclude !== null && s.hands[playerId]?.includes(s.mustInclude)) s.mustInclude = null;
   advance(s, s.turn === playerId ? playerId : null);
   return { ok: true };

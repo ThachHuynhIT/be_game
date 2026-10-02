@@ -208,5 +208,5 @@ expect(play(g, "a", c("3♠")).ok).toBe(true);           // a giữ lá nhỏ nh
 - `updateSettings` tự kiểm tra Nhất/Nhì (không dùng `checkRankPoints`) và khai báo lại `MAX_RANK_POINTS = 20` — đổi giới hạn phải sửa cả hai nơi.
 - Thông báo lỗi `mustInclude` luôn nói "3♠" kể cả khi lá bắt buộc là lá khác (2–3 người).
 - Hằng `TURN_SECONDS` không chỉnh được qua settings (khác các game khác).
-- Portfolio `src/lib/tienlen/protocol.ts` khai báo `GameView.moves?: TLMove[]` (lịch sử nước đi của ván) nhưng be_game **không gửi field này** — client coi là "server cũ". Nếu muốn có, phải thêm vào `GameState` + `roomView`.
+- Lịch sử ván: `GameState.moves` (`TLMove[]`, tối đa `MOVES_LIMIT = 400`) do `record()` trong `game.ts` ghi ở mỗi `play` (kèm `chop`/`chopPoints`), `pass` (`auto: true` khi server bỏ hộ: hết giờ, vắng, hoặc `autoPassHopeless`), vòng mới (`round`, người mở vòng), về đích (`out` + `rank`), chết cháy (`burned`), bị kích (`forfeit`). View gửi `game.moves`; ván lưu trước đó không có field → `[]`.
 - Portfolio `src/lib/tienlen/` có `cards.ts`, `combos.ts`, `rules.ts` (nguyên văn) + `protocol.ts` (bản chỉnh, tự khai báo `LastPlay`, `TienLenSettings`, `mirroredRankPoints`) + `index.ts`; không có `game.ts`/`scoring.ts`.

@@ -477,6 +477,7 @@ export function roomView(room: RoomState, player: RoomPlayer | null, now: number
           mustInclude: g.mustInclude,
           instantWin: g.instantWin,
           burned: g.burned ?? [],
+          moves: g.moves ?? [],
         }
       : null,
     hand: player ? (g?.hands[player.id] ?? []) : [],

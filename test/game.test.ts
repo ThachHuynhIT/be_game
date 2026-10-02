@@ -91,6 +91,32 @@ describe("game flow", () => {
     ]);
   });
 
+  it("records the move history (Lịch sử ván)", () => {
+    const g = newGame(["A", "B", "C"], {
+      hands: { A: c("3s 2s 9d"), B: c("4s 4h 5s 5h 6c 6d Kd"), C: c("7s 7c 7d 7h Qd") },
+    });
+    play(g, "A", c("3s"));
+    pass(g, "B");
+    autoAction(g, "C");
+    play(g, "A", c("2s"));
+    play(g, "B", c("4s 4h 5s 5h 6c 6d"));
+    const kinds = g.moves!.map((m) => [m.kind, m.player, m.auto ?? false]);
+    expect(kinds).toEqual([
+      ["play", "A", false],
+      ["pass", "B", false],
+      ["pass", "C", true],
+      ["round", "A", false],
+      ["play", "A", false],
+      ["play", "B", false],
+      ["pass", "C", true],
+      ["pass", "A", true],
+      ["round", "B", false],
+    ].slice(0, kinds.length));
+    const chop = g.moves!.find((m) => m.chop)!;
+    expect(chop).toMatchObject({ player: "B", chopPoints: 1 });
+    expect(g.moves!.map((m) => m.id)).toEqual(g.moves!.map((_, i) => i + 1));
+  });
+
   it("burns a player holding 13 cards when someone goes out", () => {
     const g = newGame(["A", "B", "C"], {
       hands: {
