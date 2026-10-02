@@ -1,4 +1,4 @@
-import { type Card, RANK_TWO, newDeck, rankOf, shuffle, sortCards } from "./cards";
+import { type Card, RANK_TWO, cardLabel, newDeck, rankOf, shuffle, sortCards } from "./cards";
 import { type Combo, canBeat, detectCombo, isChop } from "./combos";
 import { type InstantWinReason, detectInstantWin } from "./rules";
 import type { TLMove } from "./protocol";
@@ -232,7 +232,7 @@ export function play(s: GameState, playerId: string, cards: Card[]): ActionResul
   const combo = detectCombo(cards);
   if (!combo) return { ok: false, error: "Bộ bài không hợp lệ" };
   if (s.mustInclude !== null && !cards.includes(s.mustInclude)) {
-    return { ok: false, error: "Nước đầu tiên phải có lá nhỏ nhất (3♠)" };
+    return { ok: false, error: `Nước đầu tiên phải có lá nhỏ nhất (${cardLabel(s.mustInclude)})` };
   }
   const prev = s.lastPlay?.combo ?? null;
   if (!canBeat(prev, combo)) return { ok: false, error: "Bài không chặn được" };

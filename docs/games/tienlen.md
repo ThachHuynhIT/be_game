@@ -85,7 +85,7 @@ Lệnh `settings` (host, chỉ giữa các ván), đọc qua `settingsOf(room) =
 | Field | Kiểu / giá trị | Mặc định | Tác dụng | Kiểm tra |
 |---|---|---|---|---|
 | `autoPass` | boolean (`=== true`, giá trị khác → false) | `true` | Server tự bỏ lượt khi không có bài chặn được | `updateSettings` |
-| `first` | số nguyên 1–20 (`MAX_RANK_POINTS`) | 2 | Điểm Nhất | `updateSettings`: `"Điểm Nhất từ 1 đến 20"` |
+| `first` | số nguyên 1–20 (`MAX_RANK_POINTS`) | 2 | Điểm Nhất | `updateSettings` → `checkRankPoints`: `"Điểm Nhất từ 1 đến 20"` |
 | `second` | số nguyên 0–`first` | 1 | Điểm Nhì | `updateSettings`: `"Điểm Nhì từ 0 đến điểm Nhất"` |
 
 Lỗi khác: `"Chỉ chủ phòng mới đổi luật"`, `"Đổi luật khi ván đã kết thúc"`. Settings được chép vào `GameState.autoPass` / `GameState.points` lúc `start`.
@@ -205,8 +205,6 @@ expect(play(g, "a", c("3♠")).ok).toBe(true);           // a giữ lá nhỏ nh
 - `canBeat` chỉ nhìn `type`, `length`, `top`; `hasBeatingPlay` dựa vào điều này để chỉ thử bộ mạnh nhất mỗi dạng. Nếu thêm luật chặn mới phụ thuộc lá cụ thể, phải sửa cả `hasBeatingPlay`.
 - `src/game/room.ts` chứa helper xã hội của **mọi game** — sửa `watchRoom`/`react`/`sendChat`/hằng presence ảnh hưởng toàn bộ.
 - `isOut` = đã về **hoặc** forfeited **hoặc** burned; người cháy vẫn có bài trên tay (`cardCount` 13) nhưng không còn lượt.
-- `updateSettings` tự kiểm tra Nhất/Nhì (không dùng `checkRankPoints`) và khai báo lại `MAX_RANK_POINTS = 20` — đổi giới hạn phải sửa cả hai nơi.
-- Thông báo lỗi `mustInclude` luôn nói "3♠" kể cả khi lá bắt buộc là lá khác (2–3 người).
 - Hằng `TURN_SECONDS` không chỉnh được qua settings (khác các game khác).
 - Lịch sử ván: `GameState.moves` (`TLMove[]`, tối đa `MOVES_LIMIT = 400`) do `record()` trong `game.ts` ghi ở mỗi `play` (kèm `chop`/`chopPoints`), `pass` (`auto: true` khi server bỏ hộ: hết giờ, vắng, hoặc `autoPassHopeless`), vòng mới (`round`, người mở vòng), về đích (`out` + `rank`), chết cháy (`burned`), bị kích (`forfeit`). View gửi `game.moves`; ván lưu trước đó không có field → `[]`.
 - Portfolio `src/lib/tienlen/` có `cards.ts`, `combos.ts`, `rules.ts` (nguyên văn) + `protocol.ts` (bản chỉnh, tự khai báo `LastPlay`, `TienLenSettings`, `mirroredRankPoints`) + `index.ts`; không có `game.ts`/`scoring.ts`.

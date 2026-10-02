@@ -22,7 +22,7 @@ import {
   type RoomView,
   TURN_SECONDS,
 } from "./protocol";
-import { DEFAULT_TIENLEN_POINTS, scoreTienLen } from "./scoring";
+import { DEFAULT_TIENLEN_POINTS, checkRankPoints, scoreTienLen } from "./scoring";
 
 /**
  * Room lifecycle as pure functions over JSON-serialisable state, so a room can
@@ -88,7 +88,6 @@ export interface TienLenSettings {
 }
 
 export const DEFAULT_SETTINGS: TienLenSettings = { autoPass: true, ...DEFAULT_TIENLEN_POINTS };
-export const MAX_RANK_POINTS = 20;
 export const settingsOf = (room: RoomState): TienLenSettings => ({ ...DEFAULT_SETTINGS, ...room.settings });
 
 /** Host changes the table rules between games. */
@@ -99,9 +98,8 @@ export function updateSettings(room: RoomState, host: RoomPlayer, msg: Record<st
   if (msg.autoPass !== undefined) next.autoPass = msg.autoPass === true;
   if (msg.first !== undefined) next.first = msg.first as number;
   if (msg.second !== undefined) next.second = msg.second as number;
-  const ok = (v: number) => Number.isInteger(v) && v >= 0 && v <= MAX_RANK_POINTS;
-  if (!ok(next.first) || next.first < 1) return { ok: false, error: `Điểm Nhất từ 1 đến ${MAX_RANK_POINTS}` };
-  if (!ok(next.second) || next.second > next.first) return { ok: false, error: "Điểm Nhì từ 0 đến điểm Nhất" };
+  const bad = checkRankPoints(next.first, next.second);
+  if (bad) return { ok: false, error: bad };
   room.settings = next;
   return { ok: true };
 }
