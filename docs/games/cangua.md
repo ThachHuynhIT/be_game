@@ -130,7 +130,7 @@ stateDiagram-v2
 ## Kết thúc ván & tính điểm
 
 - `finish()`: `finished = [...done, ...người còn đua xếp theo tiến độ, ...forfeited đảo ngược]`. Tiến độ `progressOf` = Σ (`p + 1`) của các ngựa không ở chuồng; hoà thì theo thứ tự lượt.
-- `afterChange` (room): `scoreByRank(finished, settings)` (`src/game/scoring.ts`): 2 người `+f −f`; 3 người `+f +s −(f+s)`; 4 người `+f +s −s −f`. Cộng `points`, `games`, `wins` (hạng 0) cho ghế; push `GameRecord` (`id = "<code>-<gameSeq>"`) vào `history`; hub ghi bảng xếp hạng.
+- `afterChange` (room): `scoreByRank(finished, settings)` (`src/game/scoring.ts`): 2 người `+f −f`; 3 người `+f +s −(f+s)`; 4 người `+f +s −s −f`. Cộng `points`, `games`, `wins` (hạng 0) cho ghế; push `GameRecord` (`id = "<code>-<gameSeq>-<at>"`) vào `history`; hub ghi bảng xếp hạng.
 
 ## Test
 

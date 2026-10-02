@@ -68,15 +68,20 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
   /**
    * Load → apply → compare-and-swap, retrying on conflicts. `fn` mutates the draft in place.
    * A game that finished in the committed change is added to the leaderboard.
+   * `discard(result)` true = throw the draft away (e.g. a command that was refused must not save half-done changes).
    */
-  async mutate<T>(code: string, fn: (room: S, now: number) => T): Promise<{ found: false } | { found: true; result: T }> {
+  async mutate<T>(
+    code: string,
+    fn: (room: S, now: number) => T,
+    discard?: (result: T) => boolean,
+  ): Promise<{ found: false } | { found: true; result: T }> {
     for (let attempt = 0; attempt < 12; attempt++) {
       const cur = await this.store.load(code);
       if (!cur) return { found: false };
       const before = JSON.stringify(cur.state);
       const draft = JSON.parse(before) as S;
       const result = fn(draft, Date.now());
-      if (JSON.stringify(draft) === before) return { found: true, result };
+      if (discard?.(result) || JSON.stringify(draft) === before) return { found: true, result };
       if (await this.store.save(draft, cur.version)) {
         const rec: GameRecord | undefined = this.adapter.lastRecord(draft);
         if (rec && rec.id !== this.adapter.lastRecord(cur.state)?.id) {
@@ -299,7 +304,12 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     }
 
     if (conn.role === "spectator") return ack(id, { ok: false, error: "Khán giả không thể thao tác" });
-    const res = await hub.mutate(code, (room, now) => adapter.command(room, token, msg, now));
+    // A refused command is not saved, whatever it changed before failing.
+    const res = await hub.mutate(
+      code,
+      (room, now) => adapter.command(room, token, msg, now),
+      (r) => !r.ok,
+    );
     ack(id, res.found ? res.result : { ok: false, error: "Không tìm thấy phòng" });
   };
 

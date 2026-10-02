@@ -106,6 +106,26 @@ describe("RoomHub over WebSocket messages", () => {
     expect(seen.game!.turn).toBe(seen.meId);
   });
 
+  it("does not save changes made by a refused mutation", async () => {
+    const store = createMemoryRoomStore();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    await hub.mutate(
+      code,
+      (room) => {
+        (room as unknown as { hostId: string }).hostId = "changed";
+        return { ok: false };
+      },
+      (r) => !r.ok,
+    );
+    expect(((await store.load(code))!.state as unknown as { hostId: string }).hostId).not.toBe("changed");
+    await hub.mutate(code, (room) => {
+      (room as unknown as { hostId: string }).hostId = "changed";
+      return { ok: true };
+    });
+    expect(((await store.load(code))!.state as unknown as { hostId: string }).hostId).toBe("changed");
+  });
+
   it("rejects illegal moves and unknown rooms", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const s = connect(hub);

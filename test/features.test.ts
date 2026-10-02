@@ -105,7 +105,7 @@ describe("kick / spectators / emoji / scoring (room)", () => {
     expect(room.game!.status).toBe("ended");
     expect(room.history).toHaveLength(1);
     const rec = room.history![0];
-    expect(rec.id).toBe("QWERT-1");
+    expect(rec.id).toMatch(/^QWERT-1-[0-9]+$/);
     expect(rec.results.reduce((s, r) => s + r.delta, 0)).toBe(0);
     expect((players[0].points ?? 0) + (players[1].points ?? 0)).toBe(0);
     expect(roomView(room, players[0], T0).history).toHaveLength(1);

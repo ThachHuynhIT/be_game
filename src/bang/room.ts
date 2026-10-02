@@ -250,7 +250,7 @@ function afterChange(room: BangRoom, now: number) {
   const deltas = scoreByRank(g.finished, bangSettingsOf(room));
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
-    id: `${room.code}-${room.gameSeq}`,
+    id: `${room.code}-${room.gameSeq}-${now}`, // `now` keeps ids unique when a room code is reused later
     at: now,
     instantWin: null,
     results: g.finished.map((id, rank) => {

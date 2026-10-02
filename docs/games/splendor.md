@@ -128,7 +128,7 @@ Mọi lệnh đi qua `spCommand(room, token, msg, now)`. Lỗi chung: `"Bạn kh
 ## Kết thúc ván & tính điểm
 
 - `finish()`: xếp `players` còn lại theo điểm giảm dần → ít thẻ đã mua hơn → thứ tự chơi; sau đó nối `forfeited` đảo ngược (người rời trước đứng cuối). `status = "ended"`, `turn = deadline = null`.
-- `afterChange` (room) ghi một lần (`recorded`): điểm phòng = `scoreByRank(finished, settings)` (`src/game/scoring.ts`, `mirroredRankPoints`): 2 người `+first −first`; 3 người `+first +second −(first+second)`; 4 người `+first +second −second −first`. Cộng `points`, `games`, `wins` (hạng 0) cho ghế; push `GameRecord { id: "<code>-<gameSeq>", at, instantWin: null, results[{id,name,rank,delta}] }` vào `history`. Hub thấy record mới và ghi bảng xếp hạng (xem `../GUIDE.md`).
+- `afterChange` (room) ghi một lần (`recorded`): điểm phòng = `scoreByRank(finished, settings)` (`src/game/scoring.ts`, `mirroredRankPoints`): 2 người `+first −first`; 3 người `+first +second −(first+second)`; 4 người `+first +second −second −first`. Cộng `points`, `games`, `wins` (hạng 0) cho ghế; push `GameRecord { id: "<code>-<gameSeq>-<at>", at, instantWin: null, results[{id,name,rank,delta}] }` vào `history`. Hub thấy record mới và ghi bảng xếp hạng (xem `../GUIDE.md`).
 
 ## Test
 

@@ -201,7 +201,7 @@ function afterChange(room: OQRoom, now: number) {
   const firsts = g.finished.filter((id) => g.ranks[id] === 0).length;
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
-    id: `${room.code}-${room.gameSeq}`,
+    id: `${room.code}-${room.gameSeq}-${now}`, // `now` keeps ids unique when a room code is reused later
     at: now,
     instantWin: null,
     results: g.finished.map((id) => {

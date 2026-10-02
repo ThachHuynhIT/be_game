@@ -248,7 +248,7 @@ Trả lời từng loại prompt (`respond`):
 
 - `finish(winners)`: `finished` = người thắng rồi người thua; trong mỗi nhóm người còn sống đứng trước, người chết sau đứng trên người chết trước (`diedAt`). `queue`, `turn`, `deadline` bị xoá.
 - Chấm điểm: `afterChange` gọi `scoreByRank(finished, {first, second})` (dùng chung với splendor/typhu). `finished` = phe thắng (sống lâu hơn xếp trên) rồi phe thua theo thứ tự chết (chết muộn xếp trên); người bị kick tính như người chết. Nhất/Nhì lấy từ cài đặt phòng, hai hạng cuối bị trừ đối xứng, tổng luôn bằng 0.
-- `afterChange` (room): cộng `points`, `games`, `wins` (mọi người trong `winners`, không chỉ hạng 0); `GameRecord { id: "<code>-<gameSeq>", at, instantWin: null, results[{id, name, rank (= vị trí trong finished), delta}] }`; hub ghi bảng xếp hạng.
+- `afterChange` (room): cộng `points`, `games`, `wins` (mọi người trong `winners`, không chỉ hạng 0); `GameRecord { id: "<code>-<gameSeq>-<at>", at, instantWin: null, results[{id, name, rank (= vị trí trong finished), delta}] }`; hub ghi bảng xếp hạng.
 
 ## Test
 

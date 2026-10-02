@@ -548,7 +548,7 @@ describe("room", () => {
     expect(tpCommand(room, token, { type: "bankrupt" }, T).ok).toBe(true);
     expect(g.status).toBe("ended");
     expect(room.history?.[0].results.map((r) => r.delta)).toEqual([2, -2]);
-    expect(typhuAdapter.lastRecord(room)?.id).toBe("QWERT-1");
+    expect(typhuAdapter.lastRecord(room)?.id).toMatch(/^QWERT-1-[0-9]+$/);
   });
 });
 

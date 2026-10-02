@@ -137,7 +137,7 @@ stateDiagram-v2
 ## Kết thúc ván & tính điểm
 
 - `finish(reason, sole)`: tính `ranks`, `finished`, `winner` như trên.
-- `afterChange` (room): `scoreByRank(finished, settings)` (`+first, +second, …, −second, −first`, 2 người `+first / −first`). **Chung hạng** chia nhau điểm trung bình của các vị trí họ chiếm (cắt về 0, nên 2 người hoà = 0 điểm cả hai); `rank` trong `GameRecord` là hạng chung; `wins` chỉ tăng cho người **duy nhất** hạng nhất. Record `{ id: "<code>-<gameSeq>", at, instantWin: null, results }` vào `history`; hub ghi bảng xếp hạng.
+- `afterChange` (room): `scoreByRank(finished, settings)` (`+first, +second, …, −second, −first`, 2 người `+first / −first`). **Chung hạng** chia nhau điểm trung bình của các vị trí họ chiếm (cắt về 0, nên 2 người hoà = 0 điểm cả hai); `rank` trong `GameRecord` là hạng chung; `wins` chỉ tăng cho người **duy nhất** hạng nhất. Record `{ id: "<code>-<gameSeq>-<at>", at, instantWin: null, results }` vào `history`; hub ghi bảng xếp hạng.
 
 ## Test
 

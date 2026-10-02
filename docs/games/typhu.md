@@ -226,6 +226,6 @@ Mỗi lần đổ xúc xắc tiêu thụ 2 giá trị (cộng thêm 2 nếu là 
 - `board.ts` phải giữ **không phụ thuộc** để chép nguyên sang portfolio; đổi giá/helper giá thì chép lại.
 - Luật `even` / `chain` chỉ so các lô **của chính mình** trong nhóm (`myGroup`), nên khi `needGroup = false` có thể xây đều trên các lô mình đang có; với `chain`, "mọi lô" cũng là mọi lô của mình.
 - Trade lô có nhà có thể tạo nhóm "lẻ" (nhà nằm trên nhóm không còn đủ chủ) — được phép; luật xây/bán sau đó vẫn tính theo lô của từng chủ.
-- `answerTrade` khi re-check thất bại **xoá trade rồi mới trả lỗi** — thay đổi được lưu.
+- `answerTrade` khi re-check thất bại (tiền/đất đã đổi từ lúc mời): huỷ lời mời, ghi log "❌ … bị huỷ: <lý do>" và trả `ok` (lệnh lỗi sẽ không được hub lưu).
 - Khi ván đang chơi, `view.settings` = settings phòng đè bởi `rulesOf(ván)`, nên UI luôn hiện đúng luật ván đang áp dụng (kể cả ván cũ dùng `LEGACY_RULES`).
 - Người phá sản không còn `inPlayingGame` → ghế của họ (nếu offline quá `SEAT_GRACE_MS` hoặc đã `leave`) bị giải phóng khi có người mới `join` giữa ván (`joinTP` gọi `dropGoneSeats`); `nameOf` khi đó chỉ còn tên dự phòng từ `history` (nếu họ từng có ván xong), không thì `"?"`.

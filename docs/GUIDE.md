@@ -204,7 +204,7 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
 
 - Khi một ván kết thúc, `room.ts` của game: tính `deltas`, cộng `points`/`games`/`wins` cho ghế, tăng `room.gameSeq`, đẩy `GameRecord` vào `room.history` (giữ `HISTORY_LIMIT` = 20, view gửi 10 bản cuối).
   ```ts
-  interface GameRecord { id: `${code}-${gameSeq}`; at: number; instantWin: InstantWinReason | null;
+  interface GameRecord { id: `${code}-${gameSeq}-${at}`; at: number; instantWin: InstantWinReason | null;
     results: { id; name; rank /* 0 = Nhất */; delta; burned?: boolean }[] }
   ```
 - Hub thấy `lastRecord` mới → `store.recordGame`: mỗi kết quả cộng `delta` vào điểm theo `nameKey(name)` (NFC, trim, gộp khoảng trắng, lowercase — **không có tài khoản**, danh tính = tên), `games + 1`, `wins + 1` nếu `rank === 0`.
@@ -305,12 +305,12 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 ## Quy ước chung & bẫy thường gặp
 
 - **Máy trạng thái thuần**: `game.ts`/`room.ts` không dùng timer, không I/O, không `Date.now()` — luôn nhận `now`, và `random` được inject. State phải JSON-serializable (không `Map`/`Set`/class/`undefined` quan trọng) vì nó đi qua `JSON.stringify` trong Redis và trong `mutate`.
-- **Sửa tại chỗ, không rollback**: hub lưu bất cứ thay đổi nào của draft **kể cả khi lệnh trả lỗi**. Một lệnh phải kiểm tra hết điều kiện rồi mới sửa state; nếu cố ý sửa trước khi fail (ví dụ typhu `answerTrade` xoá trade khi re-check thất bại) thì thay đổi đó vẫn được lưu.
+- **Lệnh bị từ chối không được lưu**: với lệnh game, hub gọi `mutate(code, fn, (r) => !r.ok)` — kết quả `ok: false` thì bỏ cả draft, mọi thay đổi lệnh kịp làm trước khi fail đều mất. Muốn một thay đổi được giữ (ví dụ huỷ lời mời không còn hợp lệ) thì trả `ok: true` kèm dòng log (như typhu `answerTrade`).
 - **Result**: `{ ok: true } | { ok: false; error: string }`, thông điệp lỗi **tiếng Việt** hiển thị thẳng cho người chơi. Mỗi game khai báo lại kiểu `Result` riêng (cùng hình dạng với `Result` trong `adapters.ts`).
 - **Phòng cũ trong Redis** (TTL 12 h) có thể thiếu field mới: luôn đọc settings qua `xxxSettingsOf(room)` (`{...DEFAULT, ...room.settings}`), field mới trong state để optional (`?`) và có default khi đọc. Ví dụ: typhu `rulesOf(s)` — ván lưu trước khi có house rules (`s.rules` không có) dùng `LEGACY_RULES` (`sellLand:false, bankruptTo:"creditor", risingCost:false, landSalePct:50`), còn `s.rules` thiếu field thì lấy `DEFAULT_TP_RULES`. Tiến Lên `settingsOf(room)`, `p.points ?? 0`.
 - **Đồng bộ với portfolio**: client giữ bản sao để validate/hiển thị. Chép **nguyên văn**: `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts` (hai file sau chỉ khác comment đầu file), `src/game/{cards,combos,rules}.ts` (→ `src/lib/tienlen/`). Bản **chỉnh tay** (khác import, khai báo lại kiểu nằm trong `game.ts`, field optional cho server cũ): mọi `protocol.ts`; `src/lib/meono/cards.ts` là catalogue UI riêng (tên, hình, mô tả lá), chỉ trùng `CardType` với server. Đổi luật/kiểu ở be_game → sửa bản bên portfolio trong cùng đợt.
 - **Bảo mật view**: view là nơi duy nhất quyết định ai thấy gì. Không bao giờ đưa `token` vào view/summary; dữ liệu riêng (bài trên tay, vai trò, lá đang xem) chỉ thêm khi `player` (không phải khán giả) là chủ.
 - **Đổi luật giữa ván**: mọi game chặn `settings` khi ván đang chạy (`"Đổi luật khi ván đã kết thúc"`; Đấu Súng kiểm tra `status !== "ended"`); settings được chép vào state ván lúc `start`.
 - **Mã phòng**: `randomCode()` 5 ký tự từ `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (không I, O, 0, 1); server nhận tối đa 8 ký tự, viết hoa.
-- **Dedupe leaderboard theo `record.id = code-gameSeq`** trong 30 ngày trong khi phòng chỉ sống 12 h: nếu một mã phòng hết hạn rồi bị tạo lại trong 30 ngày, các ván đầu của phòng mới trùng id cũ sẽ **không được ghi leaderboard** (hiếm, 32⁵ mã). Memory store giữ `recorded` mãi trong process.
+- **Dedupe leaderboard theo `record.id = code-gameSeq-at`** trong 30 ngày (`at` = lúc ván kết thúc), nên mã phòng được tạo lại sau khi hết hạn vẫn ghi đủ ván. Memory store giữ `recorded` mãi trong process.
 - `MAX_RANK_POINTS` được khai báo hai lần (`src/game/scoring.ts` và `src/game/room.ts`, cùng 20); `updateSettings` của Tiến Lên tự kiểm tra thay vì gọi `checkRankPoints`.

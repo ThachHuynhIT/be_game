@@ -413,7 +413,7 @@ function recordGame(room: RoomState, now: number) {
   const deltas = scoreTienLen(g.finished, g.instantWin?.playerId ?? null, g.chops, g.burned, g.points);
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
-    id: `${room.code}-${room.gameSeq}`,
+    id: `${room.code}-${room.gameSeq}-${now}`, // `now` keeps ids unique when a room code is reused later
     at: now,
     instantWin: g.instantWin?.reason ?? null,
     results: g.finished.map((id, rank) => {

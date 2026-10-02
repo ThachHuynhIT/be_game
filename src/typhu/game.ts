@@ -917,8 +917,10 @@ export function answerTrade(s: TPState, id: string, accept: boolean, now: number
   }
   const err = checkSide(s, t.from, t.give) ?? checkSide(s, t.to, t.get);
   if (err) {
+    // Something changed since the offer (cash spent, land sold…): the offer is void, not a failed command.
     s.trade = null;
-    return fail(err);
+    log(s, now, `❌ Lời mời đổi của ${names(t.from)} bị huỷ: ${err}`, "info");
+    return OK;
   }
   for (const pos of t.give.props) s.deeds[pos].owner = t.to;
   for (const pos of t.get.props) s.deeds[pos].owner = t.from;
