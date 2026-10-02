@@ -264,9 +264,8 @@ describe("room", () => {
     return room;
   }
 
-  it("2 seats, host settings, start, moves and scoring", () => {
+  it("2 players, host settings, start, moves and scoring", () => {
     const room = room2();
-    expect(joinOQ(room, "token-cccc", "Chi", T, () => "p3").ok).toBe(false);
     expect(oqCommand(room, "token-bbbb", { type: "settings", quanValue: 5 }, T).ok).toBe(false); // not host
     expect(oqCommand(room, "token-aaaa", { type: "settings", quanValue: 7 }, T).ok).toBe(false);
     expect(oqCommand(room, "token-aaaa", { type: "settings", turnSeconds: 99 }, T).ok).toBe(false);
@@ -328,7 +327,7 @@ describe("room", () => {
     oqCommand(room, token, { type: "move", cell: side === 0 ? 3 : 9, dir: 1 }, T);
     expect(g.winner).toBeNull();
     expect(room.history?.[0].results.map((r) => r.delta)).toEqual([0, 0]);
-    expect(room.seats.every((p) => p!.wins === 0)).toBe(true);
+    expect(room.seats.every((p) => !p || p.wins === 0)).toBe(true);
   });
 
   it("the room tick auto-plays on timeout; kicking an offline player ends the game", () => {
@@ -337,7 +336,7 @@ describe("room", () => {
     const g = room.current!;
     const first = g.turn;
     // Keep both players online.
-    for (const p of room.seats) p!.lastSeen = T + 30_000;
+    for (const p of room.seats) if (p) p.lastSeen = T + 30_000;
     expect(tickOQ(room, T + 30_000)).toBe(true);
     expect(g.turn).not.toBe(first);
     // b (p2) goes offline; host a kicks them.

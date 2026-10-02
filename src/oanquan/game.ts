@@ -1,22 +1,22 @@
 import {
-  CELLS,
-  MAX_MOVES,
   MAX_PLAYERS,
   MIN_PLAYERS,
-  QUAN_CELLS,
   QUAN_NON_MIN,
   RESEED,
-  ROWS,
   START_DAN,
+  cellsFor,
   isQuanCell,
+  maxMovesFor,
   nextCell,
+  quanCellsFor,
   quanIndex,
+  rowOf,
   sideOfCell,
 } from "./board";
 import type { OQMove, OQReseed, OQStep } from "./protocol";
 
 /**
- * Ô Ăn Quan state machine (2 players). Pure and timer-free: `now` and `random`
+ * Ô Ăn Quan state machine (2–4 players). Pure and timer-free: `now` and `random`
  * are passed in; `tickGame()` plays a random legal move for a player who times
  * out or goes offline. Board layout: see board.ts.
  */
@@ -28,17 +28,23 @@ export const LOG_LIMIT = 30;
 const MAX_STEPS = 2_000;
 
 export interface OQState {
-  /** players[0] owns squares 1–5, players[1] owns 7–11. */
+  /** players[i] owns the ô dân 6i+1 … 6i+5; the ô quan are the squares 6i (see board.ts). Seating order = turn order. */
   players: string[];
   turn: string | null;
   phaseAt: number;
   deadline: number | null;
   dan: number[];
-  /** Quan piece still on square 0 / square 6. */
+  /** Quan piece still on square 0, 6, 12, 18 (one per player). */
   quan: boolean[];
   captured: Record<string, { dan: number; quan: number }>;
-  /** Dân borrowed from the opponent to reseed an empty row. */
+  /** Dân borrowed from other players to reseed an empty row (total per borrower). */
   borrowed: Record<string, number>;
+  /** debts[borrower][lender] = dân owed. */
+  debts: Record<string, Record<string, number>>;
+  /** Players who could not reseed (or were kicked): they skip turns, their cells stay on the board. In elimination order. */
+  out: string[];
+  /** Final rank (0 = best, ties share) per player once the game has ended. */
+  ranks: Record<string, number>;
   quanValue: number;
   quanNon: boolean;
   moves: number;
@@ -61,8 +67,20 @@ export type NameOf = (id: string) => string;
 export type Random = () => number;
 
 const turnMs = (s: OQState) => s.turnMs ?? TURN_MS;
-const other = (s: OQState, id: string) => s.players.find((p) => p !== id)!;
-const sideOf = (s: OQState, id: string) => s.players.indexOf(id) as 0 | 1;
+const sideOf = (s: OQState, id: string) => s.players.indexOf(id);
+const cellsOf = (s: OQState) => cellsFor(s.players.length);
+const isOut = (s: OQState, id: string) => s.out.includes(id);
+const activeOf = (s: OQState) => s.players.filter((p) => !isOut(s, p));
+/** Next player still in the game after `id` in turn order (id itself if alone). */
+function nextActive(s: OQState, id: string): string {
+  const n = s.players.length;
+  const at = sideOf(s, id);
+  for (let k = 1; k <= n; k++) {
+    const p = s.players[(at + k) % n];
+    if (!isOut(s, p)) return p;
+  }
+  return id;
+}
 
 export function newOQGame(
   players: string[],
@@ -71,17 +89,28 @@ export function newOQGame(
   random: Random = Math.random,
 ): OQState {
   if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) throw new Error(`need ${MIN_PLAYERS} players`);
-  const order = random() < 0.5 ? players.slice() : players.slice().reverse();
-  const dan = Array.from({ length: CELLS }, (_, c) => (isQuanCell(c) ? 0 : START_DAN));
+  let order: string[];
+  if (players.length === 2) order = random() < 0.5 ? players.slice() : players.slice().reverse();
+  else {
+    order = players.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.min(i, Math.floor(random() * (i + 1)));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+  }
+  const dan = Array.from({ length: cellsFor(order.length) }, (_, c) => (isQuanCell(c) ? 0 : START_DAN));
   return {
     players: order,
     turn: order[0],
     phaseAt: now,
     deadline: now + (opts.turnMs ?? TURN_MS),
     dan,
-    quan: [true, true],
+    quan: order.map(() => true),
     captured: Object.fromEntries(order.map((p) => [p, { dan: 0, quan: 0 }])),
     borrowed: Object.fromEntries(order.map((p) => [p, 0])),
+    debts: Object.fromEntries(order.map((p) => [p, {}])),
+    out: [],
+    ranks: {},
     quanValue: opts.quanValue,
     quanNon: opts.quanNon,
     moves: 0,
@@ -104,12 +133,16 @@ function log(s: OQState, now: number, text: string, tone?: OQState["log"][number
 
 // ─── Derived values ──────────────────────────────────────────────────
 
-/** dân + quan × value − borrowed + lent to the opponent. */
+/** Dân still owed to `id` by the other players. */
+export function lentOf(s: OQState, id: string) {
+  return s.players.reduce((t, p) => t + (p === id ? 0 : (s.debts[p]?.[id] ?? 0)), 0);
+}
+
+/** dân + quan × value − borrowed + lent to the other players. */
 export function scoreOf(s: OQState, id: string) {
   const c = s.captured[id];
   if (!c) return 0;
-  const opp = other(s, id);
-  return c.dan + c.quan * s.quanValue - (s.borrowed[id] ?? 0) + (opp ? (s.borrowed[opp] ?? 0) : 0);
+  return c.dan + c.quan * s.quanValue - (s.borrowed[id] ?? 0) + lentOf(s, id);
 }
 
 const isEmpty = (s: OQState, c: number) => s.dan[c] === 0 && !(isQuanCell(c) && s.quan[quanIndex(c)]);
@@ -118,7 +151,7 @@ const isEmpty = (s: OQState, c: number) => s.dan[c] === 0 && !(isQuanCell(c) && 
 export function legalMoves(s: OQState, id: string): { cell: number; dir: 1 | -1 }[] {
   if (s.status !== "playing" || s.turn !== id) return [];
   const out: { cell: number; dir: 1 | -1 }[] = [];
-  for (const cell of ROWS[sideOf(s, id)]) if (s.dan[cell] > 0) out.push({ cell, dir: 1 }, { cell, dir: -1 });
+  for (const cell of rowOf(sideOf(s, id))) if (s.dan[cell] > 0) out.push({ cell, dir: 1 }, { cell, dir: -1 });
   return out;
 }
 
@@ -126,18 +159,20 @@ export function legalMoves(s: OQState, id: string): { cell: number; dir: 1 | -1 
 
 /** Sow from `start`, keep sowing (rải tiếp), then capture (ăn, ăn liên tiếp). Mutates the board. */
 function sow(s: OQState, id: string, start: number, dir: 1 | -1, steps: OQStep[]) {
+  const cells = cellsOf(s);
+  const next = (c: number) => nextCell(c, dir, cells);
   let cell = start;
   let hand = s.dan[cell];
   s.dan[cell] = 0;
   steps.push({ k: "pick", cell, n: hand });
   for (let guard = 0; guard < MAX_STEPS; guard++) {
     while (hand > 0) {
-      cell = nextCell(cell, dir);
+      cell = next(cell);
       s.dan[cell] += 1;
       hand -= 1;
       steps.push({ k: "sow", cell });
     }
-    const n1 = nextCell(cell, dir);
+    const n1 = next(cell);
     if (!isEmpty(s, n1)) {
       // An ô quan can't be picked up: the turn ends.
       if (isQuanCell(n1)) return;
@@ -150,7 +185,7 @@ function sow(s: OQState, id: string, start: number, dir: 1 | -1, steps: OQStep[]
     // Empty square: capture what follows, as long as the pattern empty → full repeats.
     let gap = n1;
     for (;;) {
-      const t = nextCell(gap, dir);
+      const t = next(gap);
       if (isEmpty(s, t)) return;
       const hasQuan = isQuanCell(t) && s.quan[quanIndex(t)];
       if (hasQuan && s.quanNon && s.dan[t] < QUAN_NON_MIN) return;
@@ -162,7 +197,7 @@ function sow(s: OQState, id: string, start: number, dir: 1 | -1, steps: OQStep[]
         s.captured[id].quan += 1;
       }
       steps.push({ k: "capture", cell: t, dan, quan: hasQuan });
-      gap = nextCell(t, dir);
+      gap = next(t);
       if (!isEmpty(s, gap)) return;
     }
   }
@@ -172,7 +207,7 @@ export function makeMove(s: OQState, id: string, cell: unknown, dir: unknown, no
   if (s.status !== "playing") return fail("Ván đã kết thúc");
   if (s.turn !== id) return fail("Chưa đến lượt bạn");
   if (dir !== 1 && dir !== -1) return fail("Chọn hướng rải trái hoặc phải");
-  if (typeof cell !== "number" || !Number.isInteger(cell) || sideOfCell(cell) !== sideOf(s, id)) return fail("Chỉ được chọn ô dân bên mình");
+  if (typeof cell !== "number" || !Number.isInteger(cell) || sideOfCell(cell) !== sideOf(s, id) || cell >= cellsOf(s)) return fail("Chỉ được chọn ô dân bên mình");
   if (s.dan[cell] === 0) return fail("Ô này đang trống");
   const before = { dan: s.dan.slice(), quan: s.quan.slice() };
   const steps: OQStep[] = [];
@@ -183,7 +218,7 @@ export function makeMove(s: OQState, id: string, cell: unknown, dir: unknown, no
   const caps = steps.filter((x): x is Extract<OQStep, { k: "capture" }> => x.k === "capture");
   const gotDan = caps.reduce((t, x) => t + x.dan, 0);
   const gotQuan = caps.filter((x) => x.quan).length;
-  const where = `ô ${ROWS[sideOf(s, id)].indexOf(cell) + 1}`;
+  const where = `ô ${rowOf(sideOf(s, id)).indexOf(cell) + 1}`;
   const way = dir === 1 ? "phải" : "trái";
   const prefix = `${auto ? "⏱ " : ""}${names(id)} rải ${where} sang ${way}`;
   if (caps.length) {
@@ -196,72 +231,108 @@ export function makeMove(s: OQState, id: string, cell: unknown, dir: unknown, no
 }
 
 function endTurn(s: OQState, id: string, now: number, names: NameOf) {
-  const quanCleared = QUAN_CELLS.every((c) => !s.quan[quanIndex(c)] && s.dan[c] === 0);
+  const quanCleared = quanCellsFor(s.players.length).every((c) => !s.quan[quanIndex(c)] && s.dan[c] === 0);
   if (quanCleared) return finishBoard(s, now, names, "board");
-  if (s.moves >= MAX_MOVES) return finishBoard(s, now, names, "limit");
-  beginTurn(s, other(s, id), now, names);
+  if (s.moves >= maxMovesFor(s.players.length)) return finishBoard(s, now, names, "limit");
+  beginTurn(s, nextActive(s, id), now, names);
 }
 
-/** Start `id`'s turn: rải quân first if their row is empty. */
+/**
+ * Start `id`'s turn: rải quân first if their row is empty. The 5 dân come from their own pile first, then are
+ * borrowed (per lender, tracked in `debts`) from the next players in turn order who still have dân. If the
+ * piles of everyone still playing can't cover it, `id` is out: skips turns, their cells stay on the board.
+ */
 function beginTurn(s: OQState, id: string, now: number, names: NameOf) {
-  const row = ROWS[sideOf(s, id)];
+  const row = rowOf(sideOf(s, id));
   if (row.every((c) => s.dan[c] === 0)) {
-    const opp = other(s, id);
+    const lenders: string[] = [];
+    for (let p = nextActive(s, id); p !== id && !lenders.includes(p); p = nextActive(s, p)) lenders.push(p);
     const own = s.captured[id].dan;
-    if (own + s.captured[opp].dan < RESEED) {
-      log(s, now, `${names(id)} hết dân để rải lại — thua`, "info");
-      return finish(s, now, names, "stuck", opp);
+    if (own + lenders.reduce((t, p) => t + s.captured[p].dan, 0) < RESEED) {
+      log(s, now, `${names(id)} hết dân để rải lại — bị loại`, "info");
+      return eliminate(s, id, now, names, "stuck");
     }
-    const borrow = Math.max(0, RESEED - own);
-    s.captured[id].dan -= RESEED - borrow;
-    s.captured[opp].dan -= borrow;
-    s.borrowed[id] += borrow;
+    const useOwn = Math.min(own, RESEED);
+    s.captured[id].dan -= useOwn;
+    let need = RESEED - useOwn;
+    const from: { id: string; n: number }[] = [];
+    for (const p of lenders) {
+      if (need <= 0) break;
+      const n = Math.min(need, s.captured[p].dan);
+      if (n <= 0) continue;
+      s.captured[p].dan -= n;
+      s.debts[id][p] = (s.debts[id][p] ?? 0) + n;
+      s.borrowed[id] += n;
+      need -= n;
+      from.push({ id: p, n });
+    }
+    const borrow = from.reduce((t, x) => t + x.n, 0);
     for (const c of row) s.dan[c] = 1;
-    s.lastReseed = { seq: s.logSeq + 1, player: id, borrowed: borrow };
-    log(s, now, `${names(id)} rải quân: đặt 5 dân lên hàng của mình${borrow ? ` (vay ${names(opp)} ${borrow} dân)` : ""}`, "info");
+    s.lastReseed = { seq: s.logSeq + 1, player: id, borrowed: borrow, ...(from.length ? { lenders: from } : {}) };
+    const via = from.map((x) => `${names(x.id)} ${x.n} dân`).join(", ");
+    log(s, now, `${names(id)} rải quân: đặt 5 dân lên hàng của mình${borrow ? ` (vay ${via})` : ""}`, "info");
   }
   s.turn = id;
   s.phaseAt = now;
   s.deadline = now + turnMs(s);
 }
 
-/** Both ô quan are cleared (or the move limit hit): each side collects the dân on its own row. */
+/** `id` can no longer play. One player left → they win; otherwise the turn passes on if it was theirs. */
+function eliminate(s: OQState, id: string, now: number, names: NameOf, reason: "stuck" | "forfeit") {
+  // In the "stuck" case `id` was about to start their turn (s.turn still names the previous mover).
+  const passOn = reason === "stuck" || s.turn === id;
+  if (!isOut(s, id)) s.out = [...s.out, id];
+  const alive = activeOf(s);
+  if (alive.length <= 1) return finish(s, now, names, reason, alive[0] ?? null);
+  if (passOn) beginTurn(s, nextActive(s, id), now, names);
+}
+
+/** Both ô quan are cleared (or the move limit hit): each remaining player collects the dân on their own row. */
 function finishBoard(s: OQState, now: number, names: NameOf, reason: "board" | "limit") {
-  for (const id of s.players) {
+  for (const id of activeOf(s)) {
     let n = 0;
-    for (const c of ROWS[sideOf(s, id)]) {
+    for (const c of rowOf(sideOf(s, id))) {
       n += s.dan[c];
       s.dan[c] = 0;
     }
     s.captured[id].dan += n;
   }
-  // On the move limit, whatever is still on the ô quan squares counts for nobody.
+  // On the move limit, whatever is still on the ô quan squares (and on rows of players who are out) counts for nobody.
   log(s, now, reason === "board" ? "Hết quan, kéo quân về — tính điểm" : "Đã quá số nước — kéo quân về, tính điểm", "info");
-  const [a, b] = s.players;
-  const sa = scoreOf(s, a);
-  const sb = scoreOf(s, b);
-  finish(s, now, names, reason, sa === sb ? null : sa > sb ? a : b);
+  finish(s, now, names, reason, null);
 }
 
-function finish(s: OQState, now: number, names: NameOf, reason: OQState["endReason"], winner: string | null) {
+/**
+ * End the game. Ranking: players still in, best score first (ties share a rank); then the players who are out,
+ * the one who lasted longest first. `winner` is the outright first place (null if shared). `sole` is the last
+ * one standing, who wins regardless of score.
+ */
+function finish(s: OQState, now: number, names: NameOf, reason: OQState["endReason"], sole: string | null) {
   s.status = "ended";
   s.endReason = reason;
-  s.winner = winner;
   s.turn = null;
   s.deadline = null;
-  const [a, b] = s.players;
-  s.finished = winner ? [winner, other(s, winner)] : [a, b];
-  if (winner) {
-    const loser = other(s, winner);
-    log(s, now, `🏆 ${names(winner)} thắng ${scoreOf(s, winner)} – ${scoreOf(s, loser)}`, "win");
-  } else log(s, now, `🤝 Hoà ${scoreOf(s, a)} – ${scoreOf(s, b)}`, "win");
+  const alive = activeOf(s);
+  const order = [...alive.slice().sort((x, y) => scoreOf(s, y) - scoreOf(s, x)), ...s.out.slice().reverse()];
+  const ranks: Record<string, number> = {};
+  order.forEach((id, i) => {
+    const prev = order[i - 1];
+    ranks[id] = i > 0 && alive.includes(id) && alive.includes(prev) && scoreOf(s, id) === scoreOf(s, prev) ? ranks[prev] : i;
+  });
+  s.ranks = ranks;
+  s.finished = order;
+  const top = order.filter((id) => ranks[id] === 0);
+  s.winner = sole ?? (top.length === 1 ? top[0] : null);
+  const list = order.map((id) => String(scoreOf(s, id))).join(" – ");
+  if (s.winner) log(s, now, `🏆 ${names(s.winner)} thắng ${list}`, "win");
+  else log(s, now, `🤝 Hoà ${list}`, "win");
 }
 
-/** A player leaves for good (kicked while offline): the other one wins. */
+/** A player leaves for good (kicked while offline): they are out. The last one standing wins. */
 export function forfeitPlayer(s: OQState, id: string, now: number, names: NameOf): Result {
   if (s.status !== "playing" || !s.players.includes(id)) return fail("Người chơi không còn trong ván");
   log(s, now, `${names(id)} rời ván`, "info");
-  finish(s, now, names, "forfeit", other(s, id));
+  eliminate(s, id, now, names, "forfeit");
   return OK;
 }
 

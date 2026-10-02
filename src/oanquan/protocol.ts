@@ -49,17 +49,25 @@ export interface OQMove {
 export interface OQReseed {
   seq: number;
   player: string;
-  /** Dân taken from the opponent's pile (debt). */
+  /** Dân taken from other players' piles (debt), in total. */
   borrowed: number;
+  /** Who lent how much (absent when nothing was borrowed). */
+  lenders?: { id: string; n: number }[];
 }
 
 export interface OQPlayerView {
   id: string;
-  /** 0 = owns squares 1–5 (bottom row), 1 = owns 7–11. */
-  side: 0 | 1;
+  /** Segment index: owns squares 6·side+1 … 6·side+5; its ô quan is square 6·side. Also the turn order. */
+  side: number;
   captured: { dan: number; quan: number };
-  /** Dân borrowed from the opponent to reseed (subtracted from the score, given back to them). */
+  /** Dân borrowed from other players to reseed (subtracted from the score, credited to the lenders). */
   borrowed: number;
+  /** Dân other players still owe this player (added to the score). */
+  lent: number;
+  /** Could not reseed (or was kicked): skips turns; their cells stay on the board. */
+  out: boolean;
+  /** Final rank once ended (0 = first, ties share), else null. */
+  rank: number | null;
   /** Score right now: dân + quan × value − borrowed + lent (+ own row once the game ends). */
   score: number;
 }
@@ -68,16 +76,17 @@ export interface OQGameView {
   status: "playing" | "ended";
   turn: string | null;
   deadline: number | null;
-  /** Dân per square, 12 squares (see board.ts for the layout). */
+  /** Dân per square, 6 × players squares (12 for two players; see board.ts for the layout). */
   dan: number[];
-  /** Whether the quan piece is still on square 0 / square 6. */
+  /** Whether the quan piece is still on square 0, 6, 12, 18 (one entry per player). */
   quan: boolean[];
   quanValue: number;
   quanNon: boolean;
   players: OQPlayerView[];
   moves: number;
+  /** Final order, best first (ties keep a stable order; see players[].rank). */
   finished: string[];
-  /** null = draw (or not ended). */
+  /** null = shared first place (or not ended). */
   winner: string | null;
   endReason: "board" | "stuck" | "forfeit" | "limit" | null;
   lastMove: OQMove | null;
@@ -111,7 +120,7 @@ export interface OQRoomSummary {
 /**
  * Ô Ăn Quan commands (acked like the other games):
  *   { type: "start" } · { type: "settings", quanValue?, quanNon?, turnSeconds?, first?, second? } · { type: "kick", playerId }
- *   { type: "move", cell: 1–5 | 7–11, dir: 1 | -1 }   // pick up a non-empty ô dân on your row and sow
+ *   { type: "move", cell: 6·side+1 … 6·side+5, dir: 1 | -1 }   // pick up a non-empty ô dân on your row and sow
  */
 export type OQCommand =
   | { type: "start" }

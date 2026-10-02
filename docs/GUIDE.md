@@ -18,7 +18,7 @@ be_game là backend realtime (Node `http.Server` + `ws`) cho các game online tr
 | Đá Quý (Splendor) | `splendor` | `src/splendor/` | 2–4 | `/splendor` | `/api/splendor/ws` | [games/splendor.md](games/splendor.md) |
 | Đấu Súng (Bang!) | `bang` | `src/bang/` | 3–8 | `/bang` | `/api/bang/ws` | [games/bang.md](games/bang.md) |
 | Cờ Cá Ngựa | `cangua` | `src/cangua/` | 2–4 | `/co-ca-ngua` | `/api/cangua/ws` | [games/cangua.md](games/cangua.md) |
-| Ô Ăn Quan | `oanquan` | `src/oanquan/` | 2 | `/o-an-quan` | `/api/oanquan/ws` | [games/oanquan.md](games/oanquan.md) |
+| Ô Ăn Quan | `oanquan` | `src/oanquan/` | 2–4 | `/o-an-quan` | `/api/oanquan/ws` | [games/oanquan.md](games/oanquan.md) |
 
 Mỗi game có `/rooms` và `/leaderboard` cùng tiền tố (Tiến Lên dùng đường dẫn không tiền tố: `/api/rooms`, `/api/leaderboard`).
 

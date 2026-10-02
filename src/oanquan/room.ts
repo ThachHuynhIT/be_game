@@ -12,7 +12,7 @@ import {
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
 import { DEFAULT_QUAN_VALUE, DEFAULT_TURN_SECONDS, MAX_PLAYERS, MIN_PLAYERS, QUAN_VALUE_OPTIONS, TURN_SECONDS_OPTIONS } from "./board";
-import { type OQState, type Result, forfeitPlayer, makeMove, newOQGame, nextGameTickAt, scoreOf, tickGame } from "./game";
+import { type OQState, type Result, forfeitPlayer, lentOf, makeMove, newOQGame, nextGameTickAt, scoreOf, tickGame } from "./game";
 import type { OQCommand, OQRoomSummary, OQRoomView, OQSettings } from "./protocol";
 
 /** Room lifecycle for Ô Ăn Quan — same presence / spectator / scoring rules as the other games. */
@@ -183,26 +183,36 @@ export function oqCommand(room: OQRoom, token: string, msg: OQCommand, now: numb
   return res;
 }
 
-/** Record a game that just ended (points, history). A draw scores 0 for both. */
+/**
+ * Record a game that just ended (points, history). Rank points by finishing order (`scoreByRank`);
+ * players tied on a rank share the average of the points of the places they occupy (truncated toward zero), so a
+ * two-player draw scores 0 for both.
+ */
 function afterChange(room: OQRoom, now: number) {
   const g = room.current;
   if (!g || g.status !== "ended" || g.recorded) return;
   g.recorded = true;
-  const draw = !g.winner;
-  const deltas = draw ? Object.fromEntries(g.finished.map((id) => [id, 0])) : scoreByRank(g.finished, oqSettingsOf(room));
+  const table = scoreByRank(g.finished, oqSettingsOf(room));
+  const deltas: Record<string, number> = {};
+  for (const id of g.finished) {
+    const group = g.finished.filter((x) => g.ranks[x] === g.ranks[id]);
+    deltas[id] = group.length === 1 ? table[id] : Math.trunc(group.reduce((t, x) => t + table[x], 0) / group.length) || 0;
+  }
+  const firsts = g.finished.filter((id) => g.ranks[id] === 0).length;
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
     id: `${room.code}-${room.gameSeq}`,
     at: now,
     instantWin: null,
-    results: g.finished.map((id, rank) => {
+    results: g.finished.map((id) => {
       const p = findById(room, id);
+      const rank = g.ranks[id] ?? 0;
       if (p) {
         p.points += deltas[id];
         p.games += 1;
-        if (rank === 0 && !draw) p.wins += 1;
+        if (rank === 0 && firsts === 1) p.wins += 1;
       }
-      return { id, name: p?.name ?? "?", rank: draw ? 0 : rank, delta: deltas[id] };
+      return { id, name: p?.name ?? "?", rank, delta: deltas[id] };
     }),
   };
   room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
@@ -295,9 +305,12 @@ export function oqView(room: OQRoom, player: OQPlayer | null, now: number): OQRo
           quanNon: g.quanNon,
           players: g.players.map((id, side) => ({
             id,
-            side: side as 0 | 1,
+            side,
             captured: g.captured[id],
             borrowed: g.borrowed[id],
+            lent: lentOf(g, id),
+            out: g.out.includes(id),
+            rank: g.status === "ended" ? (g.ranks[id] ?? null) : null,
             score: scoreOf(g, id),
           })),
           moves: g.moves,
