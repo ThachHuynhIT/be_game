@@ -43,6 +43,8 @@ export interface SPState {
   /** Bought development cards (ids). */
   owned: Record<string, number[]>;
   reserved: Record<string, number[]>;
+  /** Reserved cards that were drawn blind from a deck (hidden from others). Missing on older saved games = all hidden. */
+  blind?: number[];
   nobles: Record<string, number[]>;
   /** decks[tier-1], top first. */
   decks: number[][];
@@ -103,6 +105,7 @@ export function newSPGame(players: string[], now: number, opts: { target: number
     tokens: Object.fromEntries(order.map((p) => [p, emptyTokens()])),
     owned: Object.fromEntries(order.map((p) => [p, []])),
     reserved: Object.fromEntries(order.map((p) => [p, []])),
+    blind: [],
     nobles: Object.fromEntries(order.map((p) => [p, []])),
     decks,
     board,
@@ -274,6 +277,7 @@ export function reserveCard(s: SPState, id: string, target: { card?: unknown; ti
     blind = true;
   } else return fail("Chọn thẻ để giữ");
   s.reserved[id].push(cardId);
+  if (blind) s.blind = [...(s.blind ?? []), cardId];
   const gold = s.bank.gold > 0;
   if (gold) {
     s.bank.gold -= 1;
@@ -330,12 +334,25 @@ export function discardTokens(s: SPState, id: string, raw: unknown, now: number,
   return OK;
 }
 
-/** No legal move at all (rare): skip the turn. */
+/** Whether `id` can take gems, reserve or buy anything right now. */
+export function hasLegalMove(s: SPState, id: string): boolean {
+  if (GEMS.some((g) => s.bank[g] > 0)) return true;
+  if (s.reserved[id].length < MAX_RESERVED && (s.board.some((row) => row.some((c) => c !== null)) || s.decks.some((d) => d.length > 0))) return true;
+  const visible = [...s.board.flat().filter((c): c is number => c !== null), ...s.reserved[id]];
+  return visible.some((c) => paymentFor(s, id, CARD_BY_ID[c]));
+}
+
+function skipTurn(s: SPState, id: string, now: number, names: NameOf) {
+  log(s, now, `${names(id)} bỏ lượt`, "info");
+  endTurn(s, id, now, names);
+}
+
+/** Only when there's no legal move at all (rare): skip the turn. */
 export function passTurn(s: SPState, id: string, now: number, names: NameOf): Result {
   const bad = check(s, id);
   if (bad) return bad;
-  log(s, now, `${names(id)} bỏ lượt`, "info");
-  endTurn(s, id, now, names);
+  if (hasLegalMove(s, id)) return fail("Bạn vẫn còn nước đi — lấy đá, giữ hoặc mua thẻ");
+  skipTurn(s, id, now, names);
   return OK;
 }
 
@@ -343,9 +360,12 @@ export function forfeitPlayer(s: SPState, id: string, now: number, names: NameOf
   if (s.status !== "playing" || !s.players.includes(id)) return fail("Người chơi không còn trong ván");
   const wasTurn = s.turn === id;
   const idx = s.players.indexOf(id);
-  // Their tokens and reserved cards go back; they rank last.
+  // Their tokens and reserved cards go back (cards to the bottom of their tier's deck); they rank last.
   for (const t of Object.keys(s.tokens[id]) as Token[]) s.bank[t] += s.tokens[id][t];
   s.tokens[id] = emptyTokens();
+  for (const c of s.reserved[id]) s.decks[CARD_BY_ID[c].tier - 1].push(c);
+  s.reserved[id] = [];
+  if (s.blind) s.blind = s.blind.filter((c) => CARD_BY_ID[c] && !s.decks[CARD_BY_ID[c].tier - 1].includes(c));
   s.players = s.players.filter((p) => p !== id);
   s.forfeited = [...(s.forfeited ?? []), id];
   log(s, now, `${names(id)} rời ván`, "info");
@@ -354,7 +374,13 @@ export function forfeitPlayer(s: SPState, id: string, now: number, names: NameOf
     return OK;
   }
   if (wasTurn) {
-    s.turn = s.players[idx % s.players.length];
+    const next = s.players[idx % s.players.length];
+    // Same end-of-round rule as endTurn: play coming back to the first player ends a triggered last round.
+    if (s.endTriggered && next === s.players[0]) {
+      finish(s, now, names);
+      return OK;
+    }
+    s.turn = next;
     s.phase = "turn";
     s.discardNeed = 0;
     s.phaseAt = now;
@@ -395,7 +421,7 @@ function autoStep(s: SPState, now: number, names: NameOf) {
     takeGems(s, id, gems, now, names);
     return;
   }
-  passTurn(s, id, now, names);
+  skipTurn(s, id, now, names);
 }
 
 export function tickGame(s: SPState, now: number, names: NameOf, absent: (id: string) => boolean): boolean {

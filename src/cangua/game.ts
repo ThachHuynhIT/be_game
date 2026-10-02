@@ -1,3 +1,4 @@
+import type { CNMove } from "./protocol";
 import { COLORS, COLORS_FOR_PLAYERS, COLOR_NAMES, FINAL, GATE, HORSES, MAX_PLAYERS, MIN_PLAYERS, STABLE, trackIndex } from "./board";
 
 /**
@@ -19,15 +20,6 @@ export interface CNRules {
 }
 
 export const DEFAULT_RULES: CNRules = { exitOn1: false, noJump: true, ladder: true, threeSixes: true, rankAll: false };
-
-export interface CNMove {
-  seq: number;
-  player: string;
-  horse: number;
-  from: number;
-  to: number;
-  kicked: { player: string; horse: number; from: number } | null;
-}
 
 export interface CNState {
   /** Turn order (clockwise by colour); forfeited players are removed. */
@@ -176,7 +168,9 @@ export function legalMoves(s: CNState, id: string, d: number): number[] {
 
 // ─── Turn flow ──────────────────────────────────────────────────────
 
-const allHome = (s: CNState, id: string) => s.horses[id].every((p) => p > GATE);
+/** Vietnamese rule: a player is home when their 4 horses fill the top 4 steps of the home column (steps 3–6). */
+export const HOME_DONE_STEP = 3;
+const allHome = (s: CNState, id: string) => s.horses[id].every((p) => p >= GATE + HOME_DONE_STEP);
 const racing = (s: CNState) => s.players.filter((p) => !s.done.includes(p));
 const progressOf = (s: CNState, id: string) => s.horses[id].reduce((t, p) => t + (p === STABLE ? 0 : p + 1), 0);
 

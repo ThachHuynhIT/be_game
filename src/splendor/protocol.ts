@@ -87,7 +87,7 @@ export interface SPRoomSummary {
  *   { type: "reserve", card?: id, tier?: 1-3 } // face-up card, or blind from a deck; +1 gold if any
  *   { type: "buy", card: id }                  // from the board or your reserve
  *   { type: "discard", tokens: {gem: n} }      // back down to 10 tokens
- *   { type: "pass" }                           // only when nothing else is possible
+ *   { type: "pass" }                           // only when nothing else is possible (else an error)
  */
 export type SPCommand =
   | { type: "start" }

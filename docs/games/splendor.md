@@ -34,7 +34,7 @@ Hạ tầng chung (hub, adapter, store, giao thức WS `join`/`ack`/`state`, cha
    - Không lấy được vàng bằng lệnh này.
 2. **Giữ thẻ** `reserveCard`: tối đa `MAX_RESERVED = 3` thẻ đang giữ. Hoặc `card` = id một thẻ ngửa trên bàn (ô trống được bù bằng lá trên cùng của chồng cùng cấp, hết chồng thì ô thành `null`), hoặc `tier` 1–3 = rút úp lá trên cùng chồng đó. Nếu ngân hàng còn vàng thì nhận 1 vàng.
 3. **Mua thẻ** `buyCard`: thẻ ngửa trên bàn hoặc thẻ mình đang giữ. Chi phí `paymentFor`: với mỗi màu, cần `max(0, cost − bonus)`; trả bằng đá màu đó trước, phần thiếu bù bằng vàng; thiếu vàng thì không mua được. Đá trả về ngân hàng. Thẻ vào `owned` (cho +1 thưởng vĩnh viễn màu `bonus` và `points` điểm).
-4. **Bỏ lượt** `passTurn`: code **cho phép bất cứ lúc nào** trong `phase === "turn"` (không kiểm tra "không còn nước nào khác" như comment trong `protocol.ts`).
+4. **Bỏ lượt** `passTurn`: chỉ khi `hasLegalMove` sai — không lấy được đá, không giữ được thẻ (đủ 3 hoặc hết bàn/chồng) và không mua nổi thẻ nào; ngược lại lỗi `"Bạn vẫn còn nước đi — lấy đá, giữ hoặc mua thẻ"`. Tự chơi khi hết giờ dùng `skipTurn` nội bộ.
 
 **Sau hành động** (`afterAction` → `endTurn`)
 - Nếu tổng đá (tính cả vàng) > `MAX_TOKENS = 10`: chuyển `phase = "discard"`, `discardNeed = số dư`, hạn lượt đặt lại. Người chơi phải gửi `discard` trả **đúng** `discardNeed` viên (có thể trả cả vàng). Sau đó mới tới bước dưới.
@@ -103,7 +103,7 @@ Mọi lệnh đi qua `spCommand(room, token, msg, now)`. Lỗi chung: `"Bạn kh
 | `reserve` | `card?: id` **hoặc** `tier?: 1-3` (`card` được ưu tiên) | Như trên | Giữ thẻ, +1 vàng nếu còn | `"Chỉ giữ tối đa 3 thẻ"`, `"Thẻ không có trên bàn"`, `"Chồng bài này đã hết"`, `"Chọn thẻ để giữ"` |
 | `buy` | `card: id` | Như trên | Mua thẻ trên bàn hoặc trong tay giữ | `"Thẻ không hợp lệ"`, `"Thẻ không có trên bàn hoặc trong tay bạn"`, `"Không đủ đá (cần …)"` |
 | `discard` | `tokens: Partial<Record<Token, number>>` | Lượt mình, `phase = "discard"` | Trả đá về ngân hàng rồi kết thúc lượt | `"Không cần trả đá lúc này"`, `"Số đá trả không hợp lệ"`, `"Hãy trả đúng N viên"` |
-| `pass` | — | Lượt mình, `phase = "turn"` | Kết thúc lượt (vẫn xét quý tộc / kết thúc) | lỗi của `check()` |
+| `pass` | — | Lượt mình, `phase = "turn"`, không còn nước đi | Kết thúc lượt (vẫn xét quý tộc / kết thúc) | lỗi của `check()`, `"Bạn vẫn còn nước đi…"` |
 
 ## View (server → client)
 
@@ -111,7 +111,7 @@ Mọi lệnh đi qua `spCommand(room, token, msg, now)`. Lỗi chung: `"Bạn kh
 - `game: "splendor"`, `code`, `meId` (`""` cho khán giả), `role`, `serverTime`, `settings` (đã ghép mặc định), `seats[]` (`connected`, `isHost`, `inGame`, `kicked`, `points`, `games`, `wins`), `history` (10 ván cuối), `spectators` (tên còn online), `reactions` (còn hạn `REACTION_TTL_MS`), `chat`.
 - `current` (`SPGameView`) gần như công khai toàn bộ: `status`, `turn`, `phase`, `discardNeed`, `deadline`, `bank`, `board`, `deckCounts` (chỉ số lá còn mỗi chồng — thứ tự chồng bị giấu), `nobleRow`, `target`, `endTriggered`, `finished`, `last`, `log`.
 - `current.players[]` gồm cả người đã bị loại (`players` + `forfeited`), mỗi người: `tokens`, `owned`, `bonuses` (suy ra), `nobles`, `prestige` (= `pointsOf`), `reserved`.
-- **Bị giấu:** `reserved` chỉ chứa id với chính chủ; người khác (và khán giả) thấy mảng `null` cùng độ dài — **kể cả thẻ được giữ từ bàn** (đã ngửa trước đó). Comment trong `SPPlayerView` nói "những thẻ giữ ngửa thì vẫn thấy" nhưng code giấu hết.
+- **Bị giấu:** chính chủ thấy mọi thẻ đang giữ; người khác (và khán giả) thấy id của thẻ giữ **từ bàn** (vốn đã ngửa), còn thẻ rút úp (`SPState.blind`) là `null`. Ván cũ không có `blind` → giấu hết như trước.
 - `last`: `seq = logSeq + 1` tại thời điểm hành động, tức trùng `id` của dòng log tương ứng; giữ thẻ úp thì `card` không có; giữ thẻ ngửa thì có `card` (lá đó vốn đã công khai).
 
 ## Timer, hết giờ, mất kết nối
@@ -122,7 +122,7 @@ Mọi lệnh đi qua `spCommand(room, token, msg, now)`. Lỗi chung: `"Bạn kh
   - pha discard: trả lần lượt từng viên của màu (không phải vàng) đang giữ nhiều nhất; hết đá màu mới trả vàng;
   - pha turn: mua thẻ đắt điểm nhất mua được (trên bàn + thẻ đang giữ); không thì lấy tới 3 màu còn nhiều nhất trong ngân hàng; không thì bỏ lượt.
 - `nextGameTickAt` = min(`deadline`, `phaseAt + ABSENT_MS` nếu còn ở tương lai). Hub dùng `nextSPTickAt` (gồm cả hạn presence của ghế, khán giả, reaction).
-- `leave` giữa ván: ghế vẫn giữ (`left = true`), người đó bị chơi hộ; muốn loại hẳn thì chủ phòng `kick` (chỉ khi họ offline) → `forfeitPlayer`: trả **đá** về ngân hàng, xoá khỏi `players`, thêm vào `forfeited`; còn < 2 người thì kết thúc ngay; nếu đang là lượt họ thì chuyển cho `players[idx % n]` và đặt lại hạn.
+- `leave` giữa ván: ghế vẫn giữ (`left = true`), người đó bị chơi hộ; muốn loại hẳn thì chủ phòng `kick` (chỉ khi họ offline) → `forfeitPlayer`: trả đá về ngân hàng và thẻ đang giữ về **đáy chồng** cùng cấp, xoá khỏi `players`, thêm vào `forfeited`; còn < 2 người thì kết thúc ngay; nếu đang là lượt họ thì chuyển cho `players[idx % n]` — nếu `endTriggered` và người kế là `players[0]` thì kết thúc ván như `endTurn`.
 - Join lại bằng cùng token: lấy lại ghế (không đổi tên khi đang chơi). Người bị kick không join lại được (`"Bạn đã bị chủ phòng mời ra khỏi ván này"`).
 
 ## Kết thúc ván & tính điểm
@@ -143,9 +143,6 @@ Cách viết test tất định:
 
 - `cards.ts` được chép nguyên sang frontend: đổi dữ liệu thẻ phải đổi cả hai nơi, và giữ file không có import.
 - Id thẻ phụ thuộc thứ tự mẫu trong `TIER1/2/3` và `GEMS`; sắp xếp lại mẫu sẽ đổi id → làm hỏng phòng đang lưu trong Redis.
-- `pass` không bị chặn khi còn nước đi khác (khác với comment trong `protocol.ts`).
 - Quý tộc tự đến theo thứ tự `nobleRow`, không cho chọn khi đủ điều kiện nhiều vị.
-- `forfeitPlayer` comment nói trả cả thẻ đang giữ, nhưng code **chỉ trả đá**; thẻ giữ của người bị loại nằm lại trong `reserved[id]` (ra khỏi cuộc chơi).
-- Khi người bị kick đang đến lượt, lượt chuyển thẳng sang `players[idx % n]` mà không qua `endTurn` — không xét kết thúc vòng ở bước này (nếu `endTriggered` và người bị loại là người cuối vòng thì vòng chưa kết thúc mà quay lại `players[0]`).
 - Hai người chơi: mỗi màu chỉ có 4 viên, nên "lấy 2 cùng màu" chỉ được khi chồng còn nguyên.
 - Mọi kiểm tra hợp lệ nằm trong `game.ts`; `room.ts` chỉ định tuyến và không lọc kiểu của `gems`/`tokens` (game tự kiểm tra).

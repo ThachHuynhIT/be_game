@@ -328,7 +328,8 @@ export function spView(room: SPRoom, player: SPPlayer | null, now: number): SPRo
             bonuses: bonuses(g, id),
             nobles: g.nobles[id],
             // Reserved cards are secret, except to their owner (blind or not — keep it simple).
-            reserved: g.reserved[id].map((c) => (player?.id === id ? c : null)),
+            // Others see the cards reserved face-up from the board; blind draws stay hidden (older games: all hidden).
+            reserved: g.reserved[id].map((c) => (player?.id === id || (g.blind && !g.blind.includes(c)) ? c : null)),
             prestige: pointsOf(g, id),
           })),
           finished: g.finished,

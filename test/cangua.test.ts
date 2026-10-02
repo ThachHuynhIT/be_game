@@ -221,19 +221,28 @@ describe("home column", () => {
 describe("winning and ranking", () => {
   it("first player with all horses home wins; the rest ranked by progress", () => {
     const s = game(["a", "b", "c"]);
-    s.horses.a = [FINAL, FINAL - 1, FINAL - 2, GATE];
+    s.horses.a = [FINAL, FINAL - 1, FINAL - 2, GATE + 2];
     s.horses.b = [10, 20, STABLE, STABLE];
     s.horses.c = [40, 2, STABLE, STABLE];
-    roll(s, "a", 1);
+    roll(s, "a", 3);
     moveHorse(s, "a", 3, T, names);
     expect(s.status).toBe("ended");
     expect(s.finished).toEqual(["a", "c", "b"]);
   });
 
-  it("rankAll keeps playing until one player is left", () => {
-    const s = game(["a", "b", "c"], { rankAll: true });
+  it("all 4 horses in the column is not enough: they must fill steps 3–6", () => {
+    const s = game(["a", "b"]);
     s.horses.a = [FINAL, FINAL - 1, FINAL - 2, GATE];
     roll(s, "a", 1);
+    moveHorse(s, "a", 3, T, names); // → step 1
+    expect(s.status).toBe("playing");
+    expect(s.done).toEqual([]);
+  });
+
+  it("rankAll keeps playing until one player is left", () => {
+    const s = game(["a", "b", "c"], { rankAll: true });
+    s.horses.a = [FINAL, FINAL - 1, FINAL - 2, GATE + 2]; // step 2 → 3 fills steps 3–6
+    roll(s, "a", 3);
     moveHorse(s, "a", 3, T, names);
     expect(s.status).toBe("playing");
     expect(s.done).toEqual(["a"]);
@@ -242,8 +251,8 @@ describe("winning and ranking", () => {
     expect(s.turn).toBe("c");
     roll(s, "c", 2);
     expect(s.turn).toBe("b"); // a is skipped
-    s.horses.b = [FINAL, FINAL - 1, FINAL - 2, GATE];
-    roll(s, "b", 1);
+    s.horses.b = [FINAL, FINAL - 1, FINAL - 2, GATE + 2];
+    roll(s, "b", 3);
     moveHorse(s, "b", 3, T, names);
     expect(s.status).toBe("ended");
     expect(s.finished).toEqual(["a", "b", "c"]);
@@ -318,8 +327,8 @@ describe("room flow", () => {
     const other = g.players.find((p) => p !== g.turn)!;
     expect(cnCommand(r, tok(other), { type: "roll" }, T).ok).toBe(false);
     const me = g.turn!;
-    g.horses[me] = [FINAL, FINAL - 1, FINAL - 2, GATE];
-    expect(cnCommand(r, tok(me), { type: "roll" }, T, dice(1)).ok).toBe(true);
+    g.horses[me] = [FINAL, FINAL - 1, FINAL - 2, GATE + 2];
+    expect(cnCommand(r, tok(me), { type: "roll" }, T, dice(3)).ok).toBe(true);
     expect(cnCommand(r, tok(me), { type: "move", horse: 7 }, T).ok).toBe(false);
     expect(cnCommand(r, tok(me), { type: "move", horse: 3 }, T).ok).toBe(true);
     expect(g.status).toBe("ended");

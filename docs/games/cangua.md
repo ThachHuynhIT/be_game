@@ -47,7 +47,7 @@ Hạ tầng chung (hub, adapter, store, giao thức WS, chat, emoji, khán giả
   - `ladder` tắt: `to = p + d ≤ FINAL`, `noJump` chặn bậc trung gian có ngựa mình.
   - Bậc đích phải trống.
 
-**Về đích**: một người **xong** khi cả 4 ngựa có tiến độ `> GATE` (đã vào cột đích, **không cần lên bậc 6**). Khi đó id vào `done`. Nếu `rankAll` tắt, hoặc còn < 2 người đang đua → kết thúc ván; ngược lại chuyển lượt và người đã xong bị bỏ qua.
+**Về đích** (luật Việt Nam): một người **xong** khi 4 ngựa lấp đủ 4 bậc trên cùng của cột đích — mọi ngựa có tiến độ `>= GATE + HOME_DONE_STEP` (bậc 3–6, `HOME_DONE_STEP = 3`). Ngựa ở bậc 1–2 phải leo tiếp. Khi đó id vào `done`. Nếu `rankAll` tắt, hoặc còn < 2 người đang đua → kết thúc ván; ngược lại chuyển lượt và người đã xong bị bỏ qua.
 
 ## Cài đặt phòng
 
@@ -144,7 +144,7 @@ Viết test tất định:
 ## Lưu ý / bẫy thường gặp
 
 - `horses` lưu **tiến độ theo màu**, không phải chỉ số ô; luôn đổi qua `trackIndex`/`cellOf` khi so sánh giữa các màu hay vẽ.
-- Về đích chỉ cần cả 4 ngựa vào cột đích (tiến độ > 55), không cần lên bậc 6 — dù luật `ladder` vẫn cho leo bậc.
+- Về đích cần 4 ngựa ở bậc 3–6; vì không được đứng chung bậc, ngựa thấp hơn chỉ lên được khi bậc trên trống — ván có `ladder` bật thường dài ở đoạn cuối.
 - Với `noJump`, ngựa **của mình** cũng chặn đường; một ngựa bất kỳ (của ai cũng vậy) đứng trên ô `GATE` của màu X chặn mọi ngựa màu X muốn đi qua đó vào cột đích.
 - `legal` được tính lúc gieo; `moveHorse` kiểm tra lại bằng `targetOf`.
 - `board.ts` được chép sang frontend: giữ không có import, đổi bàn thì đổi cả hai nơi. `CNMove` được khai báo trùng ở `game.ts` và `protocol.ts` — sửa một nơi phải sửa nơi kia.

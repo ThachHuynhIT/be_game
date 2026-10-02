@@ -5,6 +5,8 @@ import {
   type SPState,
   buyCard,
   discardTokens,
+  forfeitPlayer,
+  passTurn,
   newSPGame,
   paymentFor,
   pointsOf,
@@ -167,5 +169,48 @@ describe("room settings", () => {
     expect(spCommand(room, token, { type: "take", gems: ["white", "blue", "green"] }, T).ok).toBe(true);
     expect(g.status).toBe("ended");
     expect(room.history?.[0].results.map((r) => r.delta)).toEqual([3, -3]);
+  });
+});
+
+describe("fixes", () => {
+  it("shows face-up reserved cards to others, keeps blind ones hidden", () => {
+    let n = 0;
+    const room = newSPRoom("GEMSV");
+    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`);
+    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    spCommand(room, "token-aaaa", { type: "start" }, T);
+    const g = room.current!;
+    const [first, second] = g.turn === "p1" ? ["token-aaaa", "token-bbbb"] : ["token-bbbb", "token-aaaa"];
+    const faceUp = g.board[0][0]!;
+    expect(spCommand(room, first, { type: "reserve", card: faceUp }, T).ok).toBe(true);
+    expect(spCommand(room, second, { type: "take", gems: ["white", "blue", "green"] }, T).ok).toBe(true);
+    expect(spCommand(room, first, { type: "reserve", tier: 2 }, T).ok).toBe(true);
+    const owner = g.players.find((p) => g.reserved[p].length === 2)!;
+    const otherSeat = room.seats.find((p) => p && p.id !== owner)!;
+    const seen = spView(room, otherSeat, T).current!.players.find((p) => p.id === owner)!.reserved;
+    expect(seen).toEqual([faceUp, null]);
+  });
+
+  it("pass is refused while another move is possible", () => {
+    const s = game();
+    expect(passTurn(s, "a", T, names).ok).toBe(false);
+    for (const gem of GEMS) s.bank[gem] = 0;
+    s.bank.gold = 0;
+    s.reserved.a = [s.board[0][0]!, s.board[0][1]!, s.board[0][2]!];
+    expect(passTurn(s, "a", T, names).ok).toBe(true);
+    expect(s.turn).toBe("b");
+  });
+
+  it("a player who leaves gives back reserved cards; leaving on turn still ends a triggered last round", () => {
+    const s = game(["a", "b", "c"]);
+    const card = s.decks[1][0];
+    reserveCard(s, "a", { tier: 2 }, T, names);
+    expect(s.reserved.a).toContain(card);
+    s.turn = "a";
+    s.endTriggered = true;
+    expect(forfeitPlayer(s, "a", T, names).ok).toBe(true);
+    expect(s.decks[1]).toContain(card);
+    expect(s.reserved.a).toEqual([]);
+    expect(s.status).toBe("ended");
   });
 });
