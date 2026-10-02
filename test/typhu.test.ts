@@ -337,6 +337,17 @@ describe("house rules", () => {
     expect(sellLand(s, "a", 9, T, names).ok).toBe(false);
   });
 
+  it("mortgaged land can be sold: the bank pays the sale price minus the mortgage already taken", () => {
+    const s = game();
+    own(s, "a", 8);
+    const price = (BOARD[8] as { price: number }).price;
+    expect(mortgage(s, "a", 8, T, names).ok).toBe(true);
+    const cash = s.ps.a.cash;
+    expect(sellLand(s, "a", 8, T, names).ok).toBe(true);
+    expect(s.deeds[8]).toBeUndefined();
+    expect(s.ps.a.cash).toBe(cash + Math.floor((price * 7) / 10) - price / 2);
+  });
+
   it("settings carry the house rules into the game and the view lists what I can do", () => {
     let n = 0;
     const room = newTPRoom("RULES");
