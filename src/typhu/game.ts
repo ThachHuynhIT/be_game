@@ -1,13 +1,13 @@
 import {
   AIR_RENT,
-  BOARD,
-  BOARD_SIZE,
+  type MapSize,
+  boardOf,
   CHANCE,
   CHEST,
   type CardEffect,
   GO_SALARY,
   JAIL_FINE,
-  JAIL_POS,
+  jailPos,
   MAX_HOUSES,
   MIN_PLAYERS,
   type Ownable,
@@ -39,7 +39,7 @@ export const DEBT_MS = 60_000;
 export const TRADE_MS = 30_000;
 /** Offline players get played for after this long. */
 export const ABSENT_MS = 2_500;
-export const LOG_LIMIT = 16;
+export const LOG_LIMIT = 150;
 
 export type Phase = "roll" | "buy" | "debt" | "end";
 
@@ -120,6 +120,8 @@ export interface TPState {
   log: LogEntry[];
   logSeq: number;
   recorded?: boolean;
+  /** Map this game is played on (missing = the standard 40 squares). */
+  map?: MapSize;
   /** Room settings for this game. */
   stepMs?: number;
   /** Landing exactly on Khởi hành pays double. */
@@ -195,7 +197,7 @@ function shuffled(n: number, random: Random) {
 export function newTPGame(
   players: string[],
   now: number,
-  opts: { startCash: number; timeLimitMin: number; stepMs?: number; doubleGo?: boolean; parkingPot?: boolean; rules?: Partial<TPRules> },
+  opts: { startCash: number; timeLimitMin: number; stepMs?: number; doubleGo?: boolean; parkingPot?: boolean; map?: MapSize; rules?: Partial<TPRules> },
   random: Random = Math.random,
 ): TPState {
   if (players.length < MIN_PLAYERS) throw new Error("need at least 2 players");
@@ -209,6 +211,7 @@ export function newTPGame(
     deadline: now + (opts.stepMs ?? STEP_MS),
     ...(opts.stepMs ? { stepMs: opts.stepMs } : {}),
     ...(opts.doubleGo ? { doubleGo: true } : {}),
+    ...(opts.map && opts.map !== "std" ? { map: opts.map } : {}),
     pot: opts.parkingPot ? 0 : null,
     rules: { ...DEFAULT_TP_RULES, ...opts.rules },
     dice: null,
@@ -248,27 +251,29 @@ const ownedBy = (s: TPState, id: string) =>
     .filter(([, d]) => d.owner === id)
     .map(([pos]) => Number(pos));
 
-const sq = (pos: number) => BOARD[pos] as Ownable;
+/** The squares of this game's map. */
+const B = (s: TPState) => boardOf(s.map);
+const sq = (s: TPState, pos: number) => B(s)[pos] as Ownable;
 
 /** Most houses a lot may have while its owner does not hold the whole colour group. */
 const MAX_PARTIAL_HOUSES = 3;
 
 function ownsGroup(s: TPState, id: string, pos: number) {
-  const b = BOARD[pos];
+  const b = B(s)[pos];
   if (b.kind !== "prop") return false;
-  return groupPositions(b.group).every((p) => s.deeds[p]?.owner === id);
+  return groupPositions(b.group, B(s)).every((p) => s.deeds[p]?.owner === id);
 }
 
 /** Rent owed by landing on `pos`. `diceTotal` is used by utilities. */
 export function rentFor(s: TPState, pos: number, diceTotal: number, mult: "air2" | "util10" | null = null): number {
   const d = s.deeds[pos];
-  const b = BOARD[pos];
+  const b = B(s)[pos];
   if (!d || d.mortgaged) return 0;
   if (b.kind === "prop") {
     if (d.houses > 0) return b.rent[d.houses];
     return ownsGroup(s, d.owner, pos) ? b.rent[0] * 2 : b.rent[0];
   }
-  const count = ownedBy(s, d.owner).filter((p) => BOARD[p].kind === b.kind).length;
+  const count = ownedBy(s, d.owner).filter((p) => B(s)[p].kind === b.kind).length;
   if (b.kind === "air") return AIR_RENT[count - 1] * (mult === "air2" ? 2 : 1);
   if (b.kind === "util") return diceTotal * (mult === "util10" ? 10 : UTIL_MULT[count - 1]);
   return 0;
@@ -279,7 +284,7 @@ export function netWorth(s: TPState, id: string) {
   let total = s.ps[id].cash;
   for (const pos of ownedBy(s, id)) {
     const d = s.deeds[pos];
-    const b = sq(pos);
+    const b = sq(s, pos);
     total += d.mortgaged ? mortgageValue(b) : b.price;
     if (b.kind === "prop") total += builtCost(b, d.houses, rulesOf(s));
   }
@@ -301,7 +306,7 @@ function moveTo(s: TPState, id: string, pos: number, now: number, names: NameOf,
 
 function sendToJail(s: TPState, id: string, now: number, names: NameOf) {
   const p = s.ps[id];
-  p.pos = JAIL_POS;
+  p.pos = jailPos(B(s));
   p.jail = 1;
   s.rollAgain = false;
   s.doubles = 0;
@@ -311,7 +316,7 @@ function sendToJail(s: TPState, id: string, now: number, names: NameOf) {
 /** Resolve the square `id` stands on. May set the phase to buy / debt. */
 function land(s: TPState, id: string, now: number, names: NameOf, random: Random, mult: "air2" | "util10" | null = null) {
   const p = s.ps[id];
-  const b = BOARD[p.pos];
+  const b = B(s)[p.pos];
   if (isOwnable(b)) {
     const d = s.deeds[p.pos];
     if (!d) {
@@ -382,12 +387,16 @@ function applyEffect(s: TPState, id: string, e: CardEffect, now: number, names: 
       if (e.amount >= 0) p.cash += e.amount;
       else charge(s, id, -e.amount, null, "thẻ bài", now, names);
       return;
-    case "goto":
-      moveTo(s, id, e.pos, now, names);
+    case "goto": {
+      // Card targets are standard-map positions; look the square up by name on bigger maps.
+      const name = boardOf()[e.pos].name;
+      const to = B(s).findIndex((q) => q.name === name);
+      moveTo(s, id, to >= 0 ? to : e.pos, now, names);
       land(s, id, now, names, random);
       return;
+    }
     case "back":
-      p.pos = (p.pos - e.steps + BOARD_SIZE) % BOARD_SIZE;
+      p.pos = (p.pos - e.steps + B(s).length) % B(s).length;
       land(s, id, now, names, random);
       return;
     case "jail":
@@ -415,10 +424,53 @@ function applyEffect(s: TPState, id: string, e: CardEffect, now: number, names: 
     }
     case "nearest": {
       let pos = p.pos;
-      do pos = (pos + 1) % BOARD_SIZE;
-      while (BOARD[pos].kind !== e.target);
+      do pos = (pos + 1) % B(s).length;
+      while (B(s)[pos].kind !== e.target);
       moveTo(s, id, pos, now, names);
       land(s, id, now, names, random, e.target === "air" ? "air2" : "util10");
+      return;
+    }
+    case "forward":
+      moveTo(s, id, (p.pos + e.steps) % B(s).length, now, names);
+      land(s, id, now, names, random);
+      return;
+    case "rollagain":
+      s.rollAgain = true;
+      return;
+    case "perprop": {
+      const total = Math.abs(e.amount) * ownedBy(s, id).length;
+      if (total === 0) log(s, now, `${names(id)} chưa có ô đất nào — không được gì, không mất gì`, "info");
+      else if (e.amount > 0) p.cash += total;
+      else charge(s, id, total, null, "thuế đất", now, names);
+      return;
+    }
+    case "nearestfree": {
+      const board = B(s);
+      let pos = p.pos;
+      for (let k = 0; k < board.length; k++) {
+        pos = (pos + 1) % board.length;
+        if (isOwnable(board[pos]) && !s.deeds[pos]) break;
+      }
+      if (!isOwnable(board[pos]) || s.deeds[pos]) {
+        log(s, now, "Mọi ô đất đều đã có chủ — không đi đâu cả", "info");
+        return;
+      }
+      moveTo(s, id, pos, now, names);
+      land(s, id, now, names, random);
+      return;
+    }
+    case "poorest": {
+      const others = active(s).filter((x) => x !== id);
+      if (others.length === 0) return;
+      const poorest = others.reduce((a, b) => (s.ps[b].cash < s.ps[a].cash ? b : a));
+      charge(s, id, e.amount, poorest, "từ thiện", now, names);
+      return;
+    }
+    case "richest": {
+      const others = active(s).filter((x) => x !== id);
+      if (others.length === 0) return;
+      const richest = others.reduce((a, b) => (s.ps[b].cash > s.ps[a].cash ? b : a));
+      collectFrom(s, richest, id, e.amount, now, names);
       return;
     }
   }
@@ -474,15 +526,15 @@ function autoLiquidate(s: TPState, id: string, target: number, now: number, name
       .sort((a, b) => s.deeds[b].houses - s.deeds[a].houses);
     if (!built.length) break;
     const pos = built[0];
-    p.cash += houseRefund(sq(pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses, rulesOf(s));
+    p.cash += houseRefund(sq(s, pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses, rulesOf(s));
     s.deeds[pos].houses -= 1;
   }
   while (p.cash < target) {
     const free = mine().filter((pos) => !s.deeds[pos].mortgaged);
     if (!free.length) break;
-    free.sort((a, b) => sq(a).price - sq(b).price);
+    free.sort((a, b) => sq(s, a).price - sq(s, b).price);
     s.deeds[free[0]].mortgaged = true;
-    p.cash += mortgageValue(sq(free[0]));
+    p.cash += mortgageValue(sq(s, free[0]));
   }
   log(s, now, `${names(id)} được bán tài sản tự động để trả nợ`, "info");
 }
@@ -493,7 +545,7 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   // Buildings go back to the bank at half price first.
   for (const pos of ownedBy(s, id)) {
     const d = s.deeds[pos];
-    const b = sq(pos);
+    const b = sq(s, pos);
     if (d.houses && b.kind === "prop") p.cash += builtRefund(b, d.houses, rulesOf(s));
     d.houses = 0;
   }
@@ -622,7 +674,7 @@ export function rollDice(s: TPState, id: string, now: number, names: NameOf, ran
 
 function step(s: TPState, id: string, total: number, now: number, names: NameOf, random: Random) {
   const p = s.ps[id];
-  moveTo(s, id, (p.pos + total) % BOARD_SIZE, now, names);
+  moveTo(s, id, (p.pos + total) % B(s).length, now, names);
   s.phase = "end"; // provisional; land() may switch to buy / debt
   land(s, id, now, names, random);
   if (s.turn === id && s.ps[id].jail > 0) s.rollAgain = false;
@@ -633,7 +685,7 @@ export function buySquare(s: TPState, id: string, now: number, names: NameOf): R
   const bad = myTurn(s, id, "buy");
   if (bad) return bad;
   const p = s.ps[id];
-  const b = BOARD[p.pos];
+  const b = B(s)[p.pos];
   if (!isOwnable(b) || s.deeds[p.pos]) return fail("Ô này không mua được");
   if (p.cash < b.price) return fail(`Không đủ tiền (cần ${money(b.price)})`);
   p.cash -= b.price;
@@ -647,7 +699,7 @@ export function buySquare(s: TPState, id: string, now: number, names: NameOf): R
 export function skipBuy(s: TPState, id: string, now: number, names: NameOf): Result {
   const bad = myTurn(s, id, "buy");
   if (bad) return bad;
-  log(s, now, `${names(id)} không mua ${BOARD[s.ps[id].pos].name}`, "info");
+  log(s, now, `${names(id)} không mua ${B(s)[s.ps[id].pos].name}`, "info");
   s.phase = "end";
   afterResolve(s, now);
   return OK;
@@ -737,13 +789,13 @@ function chainAllows(level: number, houses: number[]) {
 
 /** Why `id` can't build on `pos` right now (turn / phase aside), or null when they can. */
 export function buildBlocker(s: TPState, id: string, pos: number): string | null {
-  const b = BOARD[pos];
+  const b = B(s)[pos];
   if (b.kind !== "prop") return "Chỉ xây nhà trên đất thành phố";
   const d = s.deeds[pos];
   if (!d || d.owner !== id) return "Đây không phải đất của bạn";
   const r = rulesOf(s);
   if (r.needGroup && !ownsGroup(s, id, pos)) return "Cần sở hữu cả nhóm màu mới được xây";
-  const group = groupPositions(b.group);
+  const group = groupPositions(b.group, B(s));
   if (group.some((g) => s.deeds[g]?.owner === id && s.deeds[g].mortgaged)) return "Có đất trong nhóm đang thế chấp";
   if (d.houses >= MAX_HOUSES) return "Đã có khách sạn";
   const { lots, houses } = myGroup(s, id, group);
@@ -768,10 +820,10 @@ export function buildBlocker(s: TPState, id: string, pos: number): string | null
 
 /** Why `id` can't sell a house on `pos`, or null when they can. */
 export function sellBlocker(s: TPState, id: string, pos: number): string | null {
-  const b = BOARD[pos];
+  const b = B(s)[pos];
   const d = s.deeds[pos];
   if (b.kind !== "prop" || !d || d.owner !== id || d.houses === 0) return "Không có nhà để bán";
-  const group = groupPositions(b.group);
+  const group = groupPositions(b.group, B(s));
   const { lots, houses } = myGroup(s, id, group);
   if (rulesOf(s).buildRule === "even") {
     if (d.houses < Math.max(...houses)) return "Phải bán đều các ô trong nhóm";
@@ -788,14 +840,14 @@ export function sellLandBlocker(s: TPState, id: string, pos: number): string | n
   if (!rulesOf(s).sellLand) return "Luật bàn không cho bán đất";
   const d = s.deeds[pos];
   if (!d || d.owner !== id) return "Đây không phải đất của bạn";
-  const b = BOARD[pos];
-  if (b.kind === "prop" && groupPositions(b.group).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) return "Bán hết nhà trong nhóm trước";
+  const b = B(s)[pos];
+  if (b.kind === "prop" && groupPositions(b.group, B(s)).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) return "Bán hết nhà trong nhóm trước";
   return null;
 }
 
 /** Cash from selling `pos` back to the bank. Mortgaged land already paid out its mortgage value, so only the difference is paid. */
 export const landSalePrice = (s: TPState, pos: number) => {
-  const sqr = BOARD[pos] as Ownable;
+  const sqr = B(s)[pos] as Ownable;
   return Math.max(0, landSaleValue(sqr, rulesOf(s)) - (s.deeds[pos]?.mortgaged ? mortgageValue(sqr) : 0));
 };
 
@@ -805,7 +857,7 @@ export function build(s: TPState, id: string, pos: number, now: number, names: N
   if (s.phase === "debt") return fail("Đang nợ — không xây được");
   const why = buildBlocker(s, id, pos);
   if (why) return fail(why);
-  const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
+  const b = B(s)[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
   s.ps[id].cash -= houseCost(b, d.houses + 1, rulesOf(s));
   d.houses += 1;
@@ -818,7 +870,7 @@ export function sellHouse(s: TPState, id: string, pos: number, now: number, name
   if (bad) return bad;
   const why = sellBlocker(s, id, pos);
   if (why) return fail(why);
-  const b = BOARD[pos] as Extract<Ownable, { kind: "prop" }>;
+  const b = B(s)[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
   const refund = houseRefund(b, d.houses, rulesOf(s));
   d.houses -= 1;
@@ -837,7 +889,7 @@ export function sellLand(s: TPState, id: string, pos: number, now: number, names
   const wasMortgaged = s.deeds[pos].mortgaged;
   delete s.deeds[pos];
   s.ps[id].cash += price;
-  log(s, now, `🏷️ ${names(id)} bán ${BOARD[pos].name} cho ngân hàng, thu ${money(price)}${wasMortgaged ? " (trừ phần đã thế chấp)" : ""} — ai cũng mua lại được`, "info");
+  log(s, now, `🏷️ ${names(id)} bán ${B(s)[pos].name} cho ngân hàng, thu ${money(price)}${wasMortgaged ? " (trừ phần đã thế chấp)" : ""} — ai cũng mua lại được`, "info");
   return OK;
 }
 
@@ -845,10 +897,10 @@ export function mortgage(s: TPState, id: string, pos: number, now: number, names
   const bad = canManage(s, id, pos);
   if (bad) return bad;
   const d = s.deeds[pos];
-  const b = sq(pos);
+  const b = sq(s, pos);
   if (d.mortgaged) return fail("Đã thế chấp rồi");
   // Only my own houses in the group block it; another player's houses on the same colour don't.
-  if (b.kind === "prop" && groupPositions(b.group).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) {
+  if (b.kind === "prop" && groupPositions(b.group, B(s)).some((g) => s.deeds[g]?.owner === id && s.deeds[g].houses > 0)) {
     return fail("Bán hết nhà trong nhóm trước khi thế chấp");
   }
   d.mortgaged = true;
@@ -862,7 +914,7 @@ export function unmortgage(s: TPState, id: string, pos: number, now: number, nam
   if (bad) return bad;
   if (s.phase === "debt") return fail("Đang nợ — không chuộc được");
   const d = s.deeds[pos];
-  const b = sq(pos);
+  const b = sq(s, pos);
   if (!d.mortgaged) return fail("Đất này không thế chấp");
   const cost = unmortgageCost(b, rulesOf(s));
   if (s.ps[id].cash < cost) return fail(`Cần ${money(cost)} để chuộc`);

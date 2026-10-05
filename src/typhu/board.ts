@@ -73,6 +73,59 @@ export const BOARD: Square[] = [
   prop("TP. Hồ Chí Minh", "Phố đi bộ Nguyễn Huệ", "darkblue", 400, 200, [70, 300, 900, 2000, 2400, 2800]),
 ];
 
+/**
+ * Map sizes: the standard 40-square ring, or bigger rings with extra squares slipped into each side
+ * (more lots for the colour groups, more Cơ hội / Khí vận / tax squares). The corners stay put.
+ */
+export type MapSize = "std" | "large" | "huge";
+export const MAP_SIZES: MapSize[] = ["std", "large", "huge"];
+export const MAP_LABEL: Record<MapSize, string> = { std: "Chuẩn · 40 ô", large: "Mở rộng · 48 ô", huge: "Lớn · 56 ô" };
+
+/** `side`: 0 bottom, 1 left, 2 top, 3 right; `at`: index within the side's 9 standard squares before which it is inserted. */
+interface ExtraSquare {
+  side: 0 | 1 | 2 | 3;
+  at: number;
+  sq: Square;
+}
+const CHANCE_SQ: Square = { kind: "chance", name: "Cơ hội" };
+const CHEST_SQ: Square = { kind: "chest", name: "Khí vận" };
+
+const EXTRAS_LARGE: ExtraSquare[] = [
+  { side: 0, at: 3, sq: prop("Sóc Trăng", "Chùa Dơi", "brown", 70, 50, [4, 20, 60, 180, 320, 450]) },
+  { side: 0, at: 9, sq: CHEST_SQ },
+  { side: 1, at: 4, sq: CHANCE_SQ },
+  { side: 1, at: 9, sq: prop("Pleiku", "Biển Hồ", "orange", 200, 100, [16, 80, 220, 600, 800, 1000]) },
+  { side: 2, at: 4, sq: CHEST_SQ },
+  { side: 2, at: 9, sq: prop("Mộc Châu", "Đồi chè", "yellow", 280, 150, [24, 120, 360, 850, 1025, 1200]) },
+  { side: 3, at: 3, sq: prop("Cát Bà", "Vườn quốc gia", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]) },
+  { side: 3, at: 9, sq: CHANCE_SQ },
+];
+const EXTRAS_HUGE: ExtraSquare[] = [
+  ...EXTRAS_LARGE,
+  { side: 0, at: 6, sq: { kind: "tax", name: "Thuế bất động sản", amount: 150 } },
+  { side: 0, at: 9, sq: prop("Mỹ Tho", "Cồn Thới Sơn", "lightblue", 120, 50, [8, 40, 100, 300, 450, 600]) },
+  { side: 1, at: 3, sq: prop("Long Hải", "Bãi biển hoang sơ", "pink", 160, 100, [12, 60, 180, 500, 700, 900]) },
+  { side: 1, at: 7, sq: CHEST_SQ },
+  { side: 2, at: 3, sq: prop("Quảng Bình", "Động Phong Nha", "red", 240, 150, [20, 100, 300, 750, 925, 1100]) },
+  { side: 2, at: 8, sq: CHANCE_SQ },
+  { side: 3, at: 5, sq: CHEST_SQ },
+  { side: 3, at: 9, sq: prop("Phú Mỹ Hưng", "Khu đô thị mới", "darkblue", 380, 200, [60, 270, 800, 1800, 2150, 2500]) },
+];
+
+function buildBoard(extras: ExtraSquare[]): Square[] {
+  const sides = [BOARD.slice(1, 10), BOARD.slice(11, 20), BOARD.slice(21, 30), BOARD.slice(31, 40)];
+  // Highest index first (and later-defined first on ties) so earlier insertions never shift later ones.
+  const order = extras.map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || b.i - a.i);
+  for (const { e } of order) sides[e.side].splice(e.at, 0, e.sq);
+  return [BOARD[0], ...sides[0], BOARD[10], ...sides[1], BOARD[20], ...sides[2], BOARD[30], ...sides[3]];
+}
+
+export const BOARDS: Record<MapSize, Square[]> = { std: BOARD, large: buildBoard(EXTRAS_LARGE), huge: buildBoard(EXTRAS_HUGE) };
+/** The squares of a game's map (missing = the standard one, so older saved games keep working). */
+export const boardOf = (map?: MapSize): Square[] => BOARDS[map ?? "std"] ?? BOARD;
+/** Where Nhà tù is on a map. */
+export const jailPos = (board: Square[]) => board.findIndex((q) => q.kind === "jail");
+
 export const BOARD_SIZE = BOARD.length;
 export const JAIL_POS = 10;
 export const GO_SALARY = 200;
@@ -98,8 +151,8 @@ export const GROUP_COLORS: Record<Group, string> = {
 export const isOwnable = (sq: Square): sq is Ownable => sq.kind === "prop" || sq.kind === "air" || sq.kind === "util";
 
 /** Board positions of every square in a colour group. */
-export const groupPositions = (group: Group) =>
-  BOARD.flatMap((sq, i) => (sq.kind === "prop" && sq.group === group ? [i] : []));
+export const groupPositions = (group: Group, board: Square[] = BOARD) =>
+  board.flatMap((sq, i) => (sq.kind === "prop" && sq.group === group ? [i] : []));
 
 /** Table settings that change prices (all optional: missing = the default). Room settings / game rules carry them. */
 export interface PriceRules {
@@ -146,7 +199,19 @@ export type CardEffect =
   /** Positive: every other player pays you. Negative: you pay every other player. */
   | { kind: "each"; amount: number }
   /** Move to the nearest airport (rent ×2) or utility (dice × 10). */
-  | { kind: "nearest"; target: "air" | "util" };
+  | { kind: "nearest"; target: "air" | "util" }
+  /** Move forward `steps` squares (passing Khởi hành pays) and resolve the square. */
+  | { kind: "forward"; steps: number }
+  /** Another dice roll this turn. */
+  | { kind: "rollagain" }
+  /** `amount` for every square you own (positive: you receive from the bank, negative: you pay it). */
+  | { kind: "perprop"; amount: number }
+  /** Move to the nearest square nobody owns yet; you may buy it. */
+  | { kind: "nearestfree" }
+  /** Pay `amount` to the player with the least cash. */
+  | { kind: "poorest"; amount: number }
+  /** The player with the most cash gives you `amount`. */
+  | { kind: "richest"; amount: number };
 
 export interface DeckCard {
   text: string;
@@ -170,6 +235,21 @@ export const CHANCE: DeckCard[] = [
   { text: "Bay chuyến sớm từ Sân bay Tân Sơn Nhất. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 5 } },
   { text: "Được bầu làm trưởng thôn — khao mỗi người chơi 50tr.", effect: { kind: "each", amount: -50 } },
   { text: "Khoản vay xây nhà đáo hạn. Nhận 150tr.", effect: { kind: "money", amount: 150 } },
+  { text: "Trúng vé số an ủi. Nhận 30tr.", effect: { kind: "money", amount: 30 } },
+  { text: "Trúng thầu dự án nhỏ. Nhận 120tr.", effect: { kind: "money", amount: 120 } },
+  { text: "Đi chợ Bến Thành, mua sắm hết 30tr.", effect: { kind: "money", amount: -30 } },
+  { text: "Đỗ xe sai chỗ. Phạt 25tr.", effect: { kind: "money", amount: -25 } },
+  { text: "Gặp bạn cũ ở ga, đi nhờ xe — tiến thêm 3 ô.", effect: { kind: "forward", steps: 3 } },
+  { text: "Chuyến xe đò may mắn — tiến thêm 5 ô.", effect: { kind: "forward", steps: 5 } },
+  { text: "Kẹt xe giờ tan tầm — lùi lại 2 ô.", effect: { kind: "back", steps: 2 } },
+  { text: "Hôm nay là ngày may: được tung xúc xắc thêm một lượt.", effect: { kind: "rollagain" } },
+  { text: "Phát hiện mảnh đất vô chủ: tiến tới ô đất trống gần nhất, được quyền mua.", effect: { kind: "nearestfree" } },
+  { text: "Thuế đất tăng: nộp 10tr cho mỗi ô đất bạn sở hữu.", effect: { kind: "perprop", amount: -10 } },
+  { text: "Cho thuê mặt bằng: nhận 10tr cho mỗi ô đất bạn sở hữu.", effect: { kind: "perprop", amount: 10 } },
+  { text: "Quyên góp quỹ từ thiện: trả 40tr cho người đang có ít tiền nhất.", effect: { kind: "poorest", amount: 40 } },
+  { text: "Đầu tư thắng lớn: người giàu nhất phải chia cho bạn 30tr.", effect: { kind: "richest", amount: 30 } },
+  { text: "Đến Nghỉ chân thư giãn một chút.", effect: { kind: "goto", pos: 20 } },
+  { text: "Về thăm Hà Nội ăn phở. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 37 } },
 ];
 
 export const CHEST: DeckCard[] = [
@@ -189,6 +269,22 @@ export const CHEST: DeckCard[] = [
   { text: "Góp tiền làm đường làng: 40tr mỗi nhà, 115tr mỗi khách sạn.", effect: { kind: "repairs", house: 40, hotel: 115 } },
   { text: "Giải nhì cuộc thi hát karaoke. Nhận 10tr.", effect: { kind: "money", amount: 10 } },
   { text: "Được thừa kế mảnh vườn. Nhận 100tr.", effect: { kind: "money", amount: 100 } },
+  { text: "Bán đồ cũ trên chợ mạng. Nhận 40tr.", effect: { kind: "money", amount: 40 } },
+  { text: "Bạn bè trả nợ cũ. Nhận 60tr.", effect: { kind: "money", amount: 60 } },
+  { text: "Thưởng cuối năm. Nhận 150tr.", effect: { kind: "money", amount: 150 } },
+  { text: "Gia đình gửi tiền ăn học. Nhận 80tr.", effect: { kind: "money", amount: 80 } },
+  { text: "Tiền điện nước tháng này. Trả 30tr.", effect: { kind: "money", amount: -30 } },
+  { text: "Sửa xe máy hỏng. Trả 35tr.", effect: { kind: "money", amount: -35 } },
+  { text: "Đi ăn cưới: mừng mỗi người chơi 20tr.", effect: { kind: "each", amount: -20 } },
+  { text: "Tổ chức liên hoan: mỗi người chơi góp 15tr cho bạn.", effect: { kind: "each", amount: 15 } },
+  { text: "Giảm thuế đất: nhận 15tr cho mỗi ô đất bạn sở hữu.", effect: { kind: "perprop", amount: 15 } },
+  { text: "Phí quản lý khu dân cư: trả 15tr cho mỗi ô đất bạn sở hữu.", effect: { kind: "perprop", amount: -15 } },
+  { text: "Làm từ thiện: tặng 50tr cho người đang có ít tiền nhất.", effect: { kind: "poorest", amount: 50 } },
+  { text: "Đại gia hào phóng: người giàu nhất tặng bạn 40tr.", effect: { kind: "richest", amount: 40 } },
+  { text: "Đi nhờ xe bạn — tiến thêm 2 ô.", effect: { kind: "forward", steps: 2 } },
+  { text: "May mắn: được tung xúc xắc thêm một lượt.", effect: { kind: "rollagain" } },
+  { text: "Được tặng đất: tiến tới ô đất trống gần nhất, được quyền mua.", effect: { kind: "nearestfree" } },
+  { text: "Đi du lịch Phú Quốc. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 34 } },
 ];
 
 /** Host settings. */

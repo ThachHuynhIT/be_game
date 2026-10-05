@@ -1,6 +1,8 @@
 import type { ChatMessage, GameRecord, LeaderboardEntry, Reaction } from "../game/protocol";
+import type { MapSize } from "./board";
 import type { Deed, LogEntry, Phase, TradeSide } from "./game";
 
+export type { MapSize };
 export type { ChatMessage, Deed, GameRecord, LeaderboardEntry, LogEntry, Phase, Reaction, TradeSide };
 export { CHAT_MAX_LENGTH, EMOJIS, EMOJI_COOLDOWN_MS, MAX_NAME_LENGTH, PING_INTERVAL_MS } from "../game/protocol";
 
@@ -17,6 +19,8 @@ export interface TPSettings {
   doubleGo: boolean;
   /** Taxes and fines pile up on Nghỉ chân for whoever lands there. */
   parkingPot: boolean;
+  /** Map size: the standard 40 squares or a bigger ring (see MAP_SIZES in board.ts). */
+  map: MapSize;
   /** Points for Nhất / Nhì (the rest is mirrored so games sum to zero). */
   first: number;
   second: number;
@@ -85,6 +89,8 @@ export interface TPPlayerView {
 
 export interface TPGameView {
   status: "playing" | "ended";
+  /** Map this game is played on (missing = standard). */
+  map?: MapSize;
   players: TPPlayerView[];
   deeds: Record<number, Deed>;
   turn: string | null;
@@ -145,6 +151,7 @@ export type TPCommand =
       stepSeconds?: number;
       doubleGo?: boolean;
       parkingPot?: boolean;
+      map?: MapSize;
       first?: number;
       second?: number;
       buildRule?: "even" | "chain";

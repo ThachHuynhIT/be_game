@@ -16,7 +16,9 @@ import {
   DEFAULT_TIME_LIMIT,
   GO_SALARY_OPTIONS,
   LAND_SALE_OPTIONS,
+  MAP_SIZES,
   MAX_SEATS,
+  type MapSize,
   MIN_PLAYERS,
   START_CASH_OPTIONS,
   TIME_LIMIT_OPTIONS,
@@ -90,6 +92,7 @@ export const DEFAULT_TP_SETTINGS: TPSettings = {
   stepSeconds: 30,
   doubleGo: false,
   parkingPot: false,
+  map: "std",
   ...DEFAULT_RANK_POINTS,
   ...DEFAULT_TP_RULES,
 };
@@ -181,6 +184,7 @@ function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
     stepMs: st.stepSeconds * 1000,
     doubleGo: st.doubleGo,
     parkingPot: st.parkingPot,
+    map: st.map,
     rules: {
       buildRule: st.buildRule,
       needGroup: st.needGroup,
@@ -215,6 +219,10 @@ function setSettings(room: TPRoom, host: TPPlayer, msg: Record<string, unknown>)
   }
   if (msg.doubleGo !== undefined) next.doubleGo = msg.doubleGo === true;
   if (msg.parkingPot !== undefined) next.parkingPot = msg.parkingPot === true;
+  if (msg.map !== undefined) {
+    if (!MAP_SIZES.includes(msg.map as MapSize)) return { ok: false, error: "Bản đồ không hợp lệ" };
+    next.map = msg.map as MapSize;
+  }
   if (msg.buildRule !== undefined) {
     if (msg.buildRule !== "even" && msg.buildRule !== "chain") return { ok: false, error: "Luật xây nhà không hợp lệ" };
     next.buildRule = msg.buildRule;
@@ -470,7 +478,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     role: player ? "player" : "spectator",
     serverTime: now,
     // While a game runs, show the rules it actually plays with (older saved games may differ from the room settings).
-    settings: room.current?.status === "playing" ? { ...tpSettingsOf(room), ...rulesOf(room.current) } : tpSettingsOf(room),
+    settings: room.current?.status === "playing" ? { ...tpSettingsOf(room), ...rulesOf(room.current), map: room.current.map ?? "std" } : tpSettingsOf(room),
     seats: room.seats.map((p, i) =>
       p
         ? {
@@ -491,6 +499,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     current: g
       ? {
           status: g.status,
+          ...(g.map ? { map: g.map } : {}),
           players: g.players.map((id) => ({
             id,
             pos: g.ps[id].pos,

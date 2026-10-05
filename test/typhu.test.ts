@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BOARD, CHANCE, CHEST, GO_SALARY, JAIL_POS } from "../src/typhu/board";
+import { BOARD, CHANCE, CHEST, GO_SALARY, JAIL_POS, boardOf, groupPositions, jailPos } from "../src/typhu/board";
 import {
   ABSENT_MS,
+  LOG_LIMIT,
   STEP_MS,
   type TPState,
   answerTrade,
@@ -46,15 +47,15 @@ function game(players = ["a", "b"], cash = 1500): TPState {
 }
 
 describe("board", () => {
-  it("has 40 squares with 22 cities, 4 airports, 2 utilities and 16-card decks", () => {
+  it("has 40 squares with 22 cities, 4 airports, 2 utilities and 31 + 32 card decks", () => {
     expect(BOARD).toHaveLength(40);
     expect(BOARD.filter((b) => b.kind === "prop")).toHaveLength(22);
     expect(BOARD.filter((b) => b.kind === "air")).toHaveLength(4);
     expect(BOARD.filter((b) => b.kind === "util")).toHaveLength(2);
     expect(BOARD[JAIL_POS].kind).toBe("jail");
     expect(BOARD[30].kind).toBe("gotojail");
-    expect(CHANCE).toHaveLength(16);
-    expect(CHEST).toHaveLength(16);
+    expect(CHANCE).toHaveLength(31);
+    expect(CHEST).toHaveLength(32);
   });
 });
 
@@ -656,5 +657,70 @@ describe("building without the full group", () => {
     s.deeds[19] = { owner: "a", houses: 0, mortgaged: false };
     for (const p of [19, 19, 19]) build(s, "a", p, T, names);
     expect(buildBlocker(s, "a", 16)).toBeNull();
+  });
+});
+
+describe("maps and cards", () => {
+  const sizes = { std: 40, large: 48, huge: 56 } as const;
+
+  it("bigger maps keep the corners and stay consistent", () => {
+    for (const [map, n] of Object.entries(sizes) as ["std" | "large" | "huge", number][]) {
+      const b = boardOf(map);
+      expect(b).toHaveLength(n);
+      const side = n / 4;
+      expect([b[0].kind, b[side].kind, b[2 * side].kind, b[3 * side].kind]).toEqual(["go", "jail", "parking", "gotojail"]);
+      expect(jailPos(b)).toBe(side);
+      const names = b.filter((q) => q.kind === "prop" || q.kind === "air" || q.kind === "util").map((q) => q.name);
+      expect(new Set(names).size).toBe(names.length);
+      // standard squares keep their relative order
+      const stdNames = boardOf("std").map((q) => q.name);
+      expect(b.map((q) => q.name).filter((x) => stdNames.includes(x) && !["Khí vận", "Cơ hội"].includes(x))).toEqual(
+        stdNames.filter((x) => !["Khí vận", "Cơ hội"].includes(x)),
+      );
+    }
+    expect(groupPositions("brown", boardOf("large"))).toHaveLength(3);
+  });
+
+  it("plays whole games to the end on every map, drawing every kind of card", () => {
+    for (const map of ["std", "large", "huge"] as const) {
+      let seed = 7;
+      const random = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+      const s = newTPGame(["a", "b", "c"], T, { startCash: 1500, timeLimitMin: 5, map, rules: { needGroup: false, buildRule: "chain" } }, random);
+      let now = T;
+      for (let i = 0; i < 6000 && s.status === "playing"; i++) {
+        now += 31_000;
+        tickGame(s, now, names, never, random);
+      }
+      expect(s.status).toBe("ended");
+      expect(s.log.length).toBeLessThanOrEqual(LOG_LIMIT);
+      for (const id of s.players) expect(s.ps[id].pos).toBeLessThan(boardOf(map).length);
+    }
+  });
+
+  it("every card effect works", () => {
+    const kinds = new Set([...CHANCE, ...CHEST].map((c) => c.effect.kind));
+    for (const k of ["forward", "rollagain", "perprop", "nearestfree", "poorest", "richest"]) expect(kinds.has(k as never)).toBe(true);
+    expect(CHANCE.length).toBeGreaterThanOrEqual(30);
+    expect(CHEST.length).toBeGreaterThanOrEqual(30);
+    for (const map of ["std", "large", "huge"] as const) {
+      const board = boardOf(map);
+      for (const deck of ["chance", "chest"] as const) {
+        const cards = deck === "chance" ? CHANCE : CHEST;
+        const at = board.findIndex((q) => q.kind === deck);
+        for (let ci = 0; ci < cards.length; ci++) {
+          const s = newTPGame(["a", "b", "c"], T, { startCash: 1500, timeLimitMin: 0, map }, () => 0);
+          s.deeds[1] = { owner: "a", houses: 0, mortgaged: false };
+          s.ps.b.cash = 100;
+          s.ps.c.cash = 3000;
+          s.turn = "a";
+          s.phase = "roll";
+          s[deck] = [ci];
+          s.ps.a.pos = (at - 3 + board.length) % board.length;
+          expect(rollDice(s, "a", T, names, dice(1, 2)).ok).toBe(true);
+          expect(Number.isFinite(s.ps.a.cash)).toBe(true);
+          expect(s.ps.a.pos).toBeLessThan(board.length);
+        }
+      }
+    }
   });
 });
