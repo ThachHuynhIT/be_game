@@ -44,6 +44,7 @@ import {
   passTurn,
   present,
   run,
+  salvage,
   shot,
   suzy,
   takeTop,
@@ -583,8 +584,15 @@ export function applyEffect(s: BangState, e: Extract<QEntry, { kind: "effect" }>
 /** Losing the Hồn Ma card sends a ghost back to the grave. */
 function loseGhost(s: BangState, owner: string, card: number, now: number, names: NameOf) {
   if (keyOf(card) === "ghost" && s.ps[owner].ghost) {
-    s.ps[owner].ghost = false;
+    const o = s.ps[owner];
+    o.ghost = false;
     log(s, now, `${names(owner)} về lại cõi chết`, "death");
+    // Back in the grave for good: whatever they still held goes to the discard pile (as when they die).
+    toDiscard(s, ...o.hand, ...o.play.map((c) => c.id));
+    o.hand = [];
+    o.play = [];
+    o.gear = [];
+    s.queue = s.queue.flatMap((e) => ("to" in e && e.to === owner && e.kind !== "pokerEnd" && e.kind !== "hurt" ? salvage(s, e) : [e]));
     if (s.turn?.player === owner) s.turn.skip = true;
   }
 }

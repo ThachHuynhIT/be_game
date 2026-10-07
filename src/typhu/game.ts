@@ -564,6 +564,8 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   p.bankrupt = true;
   s.out.push(id);
   if (s.trade && (s.trade.from === id || s.trade.to === id)) s.trade = null;
+  // A debt owed to the player who just left is now owed to the bank (nobody can receive money once bankrupt).
+  if (s.debt && s.debt.to === id) s.debt = { ...s.debt, to: null };
   log(
     s,
     now,

@@ -412,13 +412,11 @@ function eliminate(s: MeoState, player: string, now: number) {
     if (s.choice.kind === "alter") s.deck.unshift(...s.choice.cards);
     if (s.choice.kind === "bury") s.deck.unshift(s.choice.card);
     if (s.choice.kind === "offer") {
-      // Skip them; the rest of the queue still gives a card.
+      // Skip them; the rest of the queue still gives a card (and the turn still moves on below).
       const c = s.choice;
       s.choice = null;
       startOffer(s, c.mode, c.queue, now);
-      if (s.choice) return void (checkEnd(s) || undefined);
-    }
-    s.choice = null;
+    } else s.choice = null;
   }
   if (checkEnd(s)) return;
   if (s.turn === player) {
@@ -454,6 +452,8 @@ export function playCards(s: MeoState, player: string, ids: unknown, opts: PlayO
   const blocked = busy(s);
   if (blocked) return fail(blocked);
   if (!Array.isArray(ids) || ids.length === 0 || !ids.every((x) => Number.isInteger(x))) return fail("Chọn bài để đánh");
+  // The same card twice would pass the set checks below but cannot be taken from the hand.
+  if (new Set(ids).size !== ids.length) return fail("Mỗi lá chỉ được chọn một lần");
   if (s.out.includes(player) || !s.players.includes(player)) return fail("Bạn đã bị loại");
   const hand = s.hands[player] ?? [];
   const chosen = (ids as number[]).map((id) => hand.find((c) => c.id === id));

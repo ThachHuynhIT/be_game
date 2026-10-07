@@ -37,7 +37,8 @@ export function mirroredRankPoints(n: number, { first, second }: RankPointsSetti
   if (n < 2) return n === 1 ? [0] : [];
   if (n === 2) return [first, -first];
   if (n === 3) return [first, second, -(first + second)];
-  return [first, second, ...Array.from({ length: n - 4 }, () => 0), -second, -first];
+  // `0 - x`, not `-x`: with Nhì = 0 the latter would be −0, which breaks a JSON round-trip equality.
+  return [first, second, ...Array.from({ length: n - 4 }, () => 0), 0 - second, 0 - first];
 }
 
 /** Validate a host's Nhất / Nhì choice. */

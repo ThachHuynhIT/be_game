@@ -231,7 +231,7 @@ export const PRESETS: Preset[] = [
   { id: "undead", name: "Undead Defense", emoji: "🧟🛡️", group: "advanced", packs: ["zombie", "defending"], minPlayers: 2, maxPlayers: 6 },
   { id: "zombierun", name: "Zombie Run", emoji: "🧟🏃", group: "advanced", packs: ["zombie", "streaking"], minPlayers: 3, maxPlayers: 6 },
   { id: "ultimatewar", name: "Ultimate War", emoji: "🔥", group: "chaos", packs: ["attacking", "defending", "streaking", "imploding"], minPlayers: 4, maxPlayers: 7 },
-  { id: "zombiechaos", name: "Zombie Apocalypse Chaos", emoji: "☠️", group: "chaos", packs: ["zombie", "streaking", "imploding", "barking"], minPlayers: 4, maxPlayers: 7 },
+  { id: "zombiechaos", name: "Zombie Apocalypse Chaos", emoji: "☠️", group: "chaos", packs: ["zombie", "streaking", "imploding", "barking"], minPlayers: 4, maxPlayers: 6 },
   { id: "everything", name: "Everything", emoji: "💀", group: "chaos", packs: ["streaking", "imploding", "barking", "attacking", "zombie", "defending"], minPlayers: 4, maxPlayers: 7 },
 ];
 export const PRESET_BY_ID: Record<string, Preset> = Object.fromEntries(PRESETS.map((p) => [p.id, p]));

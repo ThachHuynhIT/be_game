@@ -85,7 +85,7 @@ export const packsInPlay = (room: MeoRoom): Expansion[] => {
 /** Player counts the chosen preset suits (custom: 2 up to what the packs allow). */
 export const playerRange = (room: MeoRoom): [number, number] => {
   const preset = PRESET_BY_ID[meoSettingsOf(room).preset];
-  return preset ? [preset.minPlayers, preset.maxPlayers] : [MIN_PLAYERS, maxPlayers(packsInPlay(room))];
+  return preset ? [preset.minPlayers, Math.min(preset.maxPlayers, maxPlayers(preset.packs))] : [MIN_PLAYERS, maxPlayers(packsInPlay(room))];
 };
 export const meoSettingsOf = (room: MeoRoom): MeoSettings => ({ ...DEFAULT_MEO_SETTINGS, ...room.settings });
 
@@ -211,6 +211,7 @@ function kickMeo(room: MeoRoom, host: MeoPlayer, targetId: unknown, now: number)
     if (!res.ok) return res;
     target.kicked = true;
     target.left = true;
+    syncCurse(room.current); // a kicked, cursed player drops out of the curse list at once
     afterChange(room, now);
     return { ok: true };
   }

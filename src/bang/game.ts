@@ -665,6 +665,8 @@ function begin(s: BangState, now: number, names: NameOf, random: Random) {
   for (const id of s.order) {
     const p = s.ps[id];
     p.max = CHARACTERS[p.char].life + (p.role === "sheriff" ? 1 : 0);
+    // Kicked during character choice: already dead, gets no life and no cards.
+    if (p.dead) continue;
     p.life = p.max;
     draw(s, id, hasAb(s, id, "bigspencer") ? 5 : p.life, random);
     if (hasAb(s, id, "redringo")) p.cubes = 4;
@@ -867,7 +869,8 @@ export function avoided(s: BangState, q: Extract<QEntry, { kind: "react" }>, now
   }
   if (q.cause === "Cò Quay Nga") {
     const next = nextLiving(s, q.to);
-    if (next) now_(s, { ...q, to: next, rolled: false, deadline: until(s, now) });
+    if (next) // need goes back to 1: a Barrel roll may have lowered it to 0, which would let the whole table "answer" for free forever.
+    now_(s, { ...q, to: next, need: 1, rolled: false, deadline: until(s, now) });
     return;
   }
   log(s, now, `${names(q.to)} né được`, "info");
