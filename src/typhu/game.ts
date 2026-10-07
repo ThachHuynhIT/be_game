@@ -679,7 +679,9 @@ export function rollDice(s: TPState, id: string, now: number, names: NameOf, ran
 
 function step(s: TPState, id: string, total: number, now: number, names: NameOf, random: Random) {
   const p = s.ps[id];
-  moveTo(s, id, (p.pos + total) % B(s).length, now, names);
+  const to = (p.pos + total) % B(s).length;
+  log(s, now, `📍 ${names(id)} đến ${B(s)[to].name}`, "info");
+  moveTo(s, id, to, now, names);
   s.phase = "end"; // provisional; land() may switch to buy / debt
   land(s, id, now, names, random);
   if (s.turn === id && s.ps[id].jail > 0) s.rollAgain = false;
@@ -952,6 +954,10 @@ function checkSide(s: TPState, owner: string, side: TradeSide): string | null {
   return null;
 }
 
+/** "Đắk Lắk, Bình Định + 100tr" — what one side of a trade hands over. */
+const sideText = (s: TPState, side: TradeSide) =>
+  [...side.props.map((p) => B(s)[p].name), side.cash ? money(side.cash) : null].filter(Boolean).join(" + ") || "không gì";
+
 export function proposeTrade(s: TPState, from: string, raw: { to?: unknown; give?: unknown; get?: unknown }, now: number, names: NameOf): Result {
   if (s.status !== "playing") return fail("Ván đã kết thúc");
   if (s.trade) return fail("Đang có một lời mời đổi khác");
@@ -965,7 +971,7 @@ export function proposeTrade(s: TPState, from: string, raw: { to?: unknown; give
   const err = checkSide(s, from, give) ?? checkSide(s, to, get);
   if (err) return fail(err);
   s.trade = { from, to, give, get, deadline: now + TRADE_MS };
-  log(s, now, `🤝 ${names(from)} mời ${names(to)} đổi đất`, "info");
+  log(s, now, `🤝 ${names(from)} mời ${names(to)} đổi: đưa ${sideText(s, give)}, nhận ${sideText(s, get)}`, "info");
   return OK;
 }
 
@@ -990,12 +996,14 @@ export function answerTrade(s: TPState, id: string, accept: boolean, now: number
     log(s, now, `❌ Lời mời đổi của ${names(t.from)} bị huỷ: ${err}`, "info");
     return OK;
   }
+  const gave = sideText(s, t.give);
+  const got = sideText(s, t.get);
   for (const pos of t.give.props) s.deeds[pos].owner = t.to;
   for (const pos of t.get.props) s.deeds[pos].owner = t.from;
   s.ps[t.from].cash += t.get.cash - t.give.cash;
   s.ps[t.to].cash += t.give.cash - t.get.cash;
   s.trade = null;
-  log(s, now, `✅ ${names(t.from)} và ${names(t.to)} đã đổi đất`, "buy");
+  log(s, now, `✅ ${names(t.from)} và ${names(t.to)} đã đổi: ${names(t.from)} đưa ${gave}, nhận ${got}`, "buy");
   return OK;
 }
 
