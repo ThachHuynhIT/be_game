@@ -526,8 +526,11 @@ function autoLiquidate(s: TPState, id: string, target: number, now: number, name
       .sort((a, b) => s.deeds[b].houses - s.deeds[a].houses);
     if (!built.length) break;
     const pos = built[0];
-    p.cash += houseRefund(sq(s, pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses, rulesOf(s));
+    const refund = houseRefund(sq(s, pos) as Extract<Ownable, { kind: "prop" }>, s.deeds[pos].houses, rulesOf(s));
+    const what = s.deeds[pos].houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${s.deeds[pos].houses}`;
+    p.cash += refund;
     s.deeds[pos].houses -= 1;
+    log(s, now, `${names(id)} bị bán ${what} ở ${sq(s, pos).name} để trả nợ, thu ${money(refund)}`, "info");
   }
   while (p.cash < target) {
     const free = mine().filter((pos) => !s.deeds[pos].mortgaged);
@@ -535,8 +538,8 @@ function autoLiquidate(s: TPState, id: string, target: number, now: number, name
     free.sort((a, b) => sq(s, a).price - sq(s, b).price);
     s.deeds[free[0]].mortgaged = true;
     p.cash += mortgageValue(sq(s, free[0]));
+    log(s, now, `${names(id)} bị thế chấp ${sq(s, free[0]).name} để trả nợ, thu ${money(mortgageValue(sq(s, free[0])))}`, "info");
   }
-  log(s, now, `${names(id)} được bán tài sản tự động để trả nợ`, "info");
 }
 
 function bankrupt(s: TPState, id: string, creditor: string | null, now: number, names: NameOf) {
@@ -861,9 +864,10 @@ export function build(s: TPState, id: string, pos: number, now: number, names: N
   if (why) return fail(why);
   const b = B(s)[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
-  s.ps[id].cash -= houseCost(b, d.houses + 1, rulesOf(s));
+  const cost = houseCost(b, d.houses + 1, rulesOf(s));
+  s.ps[id].cash -= cost;
   d.houses += 1;
-  log(s, now, `🏠 ${names(id)} xây ${d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`} ở ${b.name}`, "buy");
+  log(s, now, `🏠 ${names(id)} xây ${d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`} ở ${b.name}, trả ${money(cost)}`, "buy");
   return OK;
 }
 
@@ -875,9 +879,10 @@ export function sellHouse(s: TPState, id: string, pos: number, now: number, name
   const b = B(s)[pos] as Extract<Ownable, { kind: "prop" }>;
   const d = s.deeds[pos];
   const refund = houseRefund(b, d.houses, rulesOf(s));
+  const sold = d.houses === MAX_HOUSES ? "khách sạn" : `nhà thứ ${d.houses}`;
   d.houses -= 1;
   s.ps[id].cash += refund;
-  log(s, now, `${names(id)} bán 1 nhà ở ${b.name}, thu ${money(refund)}`, "info");
+  log(s, now, `${names(id)} bán ${sold} ở ${b.name}, thu ${money(refund)}`, "info");
   return OK;
 }
 
