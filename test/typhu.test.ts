@@ -88,7 +88,7 @@ describe("moving and buying", () => {
     rollDice(s, "a", T, names, dice(3, 3)); // → 6 Cần Thơ
     skipBuy(s, "a", T, names);
     expect(s.phase).toBe("roll");
-    rollDice(s, "a", T, names, dice(1, 1)); // → 8 Châu Đốc
+    rollDice(s, "a", T, names, dice(1, 1)); // → 8 An Giang
     skipBuy(s, "a", T, names);
     rollDice(s, "a", T, names, dice(2, 2));
     expect(s.ps.a.pos).toBe(JAIL_POS);
