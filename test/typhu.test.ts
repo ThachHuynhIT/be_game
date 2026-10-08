@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARD, CHANCE, CHEST, GO_SALARY, JAIL_POS, boardOf, groupPositions, jailPos } from "../src/typhu/board";
+import { BOARD, CHANCE, nameOnMap, CHEST, GO_SALARY, JAIL_POS, boardOf, groupPositions, jailPos } from "../src/typhu/board";
 import {
   ABSENT_MS,
   LOG_LIMIT,
@@ -90,7 +90,7 @@ describe("moving and buying", () => {
     rollDice(s, "a", T, names, dice(3, 3)); // → 6 Cần Thơ
     skipBuy(s, "a", T, names);
     expect(s.phase).toBe("roll");
-    rollDice(s, "a", T, names, dice(1, 1)); // → 8 An Giang
+    rollDice(s, "a", T, names, dice(1, 1)); // → 8 Châu Đốc
     skipBuy(s, "a", T, names);
     rollDice(s, "a", T, names, dice(2, 2));
     expect(s.ps.a.pos).toBe(JAIL_POS);
@@ -711,7 +711,7 @@ describe("maps and cards", () => {
       const names = b.filter((q) => q.kind === "prop" || q.kind === "air" || q.kind === "util").map((q) => q.name);
       expect(new Set(names).size).toBe(names.length);
       // standard squares keep their relative order
-      const stdNames = boardOf("std").map((q) => q.name);
+      const stdNames = boardOf("std").map((q) => nameOnMap(map, q.name));
       expect(b.map((q) => q.name).filter((x) => stdNames.includes(x) && !["Khí vận", "Cơ hội"].includes(x))).toEqual(
         stdNames.filter((x) => !["Khí vận", "Cơ hội"].includes(x)),
       );

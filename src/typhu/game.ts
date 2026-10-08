@@ -2,6 +2,7 @@ import {
   AIR_RENT,
   type MapSize,
   boardOf,
+  nameOnMap,
   CHANCE,
   CHEST,
   type CardEffect,
@@ -424,7 +425,7 @@ function applyEffect(s: TPState, id: string, e: CardEffect, now: number, names: 
       return;
     case "goto": {
       // Card targets are standard-map positions; look the square up by name on bigger maps.
-      const name = boardOf()[e.pos].name;
+      const name = nameOnMap(s.map, boardOf()[e.pos].name);
       const to = B(s).findIndex((q) => q.name === name);
       moveTo(s, id, to >= 0 ? to : e.pos, now, names);
       land(s, id, now, names, random);

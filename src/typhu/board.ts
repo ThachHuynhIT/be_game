@@ -1,5 +1,5 @@
 /**
- * Cờ Tỷ Phú board: 40 squares, Vietnamese provinces and cities instead of the classic streets.
+ * Cờ Tỷ Phú board: 40 squares, Vietnamese places instead of the classic streets.
  * Money is in "triệu" (tr). Prices and rents follow the classic table so the balance is familiar.
  * This file is copied verbatim to the portfolio (src/lib/typhu/board.ts) — keep it dependency-free.
  */
@@ -39,33 +39,33 @@ export const BOARD: Square[] = [
   { kind: "air", name: "Sân bay Tân Sơn Nhất", price: 200 },
   prop("Cần Thơ", "Chợ nổi Cái Răng", "lightblue", 100, 50, [6, 30, 90, 270, 400, 550]),
   { kind: "chance", name: "Cơ hội" },
-  prop("An Giang", "Núi Sam, Châu Đốc", "lightblue", 100, 50, [6, 30, 90, 270, 400, 550]),
+  prop("Châu Đốc", "Núi Sam", "lightblue", 100, 50, [6, 30, 90, 270, 400, 550]),
   prop("Bến Tre", "Xứ dừa", "lightblue", 120, 50, [8, 40, 100, 300, 450, 600]),
   { kind: "jail", name: "Nhà tù" },
-  prop("Bà Rịa-Vũng Tàu", "Tượng Chúa Kitô", "pink", 140, 100, [10, 50, 150, 450, 625, 750]),
+  prop("Vũng Tàu", "Tượng Chúa Kitô", "pink", 140, 100, [10, 50, 150, 450, 625, 750]),
   { kind: "util", name: "Công ty Điện lực", price: 150 },
-  prop("Bình Thuận", "Đồi cát Mũi Né", "pink", 140, 100, [10, 50, 150, 450, 625, 750]),
-  prop("Lâm Đồng", "Hồ Xuân Hương, Đà Lạt", "pink", 160, 100, [12, 60, 180, 500, 700, 900]),
+  prop("Phan Thiết", "Đồi cát Mũi Né", "pink", 140, 100, [10, 50, 150, 450, 625, 750]),
+  prop("Đà Lạt", "Hồ Xuân Hương", "pink", 160, 100, [12, 60, 180, 500, 700, 900]),
   { kind: "air", name: "Sân bay Cam Ranh", price: 200 },
-  prop("Đắk Lắk", "Thủ phủ cà phê", "orange", 180, 100, [14, 70, 200, 550, 750, 950]),
+  prop("Buôn Ma Thuột", "Thủ phủ cà phê", "orange", 180, 100, [14, 70, 200, 550, 750, 950]),
   { kind: "chest", name: "Khí vận" },
-  prop("Bình Định", "Eo Gió, Quy Nhơn", "orange", 180, 100, [14, 70, 200, 550, 750, 950]),
-  prop("Khánh Hòa", "Vịnh Nha Trang", "orange", 200, 100, [16, 80, 220, 600, 800, 1000]),
+  prop("Quy Nhơn", "Eo Gió", "orange", 180, 100, [14, 70, 200, 550, 750, 950]),
+  prop("Nha Trang", "Vịnh Nha Trang", "orange", 200, 100, [16, 80, 220, 600, 800, 1000]),
   { kind: "parking", name: "Nghỉ chân" },
-  prop("Quảng Nam", "Phố cổ Hội An", "red", 220, 150, [18, 90, 250, 700, 875, 1050]),
+  prop("Hội An", "Phố cổ", "red", 220, 150, [18, 90, 250, 700, 875, 1050]),
   { kind: "chance", name: "Cơ hội" },
-  prop("Thừa Thiên Huế", "Đại Nội", "red", 220, 150, [18, 90, 250, 700, 875, 1050]),
+  prop("Huế", "Đại Nội", "red", 220, 150, [18, 90, 250, 700, 875, 1050]),
   prop("Đà Nẵng", "Cầu Rồng", "red", 240, 150, [20, 100, 300, 750, 925, 1100]),
   { kind: "air", name: "Sân bay Phú Bài", price: 200 },
   prop("Ninh Bình", "Tràng An", "yellow", 260, 150, [22, 110, 330, 800, 975, 1150]),
-  prop("Lào Cai", "Fansipan, Sa Pa", "yellow", 260, 150, [22, 110, 330, 800, 975, 1150]),
+  prop("Sa Pa", "Đỉnh Fansipan", "yellow", 260, 150, [22, 110, 330, 800, 975, 1150]),
   { kind: "util", name: "Nhà máy Nước", price: 150 },
-  prop("Quảng Ninh", "Vịnh Hạ Long", "yellow", 280, 150, [24, 120, 360, 850, 1025, 1200]),
+  prop("Hạ Long", "Vịnh Hạ Long", "yellow", 280, 150, [24, 120, 360, 850, 1025, 1200]),
   { kind: "gotojail", name: "Vào tù" },
   prop("Hải Phòng", "Thành phố hoa phượng", "green", 300, 200, [26, 130, 390, 900, 1100, 1275]),
-  prop("Thanh Hóa", "Biển Sầm Sơn", "green", 300, 200, [26, 130, 390, 900, 1100, 1275]),
+  prop("Côn Đảo", "Bãi Đầm Trầu", "green", 300, 200, [26, 130, 390, 900, 1100, 1275]),
   { kind: "chest", name: "Khí vận" },
-  prop("Kiên Giang", "Đảo ngọc Phú Quốc", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]),
+  prop("Phú Quốc", "Đảo ngọc", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]),
   { kind: "air", name: "Sân bay Nội Bài", price: 200 },
   { kind: "chance", name: "Cơ hội" },
   prop("Hà Nội", "Hồ Hoàn Kiếm", "darkblue", 350, 200, [50, 250, 700, 1600, 1900, 2200]),
@@ -127,12 +127,36 @@ const EXTRAS_HUGE: ExtraSquare[] = [
   { side: 3, at: 9, sq: prop("Bình Dương", "Thành phố mới", "darkblue", 380, 200, [60, 270, 800, 1800, 2150, 2500]) },
 ];
 
+/**
+ * The standard map keeps the classic place names (Vũng Tàu, Hội An, Sa Pa…); the bigger maps name those squares after
+ * their province instead (Bà Rịa-Vũng Tàu, Quảng Nam, Lào Cai…) like the squares they add.
+ */
+export const PROVINCE_NAMES: Record<string, { name: string; region: string }> = {
+  "Châu Đốc": { name: "An Giang", region: "Núi Sam, Châu Đốc" },
+  "Vũng Tàu": { name: "Bà Rịa-Vũng Tàu", region: "Tượng Chúa Kitô" },
+  "Phan Thiết": { name: "Bình Thuận", region: "Đồi cát Mũi Né" },
+  "Đà Lạt": { name: "Lâm Đồng", region: "Hồ Xuân Hương, Đà Lạt" },
+  "Buôn Ma Thuột": { name: "Đắk Lắk", region: "Thủ phủ cà phê" },
+  "Quy Nhơn": { name: "Bình Định", region: "Eo Gió, Quy Nhơn" },
+  "Nha Trang": { name: "Khánh Hòa", region: "Vịnh Nha Trang" },
+  "Hội An": { name: "Quảng Nam", region: "Phố cổ Hội An" },
+  "Huế": { name: "Thừa Thiên Huế", region: "Đại Nội" },
+  "Sa Pa": { name: "Lào Cai", region: "Fansipan, Sa Pa" },
+  "Hạ Long": { name: "Quảng Ninh", region: "Vịnh Hạ Long" },
+  "Côn Đảo": { name: "Thanh Hóa", region: "Biển Sầm Sơn" },
+  "Phú Quốc": { name: "Kiên Giang", region: "Đảo ngọc Phú Quốc" },
+};
+
+/** The name a standard-map square has on `map` (cards aim at standard names). */
+export const nameOnMap = (map: MapSize | undefined, stdName: string) => (map && map !== "std" ? PROVINCE_NAMES[stdName]?.name ?? stdName : stdName);
+
 function buildBoard(extras: ExtraSquare[]): Square[] {
-  const sides = [BOARD.slice(1, 10), BOARD.slice(11, 20), BOARD.slice(21, 30), BOARD.slice(31, 40)];
+  const base = BOARD.map((q) => (q.kind === "prop" && PROVINCE_NAMES[q.name] ? { ...q, ...PROVINCE_NAMES[q.name] } : q));
+  const sides = [base.slice(1, 10), base.slice(11, 20), base.slice(21, 30), base.slice(31, 40)];
   // Highest index first (and later-defined first on ties) so earlier insertions never shift later ones.
   const order = extras.map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || b.i - a.i);
   for (const { e } of order) sides[e.side].splice(e.at, 0, e.sq);
-  return [BOARD[0], ...sides[0], BOARD[10], ...sides[1], BOARD[20], ...sides[2], BOARD[30], ...sides[3]];
+  return [base[0], ...sides[0], base[10], ...sides[1], base[20], ...sides[2], base[30], ...sides[3]];
 }
 
 export const BOARDS: Record<MapSize, Square[]> = { std: BOARD, large: buildBoard(EXTRAS_LARGE), huge: buildBoard(EXTRAS_HUGE) };
@@ -237,7 +261,7 @@ export const CHANCE: DeckCard[] = [
   { text: "Tiến thẳng về Khởi hành. Nhận 200tr.", effect: { kind: "goto", pos: 0 } },
   { text: "Bay vào TP. Hồ Chí Minh dạo phố đi bộ Nguyễn Huệ.", effect: { kind: "goto", pos: 39 } },
   { text: "Đi ngắm Cầu Rồng phun lửa ở Đà Nẵng. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 24 } },
-  { text: "Đi tắm biển Bà Rịa - Vũng Tàu. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 11 } },
+  { text: "Đi tắm biển Vũng Tàu. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 11 } },
   { text: "Ra sân bay gần nhất. Nếu có chủ, trả gấp đôi tiền thuê.", effect: { kind: "nearest", target: "air" } },
   { text: "Ra sân bay gần nhất. Nếu có chủ, trả gấp đôi tiền thuê.", effect: { kind: "nearest", target: "air" } },
   { text: "Đến công ty điện/nước gần nhất. Nếu có chủ, tung xúc xắc và trả 10 lần số điểm.", effect: { kind: "nearest", target: "util" } },
@@ -299,7 +323,7 @@ export const CHEST: DeckCard[] = [
   { text: "Đi nhờ xe bạn — tiến thêm 2 ô.", effect: { kind: "forward", steps: 2 } },
   { text: "May mắn: được tung xúc xắc thêm một lượt.", effect: { kind: "rollagain" } },
   { text: "Được tặng đất: tiến tới ô đất trống gần nhất, được quyền mua.", effect: { kind: "nearestfree" } },
-  { text: "Đi du lịch đảo Phú Quốc (Kiên Giang). Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 34 } },
+  { text: "Đi du lịch Phú Quốc. Qua Khởi hành thì nhận 200tr.", effect: { kind: "goto", pos: 34 } },
 ];
 
 /** Host settings. */

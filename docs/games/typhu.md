@@ -1,5 +1,5 @@
 # Cờ Tỷ Phú (`typhu`)
-> Kiểu Monopoly với các tỉnh thành Việt Nam (tiền tính bằng "tr"), house rules tuỳ chỉnh, 3 cỡ bản đồ (40 / 48 / 56 ô) · 2–6 người · frontend `/co-ty-phu` · WS `/api/typhu/ws`, `/api/typhu/rooms`, `/api/typhu/leaderboard`
+> Kiểu Monopoly với các địa danh Việt Nam (tiền tính bằng "tr"), house rules tuỳ chỉnh, 3 cỡ bản đồ (40 / 48 / 56 ô) · 2–6 người · frontend `/co-ty-phu` · WS `/api/typhu/ws`, `/api/typhu/rooms`, `/api/typhu/leaderboard`
 
 Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../GUIDE.md).
 
@@ -18,7 +18,7 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 ### Bàn cờ (`BOARD`, 40 ô, `BOARD_SIZE`)
 
 - 0 `go` Khởi hành · 10 `jail` Nhà tù (`JAIL_POS`) · 20 `parking` Nghỉ chân · 30 `gotojail` Vào tù.
-- 22 `prop` trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn). **Mọi ô đất là một tỉnh hoặc thành phố trực thuộc trung ương** (bộ 63 tỉnh thành quen thuộc; `name` là tên tỉnh, `region` là điểm nổi tiếng):
+- 22 `prop` trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn). **Bản chuẩn 40 ô dùng tên địa danh gốc** (Vũng Tàu, Hội An, Sa Pa…). **Bản 48 / 56 ô gọi các ô đó theo tỉnh** (`PROVINCE_NAMES` trong `board.ts`), như các ô thêm vào. Bảng dưới là tên theo tỉnh; thẻ bài tìm ô theo tên chuẩn rồi đổi sang tên của bản đồ qua `nameOnMap`:
 
 | Nhóm | Các ô (theo thứ tự đi) |
 |---|---|
