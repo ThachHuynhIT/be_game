@@ -3,6 +3,7 @@ import { CHANCE, CHEST, type MapSize, boardOf, groupPositions, isOwnable } from 
 import {
   type TPRules,
   type TPState,
+  answerLoan,
   answerTrade,
   build,
   buySquare,
@@ -13,6 +14,7 @@ import {
   newTPGame,
   payDebt,
   payJail,
+  proposeLoan,
   proposeTrade,
   rollDice,
   sellHouse,
@@ -84,6 +86,11 @@ function check(s: TPState, why: string) {
     if (s.turn !== null || s.debt || s.trade) fail("ended leftovers");
     if (s.finished.length !== s.players.length || new Set(s.finished).size !== s.players.length) fail("finished list");
   }
+  for (const l of s.loans ?? []) {
+    if (!s.ps[l.lender] || s.ps[l.lender].bankrupt || !s.ps[l.borrower] || s.ps[l.borrower].bankrupt) fail("loan with a bankrupt party");
+    if (!(l.owed > l.amount) || l.left < 0 || l.left > 5) fail("loan numbers");
+  }
+  if (s.loan && s.status !== "playing") fail("loan after the end");
   if (s.trade) {
     const t = s.trade;
     if (!s.ps[t.from] || s.ps[t.from].bankrupt || !s.ps[t.to] || s.ps[t.to].bankrupt || t.from === t.to) fail("trade parties");
@@ -204,7 +211,7 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
           }
         }
       } else {
-        const x = Math.floor(r() * 14);
+        const x = Math.floor(r() * 16);
         switch (x) {
           case 0:
             op = "roll";
@@ -275,6 +282,19 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
             const total = sum(s);
             res = answerTrade(s, who, r() < 0.7, now, names);
             if (sum(s) !== total) throw new Error("trade changed total cash");
+            break;
+          }
+          case 14:
+            op = "loan";
+            res = proposeLoan(s, actor, { to: r() < 0.9 ? pk(ids) : garbage(), amount: r() < 0.9 ? Math.floor(r() * 400) : garbage(), rate: r() < 0.8 ? pk([10, 20]) : garbage() }, now, names);
+            break;
+          case 15: {
+            op = "loananswer";
+            const o = s.loan;
+            const who = o && r() < 0.8 ? (r() < 0.8 ? o.to : o.from) : actor;
+            const total = sum(s);
+            res = answerLoan(s, who, r() < 0.7, now, names);
+            if (sum(s) !== total) throw new Error("loan changed total cash");
             break;
           }
           case 11:

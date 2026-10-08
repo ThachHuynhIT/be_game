@@ -5,6 +5,7 @@ import {
   LOG_LIMIT,
   STEP_MS,
   type TPState,
+  answerLoan,
   answerTrade,
   build,
   buildBlocker,
@@ -15,6 +16,7 @@ import {
   newTPGame,
   payDebt,
   payJail,
+  proposeLoan,
   proposeTrade,
   rentFor,
   rollDice,
@@ -504,6 +506,42 @@ describe("trade", () => {
     proposeTrade(s, "a", { to: "b", give: { props: [], cash: 10 }, get: { props: [3], cash: 0 } }, T, names);
     tickGame(s, T + 31_000, names, never);
     expect(s.trade).toBeNull();
+  });
+});
+
+describe("loans", () => {
+  it("lends cash, then collects amount + interest after 5 of the borrower's turns", () => {
+    const s = game();
+    s.turn = "a";
+    expect(proposeLoan(s, "a", { to: "b", amount: 200, rate: 20 }, T, names).ok).toBe(true);
+    expect(proposeLoan(s, "a", { to: "b", amount: 100, rate: 10 }, T, names).ok).toBe(false); // one offer at a time
+    expect(answerLoan(s, "a", true, T, names).ok).toBe(false);
+    expect(answerLoan(s, "b", true, T, names).ok).toBe(true);
+    expect(s.ps.a.cash).toBe(1700);
+    expect(s.ps.b.cash).toBe(1300);
+    expect(s.loans?.[0].owed).toBe(240);
+    for (let i = 0; i < 4; i++) {
+      s.turn = "b";
+      s.phase = "end";
+      endTurn(s, "b", T, names); // a's turn starts
+    }
+    expect(s.loans).toHaveLength(1);
+    s.turn = "b";
+    s.phase = "end";
+    endTurn(s, "b", T, names); // a's 5th turn starts
+    expect(s.loans).toHaveLength(0);
+    expect(s.ps.a.cash).toBe(1460);
+    expect(s.ps.b.cash).toBe(1540);
+  });
+
+  it("rejects bad rates, amounts and expires", () => {
+    const s = game();
+    expect(proposeLoan(s, "a", { to: "b", amount: 100, rate: 15 }, T, names).ok).toBe(false);
+    expect(proposeLoan(s, "a", { to: "b", amount: 99999, rate: 10 }, T, names).ok).toBe(false);
+    expect(proposeLoan(s, "a", { to: "a", amount: 100, rate: 10 }, T, names).ok).toBe(false);
+    expect(proposeLoan(s, "a", { to: "b", amount: 100, rate: 10 }, T, names).ok).toBe(true);
+    tickGame(s, T + 31_000, names, never);
+    expect(s.loan).toBeNull();
   });
 });
 

@@ -27,6 +27,7 @@ import {
 import {
   type Result,
   type TPState,
+  answerLoan,
   answerTrade,
   DEFAULT_TP_RULES,
   build,
@@ -42,6 +43,7 @@ import {
   payDebt,
   rulesOf,
   payJail,
+  proposeLoan,
   proposeTrade,
   rollDice,
   landSalePrice,
@@ -378,6 +380,12 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
     case "trade":
       res = proposeTrade(g, p.id, msg, now, names);
       break;
+    case "loan":
+      res = proposeLoan(g, p.id, msg, now, names);
+      break;
+    case "loananswer":
+      res = answerLoan(g, p.id, msg.accept === true, now, names);
+      break;
     case "tradeanswer":
       res = answerTrade(g, p.id, msg.accept === true, now, names);
       break;
@@ -517,6 +525,8 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
           rollAgain: g.rollAgain,
           debt: g.debt ? { amount: g.debt.amount, to: g.debt.to, reason: g.debt.reason } : null,
           trade: g.trade,
+          loan: g.loan ?? null,
+          loans: g.loans ?? [],
           lastCard: g.lastCard,
           finished: g.finished,
           endsAt: g.endsAt,

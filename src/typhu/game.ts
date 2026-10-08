@@ -37,6 +37,10 @@ export const STEP_MS = 30_000;
 /** Time to raise money when you owe more than you have. */
 export const DEBT_MS = 60_000;
 export const TRADE_MS = 30_000;
+/** Loans between players: borrower's turns until repayment, allowed interest rates (%), open loans per borrower. */
+export const LOAN_TURNS = 5;
+export const LOAN_RATES = [10, 20];
+export const MAX_LOANS = 2;
 /** Offline players get played for after this long. */
 export const ABSENT_MS = 2_500;
 export const LOG_LIMIT = 150;
@@ -83,6 +87,27 @@ export interface Trade {
   deadline: number;
 }
 
+/** A request to borrow `amount` from `to` (the lender), repaying amount + rate% after LOAN_TURNS of the borrower's turns. */
+export interface LoanOffer {
+  from: string;
+  to: string;
+  amount: number;
+  rate: number;
+  deadline: number;
+}
+
+export interface Loan {
+  id: number;
+  lender: string;
+  borrower: string;
+  amount: number;
+  rate: number;
+  /** What the borrower repays: amount + interest. */
+  owed: number;
+  /** Borrower's turns left before repayment. */
+  left: number;
+}
+
 export interface LogEntry {
   id: number;
   at: number;
@@ -106,6 +131,11 @@ export interface TPState {
   rollAgain: boolean;
   debt: Debt | null;
   trade: Trade | null;
+  /** Pending request to borrow money (one at a time, never together with a trade). */
+  loan?: LoanOffer | null;
+  /** Open loans between players. */
+  loans?: Loan[];
+  loanSeq?: number;
   /** Card order (indices into CHANCE / CHEST), next card first. */
   chance: number[];
   chest: number[];
@@ -287,6 +317,11 @@ export function netWorth(s: TPState, id: string) {
     const b = sq(s, pos);
     total += d.mortgaged ? mortgageValue(b) : b.price;
     if (b.kind === "prop") total += builtCost(b, d.houses, rulesOf(s));
+  }
+  // Money lent out still counts as yours; money borrowed is subtracted.
+  for (const l of s.loans ?? []) {
+    if (l.lender === id) total += l.owed;
+    if (l.borrower === id) total -= l.owed;
   }
   return total;
 }
@@ -567,6 +602,11 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   p.bankrupt = true;
   s.out.push(id);
   if (s.trade && (s.trade.from === id || s.trade.to === id)) s.trade = null;
+  if (s.loan && (s.loan.from === id || s.loan.to === id)) s.loan = null;
+  if (s.loans?.some((l) => l.lender === id || l.borrower === id)) {
+    s.loans = s.loans.filter((l) => l.lender !== id && l.borrower !== id);
+    log(s, now, `Các khoản vay của ${names(id)} được xoá sổ`, "info");
+  }
   // A debt owed to the player who just left is now owed to the bank (nobody can receive money once bankrupt).
   if (s.debt && s.debt.to === id) s.debt = { ...s.debt, to: null };
   log(
@@ -593,6 +633,7 @@ function endGame(s: TPState, now: number, names: NameOf, byTime = false) {
   s.deadline = null;
   s.debt = null;
   s.trade = null;
+  s.loan = null;
   log(s, now, byTime ? `⏰ Hết giờ! ${names(alive[0])} giàu nhất và thắng cuộc` : `🏆 ${names(alive[0])} là tỷ phú cuối cùng!`, "money");
 }
 
@@ -609,7 +650,20 @@ function nextTurn(s: TPState, now: number, names: NameOf) {
   s.dice = null;
   s.debt = null;
   setPhase(s, "roll", now);
-  void names;
+  settleLoans(s, s.turn, now, names);
+}
+
+/** A new turn starts for `id`: their loans tick down, and any that reach zero are repaid (or become a debt). */
+function settleLoans(s: TPState, id: string, now: number, names: NameOf) {
+  if (!s.loans?.length) return;
+  for (const l of s.loans) if (l.borrower === id && l.left > 0) l.left -= 1;
+  // Every loan that is due is repaid now; if one turns into a debt the rest wait (left 0) for the next turn.
+  for (const due of s.loans.filter((l) => l.borrower === id && l.left <= 0)) {
+    if (s.debt) break;
+    s.loans = s.loans.filter((l) => l !== due);
+    log(s, now, `⏳ ${names(id)} đến hạn trả nợ vay ${names(due.lender)}: ${money(due.amount)} + lãi ${due.rate}%`, "bad");
+    charge(s, id, due.owed, due.lender, "nợ vay (gốc + lãi)", now, names);
+  }
 }
 
 /** After a move is fully resolved (no buy / debt pending). */
@@ -1007,6 +1061,52 @@ export function answerTrade(s: TPState, id: string, accept: boolean, now: number
   return OK;
 }
 
+// ─── Loans ──────────────────────────────────────────────────────────
+
+export function proposeLoan(s: TPState, from: string, raw: { to?: unknown; amount?: unknown; rate?: unknown }, now: number, names: NameOf): Result {
+  if (s.status !== "playing") return fail("Ván đã kết thúc");
+  if (s.trade || s.loan) return fail("Đang có một lời mời khác");
+  const to = typeof raw.to === "string" ? raw.to : "";
+  if (!s.ps[from] || s.ps[from].bankrupt) return fail("Bạn không còn trong ván");
+  if (!s.ps[to] || s.ps[to].bankrupt || to === from) return fail("Chọn người cho vay");
+  const amount = typeof raw.amount === "number" && Number.isFinite(raw.amount) ? Math.floor(raw.amount / 10) * 10 : 0;
+  const rate = typeof raw.rate === "number" ? raw.rate : 0;
+  if (amount < 10) return fail("Số tiền vay tối thiểu 10tr");
+  if (!LOAN_RATES.includes(rate)) return fail("Lãi suất chỉ 10% hoặc 20%");
+  if (s.ps[to].cash < amount) return fail(`${names(to)} không đủ ${money(amount)} để cho vay`);
+  if ((s.loans ?? []).filter((l) => l.borrower === from).length >= MAX_LOANS) return fail(`Mỗi người chỉ vay tối đa ${MAX_LOANS} khoản cùng lúc`);
+  s.loan = { from, to, amount, rate, deadline: now + TRADE_MS };
+  log(s, now, `🏦 ${names(from)} xin vay ${names(to)} ${money(amount)} — trả sau ${LOAN_TURNS} lượt, lãi ${rate}%`, "info");
+  return OK;
+}
+
+export function answerLoan(s: TPState, id: string, accept: boolean, now: number, names: NameOf): Result {
+  const o = s.loan;
+  if (!o) return fail("Không có lời xin vay nào");
+  if (id === o.from && !accept) {
+    s.loan = null;
+    log(s, now, `${names(id)} rút lời xin vay`, "info");
+    return OK;
+  }
+  if (id !== o.to) return fail("Lời xin vay này không dành cho bạn");
+  s.loan = null;
+  if (!accept) {
+    log(s, now, `${names(id)} từ chối cho ${names(o.from)} vay`, "info");
+    return OK;
+  }
+  if (s.ps[o.to].cash < o.amount || s.ps[o.from].bankrupt) {
+    log(s, now, `❌ Lời xin vay của ${names(o.from)} bị huỷ: ${names(o.to)} không còn đủ tiền`, "info");
+    return OK;
+  }
+  s.ps[o.to].cash -= o.amount;
+  s.ps[o.from].cash += o.amount;
+  s.loanSeq = (s.loanSeq ?? 0) + 1;
+  const owed = o.amount + Math.ceil((o.amount * o.rate) / 100);
+  s.loans = [...(s.loans ?? []), { id: s.loanSeq, lender: o.to, borrower: o.from, amount: o.amount, rate: o.rate, owed, left: LOAN_TURNS }];
+  log(s, now, `🏦 ${names(o.to)} cho ${names(o.from)} vay ${money(o.amount)} — phải trả ${money(owed)} sau ${LOAN_TURNS} lượt`, "buy");
+  return OK;
+}
+
 /** Kicked / left for good: goes bankrupt to the bank. */
 export function forfeitPlayer(s: TPState, id: string, now: number, names: NameOf): Result {
   if (s.status !== "playing" || !s.ps[id] || s.ps[id].bankrupt) return fail("Người chơi không còn trong ván");
@@ -1046,6 +1146,11 @@ export function tickGame(s: TPState, now: number, names: NameOf, absent: (id: st
     s.trade = null;
     changed = true;
   }
+  if (s.loan && (now >= s.loan.deadline || absent(s.loan.to))) {
+    log(s, now, `Lời xin vay của ${names(s.loan.from)} đã hết hạn`, "info");
+    s.loan = null;
+    changed = true;
+  }
   if (s.endsAt && now >= s.endsAt) {
     endGame(s, now, names, true);
     return true;
@@ -1062,6 +1167,6 @@ export function nextGameTickAt(s: TPState, now: number): number | null {
   if (s.status !== "playing") return null;
   // The absent-player check only matters while it is still ahead; afterwards the room's presence timer covers it.
   const absentAt = s.phaseAt + ABSENT_MS > now ? s.phaseAt + ABSENT_MS : null;
-  const times = [s.deadline, absentAt, s.trade?.deadline, s.endsAt].filter((x): x is number => typeof x === "number");
+  const times = [s.deadline, absentAt, s.trade?.deadline, s.loan?.deadline, s.endsAt].filter((x): x is number => typeof x === "number");
   return times.length ? Math.min(...times) : null;
 }

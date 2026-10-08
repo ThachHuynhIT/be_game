@@ -42,7 +42,7 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 | `map` | Số ô | Ô thêm |
 |---|---|---|
 | `std` | 40 | — |
-| `large` | 48 | Sóc Trăng (nâu), Gia Lai (cam), Sơn La (vàng), Nghệ An (xanh lá) + 2 Khí vận, 2 Cơ hội |
+| `large` | 48 | Sóc Trăng (nâu), Gia Lai (cam), Sơn La (vàng), Nghệ An (xanh lá) + 2 Khí vận, 1 Cơ hội và **Thuế môi trường 120tr** (dãy ngay sau Nhà tù, bên trái bàn). Bản 56 ô kế thừa ô này và thêm Thuế bất động sản 150tr ở dãy dưới |
 | `huge` | 56 | Như `large` + Tiền Giang (xanh nhạt), Ninh Thuận (hồng), Quảng Bình (đỏ), Bình Dương (xanh đậm), thuế bất động sản 150 + 2 Khí vận, 2 Cơ hội |
 
 Hệ quả: nhóm màu có thể có 3–4 lô; các ô chuẩn giữ thứ tự tương đối. Lá thẻ `goto` lưu vị trí của **bản đồ chuẩn** và được đổi sang vị trí trên bản đồ lớn bằng cách tìm theo **tên ô** (`applyEffect`), nên không cần dữ liệu thẻ riêng cho từng cỡ. Ván lưu `s.map` (chỉ khi ≠ `"std"`); `view.current.map` và `view.settings.map` báo cho client.
@@ -110,6 +110,7 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 
 - `trade {to, give: {props, cash}, get: {props, cash}}`: bất kỳ người chơi chưa phá sản, **bất kỳ lúc nào** (không cần lượt), mỗi lúc chỉ một trade trong cả ván. `props` lọc số nguyên duy nhất, tối đa 28; `cash` floor, ≥0. Phải có ít nhất 1 ô đất ở một trong hai bên. Mỗi bên phải sở hữu các ô của mình và đủ tiền.
 - **Lô có nhà trade được, nhà đi theo đất**; lô thế chấp đi kèm trạng thái thế chấp (không phí).
+- `loan {to, amount, rate}` / `loananswer {accept}`: **vay tiền**. Người vay xin `to` (người cho vay) `amount` (bội của 10tr, ≤ tiền người cho vay) với `rate` 10 hoặc 20 (%). Người cho vay đồng ý thì tiền chuyển ngay và tạo `Loan {lender, borrower, amount, rate, owed, left: 5}`; mỗi lần **người vay bắt đầu lượt** `left` giảm 1, về 0 thì tự trừ `owed` = gốc + lãi (không đủ tiền → thành nợ `debt` với chủ nợ là người cho vay: bán nhà / thế chấp hoặc phá sản). Tối đa 2 khoản vay mỗi người; không có lời mời trade và vay cùng lúc; hết hạn như trade (30 s). Giá trị ròng (`netWorth`) cộng khoản cho vay và trừ khoản đang nợ. Người phá sản thì các khoản vay liên quan bị xoá.
 - `tradeanswer {accept}`: người nhận chấp nhận (kiểm tra lại cả hai bên; sai → huỷ trade và lỗi) hoặc từ chối; người đề nghị gửi `accept: false` để rút. Hết hạn sau `TRADE_MS` = 30 s hoặc ngay khi người nhận offline.
 
 ## Cài đặt phòng
@@ -193,6 +194,8 @@ Cần conn là player; ngoài `start`/`settings`/`kick`/`pick` phải có ván (
 | `mortgage` | `pos` | Lượt mình | Thế chấp | `"Đã thế chấp rồi"`, nhà của mình trong nhóm |
 | `unmortgage` | `pos` | Lượt mình, không nợ | Chuộc | `"Đất này không thế chấp"`, `"Cần …tr để chuộc"`, `"Đang nợ — không chuộc được"` |
 | `trade` | `to, give, get` | Bất kỳ lúc nào | Mở lời mời | `"Đang có một lời mời đổi khác"`, `"Chọn người để đổi"`, `"Giao dịch cần ít nhất một ô đất"`, `"Có ô không thuộc về người đổi"`, `"Không đủ tiền cho giao dịch"` |
+| `loan` | `to, amount, rate` | Bất kỳ lúc nào | Xin vay | `"Đang có một lời mời khác"`, `"Số tiền vay tối thiểu 10tr"`, `"Lãi suất chỉ 10% hoặc 20%"`, `"… không đủ … để cho vay"`, `"Mỗi người chỉ vay tối đa 2 khoản cùng lúc"` |
+| `loananswer` | `accept` | Người cho vay (hoặc người vay với `false`) | Đồng ý / từ chối / rút | `"Không có lời xin vay nào"`, `"Lời xin vay này không dành cho bạn"` |
 | `tradeanswer` | `accept` | Người nhận (hoặc người đề nghị với `false`) | Chấp nhận / từ chối / rút | `"Không có lời mời nào"`, `"Lời mời này không dành cho bạn"` |
 
 `pos` không phải số nguyên → `-1` (→ `"Đây không phải đất của bạn"`).

@@ -93,7 +93,7 @@ const CHEST_SQ: Square = { kind: "chest", name: "Khí vận" };
 const EXTRAS_LARGE: ExtraSquare[] = [
   { side: 0, at: 3, sq: prop("Sóc Trăng", "Chùa Dơi", "brown", 70, 50, [4, 20, 60, 180, 320, 450]) },
   { side: 0, at: 9, sq: CHEST_SQ },
-  { side: 1, at: 4, sq: CHANCE_SQ },
+  { side: 1, at: 4, sq: { kind: "tax", name: "Thuế môi trường", amount: 120 } },
   { side: 1, at: 9, sq: prop("Gia Lai", "Biển Hồ, Pleiku", "orange", 200, 100, [16, 80, 220, 600, 800, 1000]) },
   { side: 2, at: 4, sq: CHEST_SQ },
   { side: 2, at: 9, sq: prop("Sơn La", "Đồi chè Mộc Châu", "yellow", 280, 150, [24, 120, 360, 850, 1025, 1200]) },

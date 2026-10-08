@@ -1,9 +1,9 @@
 import type { ChatMessage, GameRecord, LeaderboardEntry, Reaction } from "../game/protocol";
 import type { MapSize } from "./board";
-import type { Deed, LogEntry, Phase, TradeSide } from "./game";
+import type { Deed, Loan, LoanOffer, LogEntry, Phase, TradeSide } from "./game";
 
 export type { MapSize };
-export type { ChatMessage, Deed, GameRecord, LeaderboardEntry, LogEntry, Phase, Reaction, TradeSide };
+export type { ChatMessage, Deed, GameRecord, Loan, LoanOffer, LeaderboardEntry, LogEntry, Phase, Reaction, TradeSide };
 export { CHAT_MAX_LENGTH, EMOJIS, EMOJI_COOLDOWN_MS, MAX_NAME_LENGTH, PING_INTERVAL_MS } from "../game/protocol";
 
 /** WebSocket endpoint for Cờ Tỷ Phú. */
@@ -100,6 +100,9 @@ export interface TPGameView {
   rollAgain: boolean;
   debt: { amount: number; to: string | null; reason: string } | null;
   trade: { from: string; to: string; give: TradeSide; get: TradeSide; deadline: number } | null;
+  /** Pending request to borrow money, and the loans in force. */
+  loan: LoanOffer | null;
+  loans: Loan[];
   lastCard: { deck: "chance" | "chest"; text: string; player: string; at: number } | null;
   finished: string[];
   endsAt: number | null;
@@ -140,6 +143,8 @@ export interface TPRoomSummary {
  *   { type: "payjail" } · { type: "jailcard" } · { type: "paydebt" } · { type: "bankrupt" }
  *   { type: "build" | "sell" | "mortgage" | "unmortgage", pos }
  *   { type: "trade", to, give: {props, cash}, get: {props, cash} }
+ *   { type: "loan", to, amount, rate: 10 | 20 }  // ask `to` to lend `amount`; repaid + rate% after 5 of your turns
+ *   { type: "loananswer", accept }   // the lender answers; the borrower can withdraw with accept: false
  *   { type: "tradeanswer", accept }   // the receiver answers; the proposer can withdraw with accept: false
  */
 export type TPCommand =
@@ -170,4 +175,6 @@ export type TPCommand =
   | { type: "roll" | "buy" | "skip" | "end" | "payjail" | "jailcard" | "paydebt" | "bankrupt" }
   | { type: "build" | "sell" | "sellland" | "mortgage" | "unmortgage"; pos: number }
   | { type: "trade"; to: string; give: TradeSide; get: TradeSide }
+  | { type: "loan"; to: string; amount: number; rate: number }
+  | { type: "loananswer"; accept: boolean }
   | { type: "tradeanswer"; accept: boolean };
