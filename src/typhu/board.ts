@@ -100,15 +100,30 @@ const EXTRAS_LARGE: ExtraSquare[] = [
   { side: 3, at: 3, sq: prop("Nghệ An", "Biển Cửa Lò", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]) },
   { side: 3, at: 9, sq: CHANCE_SQ },
 ];
+/**
+ * The 56-square map has its own layout (not "large" + more): every side holds exactly one Cơ hội and one Khí vận,
+ * kept well apart, plus one tax square on the sides after Nhà tù and on the bottom side.
+ */
 const EXTRAS_HUGE: ExtraSquare[] = [
-  ...EXTRAS_LARGE,
-  { side: 0, at: 6, sq: { kind: "tax", name: "Thuế bất động sản", amount: 150 } },
+  // Bottom: Cà Mau KV Bạc Liêu Sóc Trăng TX SB Long An Cần Thơ CH Thuế BĐS An Giang Bến Tre Tiền Giang
+  { side: 0, at: 3, sq: prop("Sóc Trăng", "Chùa Dơi", "brown", 70, 50, [4, 20, 60, 180, 320, 450]) },
+  { side: 0, at: 5, sq: prop("Long An", "Đồng Tháp Mười", "lightblue", 110, 50, [7, 35, 95, 285, 425, 575]) },
+  { side: 0, at: 7, sq: { kind: "tax", name: "Thuế bất động sản", amount: 150 } },
   { side: 0, at: 9, sq: prop("Tiền Giang", "Cồn Thới Sơn, Mỹ Tho", "lightblue", 120, 50, [8, 40, 100, 300, 450, 600]) },
+  // Left (after Nhà tù): BR-VT, Điện, Cơ hội, Bình Thuận, Ninh Thuận, Lâm Đồng, Thuế môi trường, SB, Đắk Lắk, KV, Bình Định, Khánh Hòa, Gia Lai
+  { side: 1, at: 2, sq: CHANCE_SQ },
   { side: 1, at: 3, sq: prop("Ninh Thuận", "Tháp Chàm, Vĩnh Hy", "pink", 160, 100, [12, 60, 180, 500, 700, 900]) },
-  { side: 1, at: 7, sq: CHEST_SQ },
+  { side: 1, at: 4, sq: { kind: "tax", name: "Thuế môi trường", amount: 120 } },
+  { side: 1, at: 9, sq: prop("Gia Lai", "Biển Hồ, Pleiku", "orange", 200, 100, [16, 80, 220, 600, 800, 1000]) },
+  // Top: Quảng Nam, CH, Huế, Quảng Bình, Hà Tĩnh, Đà Nẵng, SB, Ninh Bình, Lào Cai, Khí vận, Nước, Quảng Ninh, Sơn La
   { side: 2, at: 3, sq: prop("Quảng Bình", "Động Phong Nha", "red", 240, 150, [20, 100, 300, 750, 925, 1100]) },
-  { side: 2, at: 8, sq: CHANCE_SQ },
-  { side: 3, at: 5, sq: CHEST_SQ },
+  { side: 2, at: 3, sq: prop("Hà Tĩnh", "Chùa Hương Tích", "red", 230, 150, [19, 95, 275, 725, 900, 1075]) },
+  { side: 2, at: 7, sq: CHEST_SQ },
+  { side: 2, at: 9, sq: prop("Sơn La", "Đồi chè Mộc Châu", "yellow", 280, 150, [24, 120, 360, 850, 1025, 1200]) },
+  // Right: Hải Phòng, Thanh Hóa, Khí vận, Nghệ An, Lạng Sơn, Kiên Giang, SB, Cơ hội, Bắc Ninh, Hà Nội, Thuế, HCM, Bình Dương
+  { side: 3, at: 3, sq: prop("Nghệ An", "Biển Cửa Lò", "green", 320, 200, [28, 150, 450, 1000, 1200, 1400]) },
+  { side: 3, at: 3, sq: prop("Lạng Sơn", "Cửa khẩu Hữu Nghị", "green", 310, 200, [27, 140, 420, 950, 1150, 1325]) },
+  { side: 3, at: 6, sq: prop("Bắc Ninh", "Chùa Dâu, quan họ", "yellow", 270, 150, [23, 115, 345, 825, 1000, 1175]) },
   { side: 3, at: 9, sq: prop("Bình Dương", "Thành phố mới", "darkblue", 380, 200, [60, 270, 800, 1800, 2150, 2500]) },
 ];
 

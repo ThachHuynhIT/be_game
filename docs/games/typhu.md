@@ -43,7 +43,7 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 |---|---|---|
 | `std` | 40 | — |
 | `large` | 48 | Sóc Trăng (nâu), Gia Lai (cam), Sơn La (vàng), Nghệ An (xanh lá) + 2 Khí vận, 1 Cơ hội và **Thuế môi trường 120tr** (dãy ngay sau Nhà tù, bên trái bàn). Bản 56 ô kế thừa ô này và thêm Thuế bất động sản 150tr ở dãy dưới |
-| `huge` | 56 | Như `large` + Tiền Giang (xanh nhạt), Ninh Thuận (hồng), Quảng Bình (đỏ), Bình Dương (xanh đậm), thuế bất động sản 150 + 2 Khí vận, 2 Cơ hội |
+| `huge` | 56 | Bố cục riêng (không phải `large` + thêm): mỗi dãy đúng **1 Cơ hội + 1 Khí vận**, đặt cách xa nhau; thêm 12 ô đất (Sóc Trăng, Long An, Tiền Giang, Ninh Thuận, Gia Lai, Quảng Bình, Hà Tĩnh, Sơn La, Nghệ An, Lạng Sơn, Bắc Ninh, Bình Dương) và 2 ô thuế: Thuế môi trường 120 (dãy sau Nhà tù) + Thuế bất động sản 150 (dãy dưới) |
 
 Hệ quả: nhóm màu có thể có 3–4 lô; các ô chuẩn giữ thứ tự tương đối. Lá thẻ `goto` lưu vị trí của **bản đồ chuẩn** và được đổi sang vị trí trên bản đồ lớn bằng cách tìm theo **tên ô** (`applyEffect`), nên không cần dữ liệu thẻ riêng cho từng cỡ. Ván lưu `s.map` (chỉ khi ≠ `"std"`); `view.current.map` và `view.settings.map` báo cho client.
 
