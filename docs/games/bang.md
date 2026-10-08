@@ -110,7 +110,7 @@ flowchart TD
 ```
 
 - `prepareReact`: chỉ với `answer = "missed"` và không `unmissable`; số lần rút! = Thùng Gỗ (nếu không `noGear` và đang có tác dụng) + Giò Đỏ May; mỗi lần ♥ (`effSuit`) giảm `need` 1. Rồi đặt hạn; nếu `!canAnswer` thì chịu đòn ngay (không chờ). Nghĩa là người không có lá phù hợp **không** thấy prompt.
-- `avoided`: `evade` → bỏ cả nhóm (`dropGroup`); Đấu Tay Đôi → đẩy prompt sang người còn lại; Cò Quay Nga → chuyền cho người sống kế tiếp; phát bắn `shot` bị né → Mê-ri Máu rút 1, Súng Nòng Dài tốn 1 đạn bắt người kia bỏ ngẫu nhiên 1 lá, Súng Kíp quay về tay.
+- `avoided`: `evade` → bỏ cả nhóm (`dropGroup`); Đấu Tay Đôi → đẩy prompt sang người còn lại; Cò Quay Nga → chuyền cho người sống kế tiếp (lời nhắc kế tiếp luôn có `need: 1`; đặt 0 làm cả bàn "né" miễn phí và ván treo); phát bắn `shot` bị né → Mê-ri Máu rút 1, Súng Nòng Dài tốn 1 đạn bắt người kia bỏ ngẫu nhiên 1 lá, Súng Kíp quay về tay.
 - `took`: `evade` → không làm gì (hiệu ứng phía sau cứ thế chạy); Đạn Nảy → mất lá bị nhắm; còn lại → `hurt` lên đầu hàng.
 - Khi trả lời bằng Né / Kinh Thánh: rút 1; Cúi Đầu!: nếu thẻ nhân vật còn đạn thì tốn 1 viên và lấy lá về tay; Phản Đòn: xếp phát bắn ngược vào kẻ bắn. Mô-li rút 1 lá cho mỗi lá đánh ngoài lượt.
 

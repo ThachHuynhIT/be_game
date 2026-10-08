@@ -39,6 +39,8 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/oanquan/leaderboard": { game: "oanquan", kind: "leaderboard" },
 };
 
+const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
+
 export function createGameServer(): Server {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
@@ -75,7 +77,20 @@ export function createGameServer(): Server {
     wss.handleUpgrade(req, socket, head, (ws) => attachConnection(ws, { deadline, game: route.game }));
   });
 
+  SOCKET_SERVERS.set(server, wss);
   return server;
+}
+
+/**
+ * Graceful stop for self-hosted runs: refuse new connections and close every
+ * WebSocket with 1001 ("going away") so clients reconnect instead of timing out.
+ * Resolves once all connections have ended; callers should add their own deadline.
+ */
+export function shutdownGameServer(server: Server): Promise<void> {
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  server.closeIdleConnections();
+  for (const client of SOCKET_SERVERS.get(server)?.clients ?? []) client.close(1001, "server restarting");
+  return closed;
 }
 
 const pathOf = (req: IncomingMessage) => new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/$/, "") || "/";

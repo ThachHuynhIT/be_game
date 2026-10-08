@@ -51,7 +51,7 @@ Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, 
 | `src/server/app.ts` | `http.Server` dùng chung cho cả Vercel lẫn chạy local, kèm bảng route |
 | `api/*.ts`, `api/[game]/[kind].ts` | Các Vercel Function (xem trên) |
 | `src/local.ts` | Server chạy local / tự host |
-| `test/` | vitest: luật chơi từng game, phòng, hub (gồm cả giả lập 2 instance), kiểm tra origin |
+| `test/` | vitest: luật chơi từng game, phòng, hub (gồm cả giả lập 2 instance), kiểm tra origin, và `fuzz-<game>.test.ts` (chơi ngẫu nhiên có seed để bắt kẹt ván / mất bài / lộ thông tin) |
 
 ## Đấu Súng (`src/bang/`)
 
@@ -97,6 +97,33 @@ Region đã được đặt là `sin1` trong `vercel.json`.
 - Mỗi kết nối WebSocket chỉ sống bằng thời gian tối đa của function, trên gói Hobby là **300 giây**. Khoảng 25 giây trước khi hết hạn, server gửi `{type:"reconnect"}`; client mở kết nối mới rồi mới đóng kết nối cũ, nên người chơi không bị văng.
 - Phải có Redis. Người chơi trong cùng một phòng có thể nằm trên những instance khác nhau, và store trong RAM chỉ dùng được khi chạy một tiến trình duy nhất (chạy local / tự host).
 - WebSocket trên Vercel vẫn đang **Beta**.
+
+## Tự host (VPS, Docker Compose)
+
+Chạy backend trên server riêng thay cho Vercel: `docker-compose.yml` dựng ba service — `be_game` (`src/local.ts`), `redis` (bật AOF, volume `redis-data`) và `caddy` (HTTPS tự động, proxy cả WebSocket). Chỉ Caddy mở cổng 80/443; Redis và be_game nằm trong mạng nội bộ Docker.
+
+1. Trỏ DNS (A/AAAA) của một tên miền, ví dụ `game.example.com`, về IP server; mở firewall cổng 80, 443 (TCP) và 443 (UDP).
+2. Trên server: `git clone` repo, `cp .env.example .env`, rồi điền `GAME_DOMAIN=game.example.com` và `ALLOWED_ORIGIN=https://<domain-portfolio>` (không để `*.vercel.app` nếu không cần).
+3. `docker compose up -d --build`.
+4. Kiểm tra `https://game.example.com/api/health` — mong đợi `"ok": true`, `"store": "redis"` (`region` hiển thị `local`).
+5. Ở project **portfolio** trên Vercel đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=https://game.example.com` rồi redeploy (biến này gắn lúc build). Giữ bản Vercel chạy song song tới khi kiểm tra xong rồi mới tắt.
+
+Ghi chú vận hành:
+- Cập nhật: `git pull && docker compose up -d --build`. `SIGTERM` làm server đóng gọn: ngừng nhận kết nối mới và đóng mọi WebSocket bằng mã 1001, client tự kết nối lại (tối đa 10 giây chờ).
+- Phòng và bảng xếp hạng nằm trong volume `redis-data`; hãy sao lưu volume này. Không có Redis thì store RAM mất hết khi restart.
+- Không còn giới hạn 300 giây của Vercel nên server không gửi `reconnect` định kỳ.
+- Dùng nginx thay Caddy thì cần `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` và `proxy_read_timeout` dài (ví dụ 3600s), nếu không WebSocket bị cắt sau 60 giây.
+- Chạy nhiều bản `be_game` vẫn đúng vì trạng thái phòng dùng chung qua Redis.
+
+### Tự động deploy (CD qua SSH)
+
+`.github/workflows/deploy.yml` chạy sau khi CI trên `main` pass (hoặc bấm tay: Actions → Deploy → Run workflow): SSH vào server, `git reset --hard origin/main`, `docker compose up -d --build`, rồi gọi `/api/health`. Workflow chỉ có hiệu lực khi file đã nằm trên `main`.
+
+Chuẩn bị một lần:
+1. Trên server: clone repo vào một thư mục (ví dụ `/opt/be_game`), tạo `.env` như mục trên và chạy thử `docker compose up -d --build`. Tạo user deploy riêng, thuộc nhóm `docker`, có quyền ghi thư mục đó.
+2. Tạo cặp khoá riêng cho deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""` (đừng commit); thêm `deploy_key.pub` vào `~/.ssh/authorized_keys` của user deploy.
+3. Lấy host key để ghim: `ssh-keyscan -p 22 <host>`.
+4. GitHub → Settings → Environments → tạo `production` (có thể bật Required reviewers để duyệt trước mỗi lần deploy) và đặt các **secret**: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); và **variable** `GAME_DOMAIN` (để kiểm tra health sau deploy).
 
 ## Giao thức
 

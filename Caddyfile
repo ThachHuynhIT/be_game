@@ -1,0 +1,6 @@
+# {$GAME_DOMAIN} comes from the caddy service environment (docker-compose.yml), e.g. game.example.com.
+# DNS A/AAAA record must point at this server; Caddy then obtains and renews the certificate itself.
+# WebSocket upgrades (wss://<domain>/api/*/ws) are proxied automatically, with no idle timeout.
+{$GAME_DOMAIN} {
+	reverse_proxy be_game:4000
+}
