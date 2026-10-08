@@ -1,0 +1,45 @@
+# be_game + Redis + Caddy (automatic HTTPS, WebSocket-aware reverse proxy).
+#   cp .env.example .env   # set GAME_DOMAIN and ALLOWED_ORIGIN
+#   docker compose up -d --build
+# Only Caddy publishes ports (80/443); Redis and be_game stay on the internal network.
+services:
+  be_game:
+    build: .
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    environment:
+      REDIS_URL: redis://redis:6379
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+    depends_on:
+      - redis
+    expose:
+      - "4000"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      GAME_DOMAIN: ${GAME_DOMAIN:?set GAME_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - be_game
+
+volumes:
+  redis-data:
+  caddy-data:
+  caddy-config:

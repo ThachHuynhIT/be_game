@@ -98,6 +98,23 @@ Region đã được đặt là `sin1` trong `vercel.json`.
 - Phải có Redis. Người chơi trong cùng một phòng có thể nằm trên những instance khác nhau, và store trong RAM chỉ dùng được khi chạy một tiến trình duy nhất (chạy local / tự host).
 - WebSocket trên Vercel vẫn đang **Beta**.
 
+## Tự host (VPS, Docker Compose)
+
+Chạy backend trên server riêng thay cho Vercel: `docker-compose.yml` dựng ba service — `be_game` (`src/local.ts`), `redis` (bật AOF, volume `redis-data`) và `caddy` (HTTPS tự động, proxy cả WebSocket). Chỉ Caddy mở cổng 80/443; Redis và be_game nằm trong mạng nội bộ Docker.
+
+1. Trỏ DNS (A/AAAA) của một tên miền, ví dụ `game.example.com`, về IP server; mở firewall cổng 80, 443 (TCP) và 443 (UDP).
+2. Trên server: `git clone` repo, `cp .env.example .env`, rồi điền `GAME_DOMAIN=game.example.com` và `ALLOWED_ORIGIN=https://<domain-portfolio>` (không để `*.vercel.app` nếu không cần).
+3. `docker compose up -d --build`.
+4. Kiểm tra `https://game.example.com/api/health` — mong đợi `"ok": true`, `"store": "redis"` (`region` hiển thị `local`).
+5. Ở project **portfolio** trên Vercel đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=https://game.example.com` rồi redeploy (biến này gắn lúc build). Giữ bản Vercel chạy song song tới khi kiểm tra xong rồi mới tắt.
+
+Ghi chú vận hành:
+- Cập nhật: `git pull && docker compose up -d --build`. `SIGTERM` làm server đóng gọn: ngừng nhận kết nối mới và đóng mọi WebSocket bằng mã 1001, client tự kết nối lại (tối đa 10 giây chờ).
+- Phòng và bảng xếp hạng nằm trong volume `redis-data`; hãy sao lưu volume này. Không có Redis thì store RAM mất hết khi restart.
+- Không còn giới hạn 300 giây của Vercel nên server không gửi `reconnect` định kỳ.
+- Dùng nginx thay Caddy thì cần `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` và `proxy_read_timeout` dài (ví dụ 3600s), nếu không WebSocket bị cắt sau 60 giây.
+- Chạy nhiều bản `be_game` vẫn đúng vì trạng thái phòng dùng chung qua Redis.
+
 ## Giao thức
 
 Client → server (mọi message trừ `ping` đều có `id` và được server trả `ack`):
