@@ -130,6 +130,8 @@ Mọi message là JSON text, tối đa `MAX_MESSAGE_BYTES` = 16 KB (lớn hơn b
 | `create` | `id` | Tạo phòng mới (chưa vào). Ack `{ok:true, code}` |
 | `join` | `id, code, name, token` | Vào ghế / gắn lại ghế. `code` được `toUpperCase().slice(0, 8)`. Đổi phòng thì rời phòng cũ trên hub |
 | `watch` | `id, code, name, token` | Vào làm khán giả (`role = "spectator"`) |
+| `join` / `watch` kèm `look` | `look: {icon, color}` (tuỳ chọn) | Icon + màu người chơi chọn ở thanh games (xem "Icon và màu người chơi" bên dưới) |
+| `look` | `id, look` | Đổi icon / màu **ngay tại bàn** (kể cả khán giả); không qua cooldown. Ack `{ok:false, error:"Biểu tượng/màu không hợp lệ"}` nếu `look` sai |
 | `leave` | `id` | Rời phòng; conn quay về trạng thái chưa vào |
 | `emoji` | `id, emoji` | Cooldown `EMOJI_COOLDOWN_MS` = 1200 ms / kết nối |
 | `chat` | `id, text` | Cooldown `CHAT_COOLDOWN_MS` = 600 ms / kết nối |
@@ -148,6 +150,14 @@ Mọi message là JSON text, tối đa `MAX_MESSAGE_BYTES` = 16 KB (lớn hơn b
 ```
 
 Lỗi chung từ hub: `"Không tìm thấy phòng"` (code không tồn tại / phòng hết hạn), `"Bạn chưa vào phòng"` (lệnh trước khi join/watch), `"Chậm lại một chút"` (cooldown emoji/chat), `"Khán giả không thể thao tác"`. Exception trong handler → ack `{ok:false, error: err.message}` (hoặc `"Lỗi máy chủ"`). Lỗi chung từ `join`/`watch`: `"Phiên không hợp lệ"` (token sai độ dài), `"Bạn đã bị chủ phòng mời ra khỏi ván này"` (token đã bị kick), `"Phòng đã đủ N người"`, `"Phòng đã đủ khán giả"`.
+
+### Icon và màu người chơi (`look`)
+
+Làm **một lần ở hub**, áp dụng cho cả 7 game (adapter không biết tới nó):
+- `cleanLook(raw)` (`src/server/hub.ts`) chỉ nhận `color` dạng `#rrggbb` (chuyển chữ thường) và `icon` tối đa 4 ký tự (hoặc rỗng = dùng chữ cái đầu của tên); sai → bỏ qua.
+- `setLook(room, token, look)` lưu `room.looks[token]` (khoá theo **token bí mật**, và dọn các token đã rời phòng) ngay trong cùng `mutate` với `join`/`watch`, hoặc với message `look`.
+- Khi gửi view, hub (`refresh`) thêm `looks: { [tên]: {icon, color} }` — **khoá theo tên**, không bao giờ lộ token — vào mọi view dạng object. Client đọc bằng `useLookOf(name)` / `SeatAvatar`.
+- Phòng cũ không có `looks`: view chỉ đơn giản không có trường này.
 
 ### Rate limit, deadline, reconnect
 
@@ -253,8 +263,9 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 
 ## Test
 
-- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 13 file / 255 test, chạy ~2 s.
-- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời; `origin` — `isAllowedOrigin`).
+- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 21 file / khoảng 340 test, chạy vài giây.
+- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`).
+- **Fuzz test** (`test/fuzz-<game>.test.ts`, mỗi game một file; Bang và Ô Ăn Quan còn có thêm test ngẫu nhiên riêng): chơi ngẫu nhiên có seed với 2…N người, gồm cả **lệnh rác** và lệnh bất hợp lệ lấy từ view hiện tại, hết giờ (`tick`), người vắng mặt, kick, rời bàn. Kiểm tra bất biến: không exception, ván luôn kết thúc, bảo toàn bài / quân / tiền, state JSON round-trip bằng nhau, lệnh bị từ chối **không** làm đổi state, view không lộ token hay bài ẩn của người khác. Chạy mặc định vài seed (dưới ~5 s mỗi file); tăng bằng biến môi trường `FUZZ_SEEDS` (Mèo Nổ, Tiến Lên) khi cần soi kỹ. Khi thêm luật mới nên chạy lại fuzz của game đó.
 - **Quy ước**:
   - Thời gian là tham số: dùng hằng `T = 1_000_000` (hoặc `T0`) và truyền `T + n` — không dùng fake timer.
   - Ngẫu nhiên được inject: mọi `newXxxGame(..., random)`, `shuffle(items, random)`, `rollDice(..., random)`, `tickGame(..., random)` nhận `() => number`. Test dùng `() => 0` để cố định, hoặc helper `dice(...faces)` (typhu: `() => ((q.shift() ?? 1) − 1) / 6 + 0.01`).
@@ -314,3 +325,11 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 - **Mã phòng**: `randomCode()` 5 ký tự từ `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (không I, O, 0, 1); server nhận tối đa 8 ký tự, viết hoa.
 - **Dedupe leaderboard theo `record.id = code-gameSeq-at`** trong 30 ngày (`at` = lúc ván kết thúc), nên mã phòng được tạo lại sau khi hết hạn vẫn ghi đủ ván. Memory store giữ `recorded` mãi trong process.
 - `MAX_RANK_POINTS` được khai báo hai lần (`src/game/scoring.ts` và `src/game/room.ts`, cùng 20); `updateSettings` của Tiến Lên tự kiểm tra thay vì gọi `checkRankPoints`.
+
+### Lỗi đã bắt bằng fuzz (để biết loại bẫy cần tránh)
+
+- **Đấu Súng**: Cò Quay Nga (Roulette) để `need: 0` ở lời nhắc kế tiếp nên mọi người "né" miễn phí và ván treo (không `deadline`) → luôn đặt lại `need: 1` khi chuyển lời nhắc. Người bị kick lúc đang chọn nhân vật không được chia bài khi `begin()`. Người chơi "hồn ma" mất thẻ phải bỏ hết bài + đồ vào chồng bỏ và giải quyết các lời nhắc đang chờ họ.
+- **Mèo Nổ**: `mplay [x, x]` (trùng id lá bài) làm `takeFromHand` trả `null` → từ chối trùng id. Kick người đang có lượt khi lời mời Dọn rác / Góp nồi / Nuôi xác sống mở: `eliminate` phải chuyển lượt. `playerRange` kẹp theo `maxPlayers(packs)` (preset `zombiechaos` tối đa 6). `kickMeo` gọi `syncCurse` ngay sau forfeit.
+- **Cờ Tỷ Phú**: chủ nợ phá sản / bị kick giữa lúc con nợ đang `debt` → nợ chuyển về ngân hàng, không để tiền vào ghế đã phá sản.
+- **Điểm hạng**: `-second` ra `-0` khi Nhì = 0 làm room khác bản JSON round-trip → dùng `0 - x`.
+- Chung: mọi trạng thái phải là JSON thuần và `JSON.parse(JSON.stringify(state))` phải bằng chính nó (kể cả `-0`, `undefined`, `NaN`).

@@ -1,5 +1,5 @@
 # Cờ Tỷ Phú (`typhu`)
-> Kiểu Monopoly với địa danh Việt Nam (tiền tính bằng "tr"), house rules tuỳ chỉnh · 2–6 người · frontend `/co-ty-phu` · WS `/api/typhu/ws`, `/api/typhu/rooms`, `/api/typhu/leaderboard`
+> Kiểu Monopoly với các tỉnh thành Việt Nam (tiền tính bằng "tr"), house rules tuỳ chỉnh, 3 cỡ bản đồ (40 / 48 / 56 ô) · 2–6 người · frontend `/co-ty-phu` · WS `/api/typhu/ws`, `/api/typhu/rooms`, `/api/typhu/leaderboard`
 
 Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../GUIDE.md).
 
@@ -7,10 +7,10 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 
 | File | Vai trò |
 |---|---|
-| `src/typhu/board.ts` | `BOARD` (40 ô), `Square`/`Ownable`/`Group`, hằng (`JAIL_POS`, `GO_SALARY`, `JAIL_FINE`, `AIR_RENT`, `UTIL_MULT`, `MAX_HOUSES`), `CHANCE`/`CHEST` (16 + 16 lá), helper giá (`PriceRules`, `houseCost`, `houseRefund`, `builtCost`, `builtRefund`, `mortgageValue`, `unmortgageCost`, `landSaleValue`), option settings. **Chép nguyên văn** sang portfolio `src/lib/typhu/board.ts` — không import gì |
-| `src/typhu/game.ts` | Máy trạng thái: `TPState`, `TPRules`, `DEFAULT_TP_RULES`, `rulesOf`, `newTPGame`, lệnh (`rollDice`, `buySquare`, `skipBuy`, `endTurn`, `payJail`, `payDebt`, `declareBankrupt`, `build`, `sellHouse`, `sellLand`, `mortgage`, `unmortgage`, `proposeTrade`, `answerTrade`, `forfeitPlayer`), `buildBlocker`/`sellBlocker`/`sellLandBlocker`, `rentFor`, `netWorth`, `landSalePrice`, `tickGame`, `nextGameTickAt` |
-| `src/typhu/room.ts` | Phòng: `newTPRoom`, `joinTP`, `tpHeartbeat`, `leaveTP`, `tpCommand`, `tickTP`, `nextTPTickAt`, `tpView` (gồm `manage`), `tpSummary`, `isTPActive`, `tpSettingsOf`, `DEFAULT_TP_SETTINGS`, `STEP_SECONDS_OPTIONS` |
-| `src/typhu/protocol.ts` | `TYPHU_WS_PATH`, `TPSettings`, `TPRoomView`, `TPGameView`, `TPPlayerView`, `TPSeatView`, `TPRoomSummary`, `TPCommand`. Bản chỉnh tay ở portfolio (tự khai báo `Phase`, `Deed`, `TradeSide`, `LogEntry`) |
+| `src/typhu/board.ts` | `BOARD` (bản đồ chuẩn 40 ô) và các bản đồ lớn (`MapSize`, `MAP_SIZES`, `MAP_LABEL`, `BOARDS`, `boardOf(map)`, `jailPos(board)`), `Square`/`Ownable`/`Group`, hằng (`JAIL_POS`, `GO_SALARY`, `JAIL_FINE`, `AIR_RENT`, `UTIL_MULT`, `MAX_HOUSES`), `CHANCE` (31 lá) / `CHEST` (32 lá), `groupPositions(group, board)`, helper giá (`PriceRules`, `houseCost`, `houseRefund`, `builtCost`, `builtRefund`, `mortgageValue`, `unmortgageCost`, `landSaleValue`), option settings. **Chép nguyên văn** sang portfolio `src/lib/typhu/board.ts` — không import gì |
+| `src/typhu/game.ts` | Máy trạng thái (mọi hàm đọc bản đồ qua `B(s)` = `boardOf(s.map)`): `TPState`, `TPRules`, `DEFAULT_TP_RULES`, `rulesOf`, `newTPGame`, lệnh (`rollDice`, `buySquare`, `skipBuy`, `endTurn`, `payJail`, `payDebt`, `declareBankrupt`, `build`, `sellHouse`, `sellLand`, `mortgage`, `unmortgage`, `proposeTrade`, `answerTrade`, `forfeitPlayer`), `buildBlocker`/`sellBlocker`/`sellLandBlocker`, `rentFor`, `netWorth`, `landSalePrice`, `tickGame`, `nextGameTickAt` |
+| `src/typhu/room.ts` | Phòng: `newTPRoom`, `joinTP`, `tpHeartbeat`, `leaveTP`, `tpCommand`, `tickTP`, `nextTPTickAt`, `tpView` (gồm `manage`), `pieceOf`, `ensureUniquePieces`, `tpSummary`, `isTPActive`, `tpSettingsOf`, `DEFAULT_TP_SETTINGS`, `STEP_SECONDS_OPTIONS` |
+| `src/typhu/protocol.ts` | `TYPHU_WS_PATH`, `TPSettings`, `TPRoomView`, `TPGameView`, `TPPlayerView`, `TPSeatView`, `TPPiece`, `DEFAULT_PIECES`, `PIECE_EMOJIS`, `PIECE_COLORS`, `TPRoomSummary`, `TPCommand`. Bản chỉnh tay ở portfolio (tự khai báo `Phase`, `Deed`, `TradeSide`, `LogEntry`) |
 | `src/server/adapters.ts` | `typhuAdapter` |
 
 ## Luật chơi (như code đang chạy)
@@ -18,9 +18,34 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 ### Bàn cờ (`BOARD`, 40 ô, `BOARD_SIZE`)
 
 - 0 `go` Khởi hành · 10 `jail` Nhà tù (`JAIL_POS`) · 20 `parking` Nghỉ chân · 30 `gotojail` Vào tù.
-- 22 `prop` thành phố trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn).
+- 22 `prop` trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn). **Mọi ô đất là một tỉnh hoặc thành phố trực thuộc trung ương** (bộ 63 tỉnh thành quen thuộc; `name` là tên tỉnh, `region` là điểm nổi tiếng):
+
+| Nhóm | Các ô (theo thứ tự đi) |
+|---|---|
+| `brown` | Cà Mau, Bạc Liêu |
+| `lightblue` | Cần Thơ, An Giang, Bến Tre |
+| `pink` | Bà Rịa-Vũng Tàu, Bình Thuận, Lâm Đồng |
+| `orange` | Đắk Lắk, Bình Định, Khánh Hòa |
+| `red` | Quảng Nam, Thừa Thiên Huế, Đà Nẵng |
+| `yellow` | Ninh Bình, Lào Cai, Quảng Ninh |
+| `green` | Hải Phòng, Thanh Hóa, Kiên Giang |
+| `darkblue` | Hà Nội, TP. Hồ Chí Minh |
+
 - 4 `air` sân bay (5, 15, 25, 35; giá 200), 2 `util` (12 Điện lực, 28 Nước; giá 150), `tax` (4: 200, 38: 100), `chance` (7, 22, 36), `chest` (2, 17, 33).
 - Không đấu giá: ô không mua thì ở lại với ngân hàng. Nhà không giới hạn số lượng. Chỉ xây/bán/thế chấp **trong lượt mình**.
+- Tiền thuê Hà Nội / TP.HCM đã được nâng (50…2200 và 70…2800) vì giá mua quá cao so với tiền thu được.
+
+### Cỡ bản đồ (`MapSize`, setting `map`)
+
+`boardOf(map)` trả về bản đồ của ván (thiếu `map` = `"std"`, nên ván cũ vẫn chạy). Bản đồ lớn **chèn thêm ô vào giữa mỗi cạnh**, bốn góc giữ nguyên (`jailPos(board)` tìm ô tù; ô tù luôn ở `n/4`):
+
+| `map` | Số ô | Ô thêm |
+|---|---|---|
+| `std` | 40 | — |
+| `large` | 48 | Sóc Trăng (nâu), Gia Lai (cam), Sơn La (vàng), Nghệ An (xanh lá) + 2 Khí vận, 2 Cơ hội |
+| `huge` | 56 | Như `large` + Tiền Giang (xanh nhạt), Ninh Thuận (hồng), Quảng Bình (đỏ), Bình Dương (xanh đậm), thuế bất động sản 150 + 2 Khí vận, 2 Cơ hội |
+
+Hệ quả: nhóm màu có thể có 3–4 lô; các ô chuẩn giữ thứ tự tương đối. Lá thẻ `goto` lưu vị trí của **bản đồ chuẩn** và được đổi sang vị trí trên bản đồ lớn bằng cách tìm theo **tên ô** (`applyEffect`), nên không cần dữ liệu thẻ riêng cho từng cỡ. Ván lưu `s.map` (chỉ khi ≠ `"std"`); `view.current.map` và `view.settings.map` báo cho client.
 
 ### Lượt (phase `roll` → (`buy` | `debt`) → `end`)
 
@@ -36,24 +61,28 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 - Sau khi giải quyết xong: phase `roll` nếu `rollAgain`, ngược lại `end`. `end` → lệnh `end` chuyển lượt (`nextTurn`: người kế tiếp chưa phá sản, reset `doubles`, `rollAgain`, `dice`, `debt`).
 - `payJail` (phase `roll`, đang ở tù): `payjail` trả 50 hoặc `jailcard` dùng thẻ → ra tù, đặt lại deadline; sau đó vẫn phải `roll`.
 
-### Thẻ (`CHANCE` 16, `CHEST` 16)
+### Thẻ (`CHANCE` 31, `CHEST` 32)
 
-Mỗi bộ là mảng chỉ số đã xáo (`s.chance`, `s.chest`); rút lá đầu, đặt xuống cuối. Thẻ ra tù (`jailcard`) được giữ (`ps.jailCards`) và **ra khỏi bộ** cho tới khi dùng hoặc chủ phá sản. Hiệu ứng (`CardEffect`): `money` (âm → trả ngân hàng), `goto` (có thể qua Khởi hành), `back` 3 ô, `jail`, `jailcard`, `repairs` (`house`/nhà, `hotel`/khách sạn), `each` (dương: mọi người khác trả bạn — sinh nhật 10tr; âm: bạn trả mọi người khác — 50tr mỗi người), `nearest` (`air` ×2 tiền thuê / `util` tung lại ×10).
+Mỗi bộ là mảng chỉ số đã xáo (`s.chance`, `s.chest`); rút lá đầu, đặt xuống cuối. Thẻ ra tù (`jailcard`) được giữ (`ps.jailCards`) và **ra khỏi bộ** cho tới khi dùng hoặc chủ phá sản. Hiệu ứng (`CardEffect`):
+- `money` (âm → trả ngân hàng), `goto` (có thể qua Khởi hành; vị trí tính theo bản đồ chuẩn, xem trên), `back` n ô, `jail`, `jailcard`.
+- `repairs` (`house`/nhà, `hotel`/khách sạn), `each` (dương: mọi người khác trả bạn; âm: bạn trả mọi người khác), `nearest` (`air` ×2 tiền thuê / `util` tung lại ×10).
+- Mới: `forward` (tiến n ô rồi giải quyết ô đến), `rollagain` (được tung thêm một lượt, đặt `rollAgain`), `perprop` (± số tiền cho **mỗi ô đất đang sở hữu**), `nearestfree` (đi tới ô đất chưa ai mua gần nhất và được quyền mua), `poorest` (trả cho người **ít tiền nhất** còn trong ván), `richest` (người **nhiều tiền nhất** chia cho bạn).
+- Chỉ **thêm cuối mảng** `CHANCE`/`CHEST`: bộ bài trong state lưu chỉ số, nên ván đang chơi không bị lệch.
 
 ### Tiền: trả, nợ, phá sản
 
 - `charge(payer, amount, to | null, reason, split?)`: đủ tiền → trả ngay; thiếu → mở `debt {amount, to, split?, reason, thenMove?}`, phase `debt` (deadline `DEBT_MS` = 60 s). Chỉ áp dụng cho người đang đi lượt.
 - Tiền trả cho ngân hàng (thuế, phạt, thẻ âm, sửa nhà, phạt ra tù) vào quỹ `pot` khi bật `parkingPot`; tiền trả cho người (`to`) hoặc chia đều (`split`, "khao mọi người") thì không.
 - Trong `debt`: bán nhà (`sell`), thế chấp (`mortgage`), bán đất (`sellland`), trade… rồi `paydebt`; hoặc `bankrupt`. Không được `build`/`unmortgage` khi nợ. **Tự trả**: sau `sell`, `mortgage` hoặc `sellland` thành công mà tiền ≥ nợ → `tpCommand` gọi `payDebt` luôn.
-- **Tự thanh lý** (`autoLiquidate`, khi hết giờ nợ, hoặc người **không đi lượt** phải trả tiền sinh nhật): bán nhà từ lô nhiều nhà nhất, từng căn (`houseRefund`), rồi thế chấp lô rẻ nhất trước, tới khi đủ hoặc hết tài sản. Vẫn thiếu → phá sản (sinh nhật: phá sản cho người được mừng).
+- **Tự thanh lý** (`autoLiquidate`, khi hết giờ nợ, hoặc người **không đi lượt** phải trả tiền sinh nhật): bán nhà từ lô nhiều nhà nhất, từng căn (`houseRefund`), rồi thế chấp lô rẻ nhất trước, tới khi đủ hoặc hết tài sản. Mỗi lần bán nhà / thế chấp có một dòng log riêng kèm số tiền thu. Vẫn thiếu → phá sản (sinh nhật: phá sản cho người được mừng).
 - **Phá sản** (`bankrupt(id, creditor)`): nhà bán lại `builtRefund` (cộng vào tiền mặt), rồi:
   - `bankruptTo = "creditor"` và chủ nợ là người chơi còn sống → **mọi đất** (giữ trạng thái thế chấp) về chủ nợ.
   - Ngược lại → đất bị xoá khỏi `deeds` (trở lại ngân hàng, ai cũng mua lại được).
-  - Tiền mặt còn lại về chủ nợ nếu là người chơi (kể cả luật `bank`), không thì mất. Thẻ ra tù trả về bộ. Trade liên quan bị huỷ. Còn ≤1 người → kết thúc; nếu đang là lượt người đó → chuyển lượt.
+  - Tiền mặt còn lại về chủ nợ nếu là người chơi (kể cả luật `bank`), không thì mất. Thẻ ra tù trả về bộ. Trade liên quan bị huỷ. Nếu chủ nợ của một khoản nợ đang mở chính là người phá sản / bị kick (`forfeitPlayer`), khoản nợ đó chuyển về **ngân hàng** (`debt.to = null`) — nếu không, tiền trả sẽ rơi vào ghế đã phá sản. Còn ≤1 người → kết thúc; nếu đang là lượt người đó → chuyển lượt.
 
 ### Xây nhà (`build`, `buildBlocker`)
 
-Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → là của mình → `needGroup` thì phải đủ nhóm (`"Cần sở hữu cả nhóm màu mới được xây"`) → không lô nào **của mình** trong nhóm đang thế chấp → chưa có khách sạn (`MAX_HOUSES = 5`) → luật xây → đủ tiền `houseCost(level)`.
+Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → là của mình → `needGroup` thì phải đủ nhóm (`"Cần sở hữu cả nhóm màu mới được xây"`) → không lô nào **của mình** trong nhóm đang thế chấp → chưa có khách sạn (`MAX_HOUSES = 5`) → luật xây → **giới hạn 3 nhà khi chưa đủ nhóm** (`needGroup = false` và không sở hữu cả nhóm: `"Chưa đủ nhóm màu: tối đa 3 nhà, nhà 4 / khách sạn cần sở hữu cả nhóm"`; kiểm tra sau luật xây) → đủ tiền `houseCost(level)`.
 - `buildRule = "even"`: lô đang xây không được nhiều nhà hơn lô ít nhất trong nhóm (`"Phải xây đều các ô trong nhóm"`). Lô không thuộc mình tính 0 nhà.
 - `buildRule = "chain"` (`chainAllows`, xét nhóm sau khi xây): nhà 2 cần ≥2 lô có ≥1 nhà; nhà 3 cần ≥2 lô có ≥2 nhà; nhà 4 cần **mọi** lô ≥3; khách sạn cần mọi lô ≥4.
 - Bán nhà (`sellBlocker`): `even` → phải bán từ lô nhiều nhà nhất; `chain` → sau khi bán mọi lô vẫn thoả `chainAllows`. Tiền nhận `houseRefund(level hiện tại)`.
@@ -62,7 +91,7 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 
 - `mortgage`: nhận `mortgageValue = price / 2`. Chỉ bị chặn bởi **nhà của chính mình** trong nhóm (`"Bán hết nhà trong nhóm trước khi thế chấp"`); nhà của người khác cùng màu không chặn. Được làm cả khi nợ.
 - `unmortgage`: trả `unmortgageCost`, không làm được khi nợ.
-- `sellland` (khi `sellLand` bật): đất không thế chấp, nhóm không còn nhà của mình → nhận `landSaleValue`, đất về ngân hàng.
+- `sellland` (khi `sellLand` bật): nhóm không còn nhà của mình → đất về ngân hàng. **Đất đang thế chấp bán được**: nhận `max(0, landSaleValue − mortgageValue)` (phần chênh, vì tiền thế chấp đã nhận trước đó); đất không thế chấp nhận `landSaleValue`. `landSalePrice(s, pos)` đã trừ sẵn phần này và là số `manage[pos].landPrice` gửi cho client.
 
 ### Helper giá (`board.ts`, `PriceRules = {risingCost?, unmortgageFee?, landSalePct?}`, thiếu = mặc định)
 
@@ -93,6 +122,7 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 | `timeLimit` | `TIME_LIMIT_OPTIONS` 0/20/30/45/60 phút (0 = không giới hạn) | 30 | Hết giờ → người giàu nhất (`netWorth`) thắng | `"Thời gian không hợp lệ"` |
 | `stepSeconds` | `STEP_SECONDS_OPTIONS` 15/20/30/45/60 | 30 | Deadline mỗi bước (roll/buy/end) | `"Thời gian mỗi bước không hợp lệ"` |
 | `doubleGo` | boolean | false | Dừng đúng Khởi hành nhận gấp đôi | — |
+| `map` | `MAP_SIZES`: `"std"`, `"large"`, `"huge"` | `"std"` | Cỡ bản đồ 40 / 48 / 56 ô (chép vào `s.map` lúc `start`) | `"Bản đồ không hợp lệ"` |
 | `parkingPot` | boolean | false | Tiền trả ngân hàng dồn vào quỹ Nghỉ chân | — |
 | `first`, `second` | `checkRankPoints` | 2, 1 | Điểm Nhất/Nhì | `checkRankPoints` |
 | `buildRule` | `"even"` \| `"chain"` | `"even"` | Luật xây | `"Luật xây nhà không hợp lệ"` |
@@ -111,6 +141,7 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 ## State
 
 ```ts
+interface TPPlayer { id; token; name; lastSeen; left?; kicked?; wins; points; games; piece?: { emoji; color } /* quân đã chọn */ }
 interface TPRoom { game: "typhu"; code; hostId; seats: (TPPlayer | null)[6]; current: TPState | null;
   settings: TPSettings; history?; gameSeq?; spectators?; reactions?; chat? }
 interface TPState {
@@ -120,8 +151,8 @@ interface TPState {
   debt: { amount; to: id | null; split?; reason; thenMove? } | null;
   trade: { from; to; give; get; deadline } | null;
   chance: number[]; chest: number[]; lastCard; out: string[] /* thứ tự phá sản */;
-  status: "playing" | "ended"; finished; startedAt; endsAt: number | null; log /* 16 */; logSeq;
-  recorded?; stepMs?; doubleGo?; pot?: number | null; rules?: TPRules;
+  status: "playing" | "ended"; finished; startedAt; endsAt: number | null; log /* LOG_LIMIT = 150 */; logSeq;
+  recorded?; stepMs?; doubleGo?; pot?: number | null; rules?: TPRules; map?: MapSize;
 }
 ```
 
@@ -141,12 +172,13 @@ stateDiagram-v2
 
 ## Lệnh (client → server)
 
-Cần conn là player; ngoài `start`/`settings`/`kick` phải có ván (`"Chưa bắt đầu ván"`) và ghế phải thuộc ván (`"Bạn không chơi ván này"`). Lệnh lượt dùng `myTurn`: `"Ván đã kết thúc"`, `"Chưa đến lượt bạn"`, `"Không thể làm vậy lúc này"` (sai phase). Quản lý tài sản dùng `canManage`: `"Chỉ quản lý tài sản trong lượt của mình"`, `"Đây không phải đất của bạn"`.
+Cần conn là player; ngoài `start`/`settings`/`kick`/`pick` phải có ván (`"Chưa bắt đầu ván"`) và ghế phải thuộc ván (`"Bạn không chơi ván này"`). Lệnh lượt dùng `myTurn`: `"Ván đã kết thúc"`, `"Chưa đến lượt bạn"`, `"Không thể làm vậy lúc này"` (sai phase). Quản lý tài sản dùng `canManage`: `"Chỉ quản lý tài sản trong lượt của mình"`, `"Đây không phải đất của bạn"`.
 
 | `type` | Field | Khi nào | Tác dụng | Lỗi riêng |
 |---|---|---|---|---|
 | `start` | — | Host, giữa ván, ≥2 ghế | Ván mới, mọi ghế hiện có | `"Cần ít nhất 2 người"` |
 | `settings` | xem bảng | Host, giữa ván | | xem bảng |
+| `pick` | `emoji, color` | Bất kỳ lúc nào (kể cả giữa ván), người chơi | Đổi quân cờ và màu nhà. `emoji` thuộc `PIECE_EMOJIS` (12), `color` thuộc `PIECE_COLORS` (8); **không được trùng emoji hoặc màu với người khác** (tính cả quân khởi đầu của ghế chưa chọn) | `"Quân cờ hoặc màu không hợp lệ"`, `"Quân này đã có người dùng"`, `"Màu này đã có người dùng"` |
 | `kick` | `playerId` | Host, mục tiêu offline | Trong ván → `forfeitPlayer` = phá sản cho **ngân hàng** | như mọi game |
 | `roll` | — | Lượt mình, phase `roll` | Tung & đi | |
 | `buy` | — | phase `buy` | Mua ô đang đứng | `"Không đủ tiền (cần …)"`, `"Ô này không mua được"` |
@@ -157,7 +189,7 @@ Cần conn là player; ngoài `start`/`settings`/`kick` phải có ván (`"Chưa
 | `bankrupt` | — | phase `debt` | Tuyên bố phá sản cho `debt.to` | |
 | `build` | `pos` | Lượt mình, không nợ | +1 nhà | `buildBlocker`, `"Đang nợ — không xây được"` |
 | `sell` | `pos` | Lượt mình | −1 nhà | `sellBlocker` |
-| `sellland` | `pos` | Lượt mình | Bán đất cho ngân hàng | `sellLandBlocker` (`"Luật bàn không cho bán đất"`, `"Chuộc lại đất trước khi bán"`, `"Bán hết nhà trong nhóm trước"`) |
+| `sellland` | `pos` | Lượt mình | Bán đất cho ngân hàng | `sellLandBlocker` (`"Luật bàn không cho bán đất"`, `"Bán hết nhà trong nhóm trước"`) |
 | `mortgage` | `pos` | Lượt mình | Thế chấp | `"Đã thế chấp rồi"`, nhà của mình trong nhóm |
 | `unmortgage` | `pos` | Lượt mình, không nợ | Chuộc | `"Đất này không thế chấp"`, `"Cần …tr để chuộc"`, `"Đang nợ — không chuộc được"` |
 | `trade` | `to, give, get` | Bất kỳ lúc nào | Mở lời mời | `"Đang có một lời mời đổi khác"`, `"Chọn người để đổi"`, `"Giao dịch cần ít nhất một ô đất"`, `"Có ô không thuộc về người đổi"`, `"Không đủ tiền cho giao dịch"` |
@@ -172,13 +204,21 @@ Cần conn là player; ngoài `start`/`settings`/`kick` phải có ván (`"Chưa
 | Field | Nội dung |
 |---|---|
 | `game: "typhu"`, `code`, `meId`, `role`, `serverTime` | |
-| `settings` | `tpSettingsOf(room)` (settings **phòng**, không phải `rulesOf` của ván) |
-| `seats[6]` | `id, name, connected, isHost, inGame (có trong ps, kể cả đã phá sản), kicked, points, games, wins, color (= chỉ số ghế)` |
+| `settings` | `tpSettingsOf(room)` (settings **phòng**, không phải `rulesOf` của ván; khi đang chơi thì `map` là bản đồ của ván) |
+| `seats[6]` | `id, name, connected, isHost, inGame (có trong ps, kể cả đã phá sản), kicked, points, games, wins, color (= chỉ số ghế; quân khởi đầu là `DEFAULT_PIECES[color]`), piece ({emoji, color} đang dùng: lựa chọn của người chơi, hoặc quân khởi đầu **không trùng ai**)` |
 | `current.players` | `{id, pos, cash, jail, jailCards (số lượng), bankrupt, netWorth}` |
-| `current.*` | `status, deeds, turn, phase, deadline, dice, rollAgain, debt ({amount, to, reason} — bỏ `split`/`thenMove`), trade, lastCard, finished, endsAt, pot, log` |
+| `current.*` | `status, map?, deeds, turn, phase, deadline, dice, rollAgain, debt ({amount, to, reason} — bỏ `split`/`thenMove`), trade, lastCard, finished, endsAt, pot, log` |
 | `current.manage` | **Chỉ cho người xem đang trong ván**, mỗi lô của họ: `{build, sell, sellLand: string \| null (lý do không được; null = được), landPrice}` từ `buildBlocker`/`sellBlocker`/`sellLandBlocker`/`landSalePrice` — không xét lượt/phase, UI tự kết hợp với `turn`/`phase` |
 
 Summary: `{code, status, players, spectators, games}`.
+
+## Quân cờ và màu nhà (`pick`)
+
+Mỗi ghế có một quân: emoji chạy trên bàn và màu của dấu chủ sở hữu / nhà. Ghế chưa chọn dùng `DEFAULT_PIECES[chỉ số ghế]`; `pieceOf(room, p)` trả quân đang dùng và, nếu quân khởi đầu trùng emoji/màu với quân người khác **đã chọn**, chuyển sang quân khởi đầu kế tiếp còn trống. `ensureUniquePieces` (gọi ở cuối `joinTP`) bảo đảm mọi người khác nhau: ai trùng với ghế đứng trước sẽ được **random** một quân và màu chưa ai dùng (đủ chỗ: 12 quân, 8 màu, tối đa 6 ghế). `pick` kiểm tra trùng với quân đang dùng của người khác nên không thể chọn trùng.
+
+## Nhật ký ván (`log`, `LOG_LIMIT = 150`)
+
+Server giữ **150 dòng cuối** (trước đây 16) và gửi cả mảng trong view; client có panel "Diễn biến" và hộp "Toàn bộ diễn biến". Các dòng chính (emoji đầu dòng để client nhận biết): `🎲` tung xúc xắc, `📍 A đến <ô>` (ghi trước dòng nhận lương qua Khởi hành), `🏷️` mua đất, `🏠 A xây nhà thứ n / khách sạn ở X, trả …tr` (client bắt dòng này để hiện banner "vừa xây"; **giữ nguyên tiền tố `🏠` và chữ "khách sạn"**), bán nhà / khách sạn (kèm cấp bị bán), thế chấp, bán đất ("trừ phần đã thế chấp" nếu có), `🤝` lời mời đổi và `✅` đổi xong (ghi rõ mỗi bên đưa gì, nhận gì), thẻ `❓`/`🎁`, tù, nợ, phá sản.
 
 ## Timer, hết giờ, mất kết nối
 
@@ -205,7 +245,7 @@ Summary: `{code, status, players, spectators, games}`.
 
 ## Test
 
-`test/typhu.test.ts` (40 test): bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
+`test/typhu.test.ts` (khoảng 45 test, thêm: bán đất đang thế chấp, giới hạn 3 nhà, chọn quân và random khi trùng, các cỡ bản đồ, mọi lá thẻ trên cả ba bản đồ, chơi trọn ván tự động trên cả ba bản đồ) và `test/fuzz-typhu.test.ts` (random lệnh từ nhiều người chơi trên cả ba bản đồ với mọi tổ hợp luật; kiểm tra tiền/vị trí/nhà/chủ đất, JSON round-trip, lệnh bị từ chối không đổi state, không lộ token trong view; có test hồi quy "chủ nợ phá sản giữa lúc con nợ đang nợ"). Nội dung test gốc: bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
 
 Viết test xác định:
 
@@ -229,3 +269,6 @@ Mỗi lần đổ xúc xắc tiêu thụ 2 giá trị (cộng thêm 2 nếu là 
 - `answerTrade` khi re-check thất bại (tiền/đất đã đổi từ lúc mời): huỷ lời mời, ghi log "❌ … bị huỷ: <lý do>" và trả `ok` (lệnh lỗi sẽ không được hub lưu).
 - Khi ván đang chơi, `view.settings` = settings phòng đè bởi `rulesOf(ván)`, nên UI luôn hiện đúng luật ván đang áp dụng (kể cả ván cũ dùng `LEGACY_RULES`).
 - Người phá sản không còn `inPlayingGame` → ghế của họ (nếu offline quá `SEAT_GRACE_MS` hoặc đã `leave`) bị giải phóng khi có người mới `join` giữa ván (`joinTP` gọi `dropGoneSeats`); `nameOf` khi đó chỉ còn tên dự phòng từ `history` (nếu họ từng có ván xong), không thì `"?"`.
+- Mọi hàm trong `game.ts` phải lấy bản đồ qua `B(s)` (hoặc `boardOf(s.map)`), **không** dùng `BOARD` trực tiếp — `BOARD` chỉ là bản đồ chuẩn. `groupPositions(group, board)` cũng cần truyền bản đồ.
+- Thêm lá thẻ mới: chỉ thêm cuối mảng, và nếu là `goto` thì dùng vị trí của bản đồ chuẩn (đổi theo tên ô trên bản đồ lớn). Thêm ô cho bản đồ lớn: thêm vào `EXTRAS_LARGE` / `EXTRAS_HUGE` (`side`, `at` trong 9 ô chuẩn của cạnh); tên ô đất phải **không trùng**.
+- `board.ts` vẫn chép nguyên văn sang portfolio (`src/lib/typhu/board.ts`) mỗi khi đổi.

@@ -60,7 +60,7 @@ Số người: `MIN_PLAYERS = 2`; `maxPlayers(expansions)` = 7 nếu có `attack
 | `undead` | zombie, defending | 2–6 |
 | `zombierun` | zombie, streaking | 3–6 |
 | `ultimatewar` | attacking, defending, streaking, imploding | 4–7 |
-| `zombiechaos` | zombie, streaking, imploding, barking | 4–7 |
+| `zombiechaos` | zombie, streaking, imploding, barking | 4–6 |
 | `everything` | cả 6 gói | 4–7 |
 
 (`group`: `basic` / `advanced` / `chaos` chỉ dùng cho UI.)

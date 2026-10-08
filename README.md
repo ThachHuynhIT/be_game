@@ -51,7 +51,7 @@ Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, 
 | `src/server/app.ts` | `http.Server` dùng chung cho cả Vercel lẫn chạy local, kèm bảng route |
 | `api/*.ts`, `api/[game]/[kind].ts` | Các Vercel Function (xem trên) |
 | `src/local.ts` | Server chạy local / tự host |
-| `test/` | vitest: luật chơi từng game, phòng, hub (gồm cả giả lập 2 instance), kiểm tra origin |
+| `test/` | vitest: luật chơi từng game, phòng, hub (gồm cả giả lập 2 instance), kiểm tra origin, và `fuzz-<game>.test.ts` (chơi ngẫu nhiên có seed để bắt kẹt ván / mất bài / lộ thông tin) |
 
 ## Đấu Súng (`src/bang/`)
 
