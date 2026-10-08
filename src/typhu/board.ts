@@ -127,36 +127,12 @@ const EXTRAS_HUGE: ExtraSquare[] = [
   { side: 3, at: 9, sq: prop("Bình Dương", "Thành phố mới", "darkblue", 380, 200, [60, 270, 800, 1800, 2150, 2500]) },
 ];
 
-/**
- * The standard map keeps the classic place names (Vũng Tàu, Hội An, Sa Pa…); the bigger maps name those squares after
- * their province instead (Bà Rịa-Vũng Tàu, Quảng Nam, Lào Cai…) like the squares they add.
- */
-export const PROVINCE_NAMES: Record<string, { name: string; region: string }> = {
-  "Châu Đốc": { name: "An Giang", region: "Núi Sam, Châu Đốc" },
-  "Vũng Tàu": { name: "Bà Rịa-Vũng Tàu", region: "Tượng Chúa Kitô" },
-  "Phan Thiết": { name: "Bình Thuận", region: "Đồi cát Mũi Né" },
-  "Đà Lạt": { name: "Lâm Đồng", region: "Hồ Xuân Hương, Đà Lạt" },
-  "Buôn Ma Thuột": { name: "Đắk Lắk", region: "Thủ phủ cà phê" },
-  "Quy Nhơn": { name: "Bình Định", region: "Eo Gió, Quy Nhơn" },
-  "Nha Trang": { name: "Khánh Hòa", region: "Vịnh Nha Trang" },
-  "Hội An": { name: "Quảng Nam", region: "Phố cổ Hội An" },
-  "Huế": { name: "Thừa Thiên Huế", region: "Đại Nội" },
-  "Sa Pa": { name: "Lào Cai", region: "Fansipan, Sa Pa" },
-  "Hạ Long": { name: "Quảng Ninh", region: "Vịnh Hạ Long" },
-  "Côn Đảo": { name: "Thanh Hóa", region: "Biển Sầm Sơn" },
-  "Phú Quốc": { name: "Kiên Giang", region: "Đảo ngọc Phú Quốc" },
-};
-
-/** The name a standard-map square has on `map` (cards aim at standard names). */
-export const nameOnMap = (map: MapSize | undefined, stdName: string) => (map && map !== "std" ? PROVINCE_NAMES[stdName]?.name ?? stdName : stdName);
-
 function buildBoard(extras: ExtraSquare[]): Square[] {
-  const base = BOARD.map((q) => (q.kind === "prop" && PROVINCE_NAMES[q.name] ? { ...q, ...PROVINCE_NAMES[q.name] } : q));
-  const sides = [base.slice(1, 10), base.slice(11, 20), base.slice(21, 30), base.slice(31, 40)];
+  const sides = [BOARD.slice(1, 10), BOARD.slice(11, 20), BOARD.slice(21, 30), BOARD.slice(31, 40)];
   // Highest index first (and later-defined first on ties) so earlier insertions never shift later ones.
   const order = extras.map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || b.i - a.i);
   for (const { e } of order) sides[e.side].splice(e.at, 0, e.sq);
-  return [base[0], ...sides[0], base[10], ...sides[1], base[20], ...sides[2], base[30], ...sides[3]];
+  return [BOARD[0], ...sides[0], BOARD[10], ...sides[1], BOARD[20], ...sides[2], BOARD[30], ...sides[3]];
 }
 
 export const BOARDS: Record<MapSize, Square[]> = { std: BOARD, large: buildBoard(EXTRAS_LARGE), huge: buildBoard(EXTRAS_HUGE) };

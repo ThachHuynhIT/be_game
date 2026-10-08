@@ -18,17 +18,17 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 ### Bàn cờ (`BOARD`, 40 ô, `BOARD_SIZE`)
 
 - 0 `go` Khởi hành · 10 `jail` Nhà tù (`JAIL_POS`) · 20 `parking` Nghỉ chân · 30 `gotojail` Vào tù.
-- 22 `prop` trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn). **Bản chuẩn 40 ô dùng tên địa danh gốc** (Vũng Tàu, Hội An, Sa Pa…). **Bản 48 / 56 ô gọi các ô đó theo tỉnh** (`PROVINCE_NAMES` trong `board.ts`), như các ô thêm vào. Bảng dưới là tên theo tỉnh; thẻ bài tìm ô theo tên chuẩn rồi đổi sang tên của bản đồ qua `nameOnMap`:
+- 22 `prop` trong 8 nhóm màu (`brown` 2 lô, `lightblue` 3, `pink` 3, `orange` 3, `red` 3, `yellow` 3, `green` 3, `darkblue` 2); mỗi lô có `price`, `house` (giá xây cơ bản 50/100/150/200), `rent[0..5]` (đất trống, 1–4 nhà, khách sạn). **Các ô của bản chuẩn 40 ô giữ nguyên tên trên cả ba bản đồ** (Vũng Tàu, Hội An, Sa Pa, Côn Đảo, Phú Quốc…); bản 48 / 56 ô chỉ **thêm** ô mới (tên tỉnh / địa danh) chứ không đổi ô cũ. Bảng dưới là các nhóm màu của bản chuẩn:
 
 | Nhóm | Các ô (theo thứ tự đi) |
 |---|---|
 | `brown` | Cà Mau, Bạc Liêu |
-| `lightblue` | Cần Thơ, An Giang, Bến Tre |
-| `pink` | Bà Rịa-Vũng Tàu, Bình Thuận, Lâm Đồng |
-| `orange` | Đắk Lắk, Bình Định, Khánh Hòa |
-| `red` | Quảng Nam, Thừa Thiên Huế, Đà Nẵng |
-| `yellow` | Ninh Bình, Lào Cai, Quảng Ninh |
-| `green` | Hải Phòng, Thanh Hóa, Kiên Giang |
+| `lightblue` | Cần Thơ, Châu Đốc, Bến Tre |
+| `pink` | Vũng Tàu, Phan Thiết, Đà Lạt |
+| `orange` | Buôn Ma Thuột, Quy Nhơn, Nha Trang |
+| `red` | Hội An, Huế, Đà Nẵng |
+| `yellow` | Ninh Bình, Sa Pa, Hạ Long |
+| `green` | Hải Phòng, Côn Đảo, Phú Quốc |
 | `darkblue` | Hà Nội, TP. Hồ Chí Minh |
 
 - 4 `air` sân bay (5, 15, 25, 35; giá 200), 2 `util` (12 Điện lực, 28 Nước; giá 150), `tax` (4: 200, 38: 100), `chance` (7, 22, 36), `chest` (2, 17, 33).
