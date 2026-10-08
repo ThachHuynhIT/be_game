@@ -507,7 +507,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     current: g
       ? {
           status: g.status,
-          ...(g.map ? { map: g.map } : {}),
+          map: g.map ?? "std",
           players: g.players.map((id) => ({
             id,
             pos: g.ps[id].pos,
