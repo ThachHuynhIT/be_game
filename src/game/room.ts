@@ -379,6 +379,13 @@ export function tick(room: RoomState, now: number): boolean {
 export function nextTickAt(room: RoomState, now: number): number | null {
   const times: number[] = [];
   if (room.game?.status === "playing" && room.turnDeadline) times.push(room.turnDeadline);
+  // The turn passed to a player who is already offline: `tick` auto-plays them right away,
+  // so it is due now rather than at the turn deadline.
+  const g = room.game;
+  if (g?.status === "playing" && g.turn) {
+    const turnPlayer = findById(room, g.turn);
+    if (!turnPlayer || !isOnline(turnPlayer, now)) times.push(now);
+  }
   for (const p of room.seats) {
     if (!p || p.left) continue;
     // Moment a player would flip to offline (matters on their turn / for host handover / seat drop).
