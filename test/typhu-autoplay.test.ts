@@ -52,8 +52,10 @@ describe("Cờ Tỷ Phú: auto-play for an offline opponent (through the hub)", 
       const bId = s0.seats.find((p) => p?.token === "token-bbbbbbbb")!.id;
       expect(s0.current?.status).toBe("playing");
 
-      let heldByB = 0;
-      let maxHeldByB = 0;
+      // Seconds the offline player's turn sat without a new step. Measured per step, not per turn:
+      // a turn's length depends on the dice (doubles add steps), the pace between steps does not.
+      let stall = 0;
+      let maxStall = 0;
       let bSteps = 0;
       let lastPhaseAt = 0;
       for (let t = 0; t < 240; t++) {
@@ -65,16 +67,19 @@ describe("Cờ Tỷ Phú: auto-play for an offline opponent (through the hub)", 
         const g = (await state()).current;
         if (!g || g.status !== "playing") break;
         if (g.turn === aId) {
-          heldByB = 0;
+          stall = 0;
           for (const type of ["roll", "skip", "end"]) a.say({ type });
         } else if (g.turn === bId && t >= dropAt + 30) {
-          maxHeldByB = Math.max(maxHeldByB, ++heldByB);
-          if (g.phaseAt !== lastPhaseAt) bSteps++;
+          if (g.phaseAt !== lastPhaseAt) {
+            bSteps++;
+            stall = 0;
+          } else maxStall = Math.max(maxStall, ++stall);
           lastPhaseAt = g.phaseAt;
         }
       }
       expect(bSteps).toBeGreaterThan(0);
-      expect(maxHeldByB).toBeLessThanOrEqual(15);
+      // One automatic step every ABSENT_MS (2.5 s), sampled once a second.
+      expect(maxStall).toBeLessThanOrEqual(3);
     } finally {
       vi.useRealTimers();
     }

@@ -264,7 +264,10 @@ export function nextSPTickAt(room: SPRoom, now: number): number | null {
   if (g) times.push(g);
   for (const p of room.seats) {
     if (!p || p.left) continue;
-    times.push(isOnline(p, now) ? p.lastSeen + PRESENCE_TIMEOUT_MS : p.lastSeen + SEAT_GRACE_MS + 1);
+    if (isOnline(p, now)) times.push(p.lastSeen + PRESENCE_TIMEOUT_MS);
+    // Past the grace period an offline seat is only freed between games; mid-game there is nothing to wake up
+    // for, and a time already past would re-run `tick` every 100 ms and re-send every view.
+    else if (p.lastSeen + SEAT_GRACE_MS + 1 > now || room.current?.status !== "playing") times.push(p.lastSeen + SEAT_GRACE_MS + 1);
   }
   for (const x of room.spectators ?? []) times.push(x.lastSeen + PRESENCE_TIMEOUT_MS);
   for (const r of room.reactions ?? []) times.push(r.at + REACTION_TTL_MS);

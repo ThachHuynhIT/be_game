@@ -390,7 +390,9 @@ export function nextTickAt(room: RoomState, now: number): number | null {
     if (!p || p.left) continue;
     // Moment a player would flip to offline (matters on their turn / for host handover / seat drop).
     if (isOnline(p, now)) times.push(p.lastSeen + PRESENCE_TIMEOUT_MS);
-    else times.push(p.lastSeen + SEAT_GRACE_MS + 1);
+    // Past the grace period an offline seat is only freed between games; mid-game there is nothing to wake up
+    // for, and a time already past would re-run `tick` every 100 ms and re-send every view.
+    else if (p.lastSeen + SEAT_GRACE_MS + 1 > now || room.game?.status !== "playing") times.push(p.lastSeen + SEAT_GRACE_MS + 1);
   }
   for (const x of room.spectators ?? []) times.push(x.lastSeen + PRESENCE_TIMEOUT_MS);
   for (const r of room.reactions ?? []) times.push(r.at + REACTION_TTL_MS);
