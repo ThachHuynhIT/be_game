@@ -71,6 +71,8 @@ export interface TPPlayer {
   games: number;
   /** Picked token (emoji + colour); unset = the seat's starting piece. */
   piece?: { emoji: string; color: string };
+  /** Auto-play switched on by the player (Ctrl+Shift+Y): the server plays their turns. Only shown to them. */
+  auto?: boolean;
 }
 
 export interface TPRoom {
@@ -332,6 +334,13 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   if (msg.type === "kick") return kickTP(room, p, msg.playerId, now);
   if (msg.type === "pick") return pickPiece(room, p, msg.emoji, msg.color);
   if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
+  if (msg.type === "auto") {
+    if (msg.on === true) p.auto = true;
+    else delete p.auto;
+    // A step that is already due (its phase started over ABSENT_MS ago) is played right away.
+    tickTP(room, now);
+    return { ok: true };
+  }
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
   if (!g.ps[p.id]) return { ok: false, error: "Bạn không chơi ván này" };
@@ -433,7 +442,8 @@ export function tickTP(room: TPRoom, now: number): boolean {
       const p = findById(room, id);
       return !p || !isOnline(p, now);
     };
-    if (tickGame(g, now, nameOf(room), absent)) {
+    const auto = (id: string) => !!findById(room, id)?.auto;
+    if (tickGame(g, now, nameOf(room), absent, Math.random, auto)) {
       changed = true;
       afterChange(room, now);
     }
@@ -487,6 +497,7 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
     code: room.code,
     meId: player?.id ?? "",
     role: player ? "player" : "spectator",
+    ...(player?.auto ? { auto: true } : {}),
     serverTime: now,
     // While a game runs, show the rules it actually plays with (older saved games may differ from the room settings).
     settings: room.current?.status === "playing" ? { ...tpSettingsOf(room), ...rulesOf(room.current), map: room.current.map ?? "std" } : tpSettingsOf(room),
