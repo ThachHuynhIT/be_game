@@ -53,6 +53,10 @@ interface LocalRoom {
   timer: ReturnType<typeof setTimeout> | null;
   refreshing: Promise<void> | null;
   dirty: boolean;
+  /** Newest copy of the room this instance has seen (saved or loaded), as stored. Saves stay compare-and-swap. */
+  latest: { json: string; version: number } | null;
+  /** Highest version announced by the store's notifications; views older than this are reloaded. */
+  want: number;
 }
 
 /** Icon + colour a player picked in the games top bar; shown next to their name at every table. */
@@ -111,23 +115,52 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
     fn: (room: S, now: number) => T,
     discard?: (result: T) => boolean,
   ): Promise<{ found: false } | { found: true; result: T }> {
+    // The first attempt starts from this instance's newest copy when it has one, skipping a store read;
+    // if that copy is stale the compare-and-swap refuses it and the next attempts read the store.
+    let useCached = true;
     for (let attempt = 0; attempt < 12; attempt++) {
-      const cur = await this.store.load(code);
-      if (!cur) return { found: false };
-      const before = JSON.stringify(cur.state);
+      let cur = useCached ? this.cached(code) : null;
+      const fromCache = !!cur;
+      useCached = false;
+      if (!cur) {
+        const loaded = await this.store.load(code);
+        if (!loaded) return { found: false };
+        cur = this.remember(code, JSON.stringify(loaded.state), loaded.version);
+      }
+      const before = cur.json;
       const draft = JSON.parse(before) as S;
       const result = fn(draft, Date.now());
-      if (discard?.(result) || JSON.stringify(draft) === before) return { found: true, result };
+      const after = discard?.(result) ? before : JSON.stringify(draft);
+      if (after === before) {
+        // Refused or no change: nothing to save, so a cached copy was never checked against the store —
+        // confirm on fresh data (e.g. "start" right after someone joined through another instance).
+        if (fromCache) continue;
+        return { found: true, result };
+      }
       if (await this.store.save(draft, cur.version)) {
+        this.remember(code, after, cur.version + 1);
         const rec: GameRecord | undefined = this.adapter.lastRecord(draft);
-        if (rec && rec.id !== this.adapter.lastRecord(cur.state)?.id) {
+        if (rec && rec.id !== this.adapter.lastRecord(JSON.parse(before) as S)?.id) {
           await this.store.recordGame(rec).catch((err) => console.error("[be_game] leaderboard:", err));
         }
         return { found: true, result };
       }
-      await new Promise((r) => setTimeout(r, 5 + Math.random() * 20 * (attempt + 1)));
+      // A stale cached copy is retried at once from the store; a race lost on fresh data backs off first.
+      if (!fromCache) await new Promise((r) => setTimeout(r, 5 + Math.random() * 20 * (attempt + 1)));
     }
     throw new Error("Phòng đang bận, thử lại");
+  }
+
+  private cached(code: string) {
+    return this.rooms.get(code)?.latest ?? null;
+  }
+
+  /** Keep `json` as this instance's copy of the room if it is not older than the one held (only for rooms with local sockets). */
+  private remember(code: string, json: string, version: number) {
+    const entry = { json, version };
+    const r = this.rooms.get(code);
+    if (r && (!r.latest || version >= r.latest.version)) r.latest = entry;
+    return entry;
   }
 
   async createRoom(): Promise<string> {
@@ -141,10 +174,10 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
   private local(code: string): LocalRoom {
     let r = this.rooms.get(code);
     if (!r) {
-      r = { conns: new Set(), unsubscribe: null, timer: null, refreshing: null, dirty: false };
+      r = { conns: new Set(), unsubscribe: null, timer: null, refreshing: null, dirty: false, latest: null, want: 0 };
       this.rooms.set(code, r);
       const room = r;
-      void this.store.subscribe(code, () => this.refresh(code)).then((unsub) => {
+      void this.store.subscribe(code, (version) => this.refresh(code, version)).then((unsub) => {
         if (this.rooms.get(code) === room) room.unsubscribe = unsub;
         else unsub();
       });
@@ -168,10 +201,15 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
     }
   }
 
-  /** Push fresh views to this instance's sockets in the room and re-arm its timer. Coalesces bursts. */
-  refresh(code: string): Promise<void> {
+  /**
+   * Push fresh views to this instance's sockets in the room and re-arm its timer. Coalesces bursts.
+   * `version` (from a store notification) is the version to show at least; the store is only read
+   * when this instance's own copy is older than that.
+   */
+  refresh(code: string, version?: number): Promise<void> {
     const r = this.rooms.get(code);
     if (!r) return Promise.resolve();
+    if (version && version > r.want) r.want = version;
     if (r.refreshing) {
       r.dirty = true;
       return r.refreshing;
@@ -179,18 +217,21 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
     r.refreshing = (async () => {
       do {
         r.dirty = false;
-        const cur = await this.store.load(code).catch(() => null);
-        if (!cur) break;
+        let cur = r.latest && r.latest.version >= r.want ? r.latest : null;
+        if (!cur) {
+          const loaded = await this.store.load(code).catch(() => null);
+          if (!loaded) break;
+          cur = this.remember(code, JSON.stringify(loaded.state), loaded.version);
+        }
+        const state = JSON.parse(cur.json) as S;
         const now = Date.now();
+        const looks = looksByName(state as unknown as LookRoom);
         for (const conn of r.conns) {
           if (!conn.token) continue;
-          const view = this.adapter.view(cur.state, conn.token, conn.role, now);
-          if (view) {
-            const looks = looksByName(cur.state as unknown as LookRoom);
-            send(conn.socket, { type: "state", view: typeof view === "object" && Object.keys(looks).length ? { ...view, looks } : view });
-          }
+          const view = this.adapter.view(state, conn.token, conn.role, now);
+          if (view) send(conn.socket, { type: "state", view: typeof view === "object" && Object.keys(looks).length ? { ...view, looks } : view });
         }
-        this.arm(code, r, cur.state, now);
+        this.arm(code, r, state, now);
       } while (r.dirty);
     })().finally(() => {
       r.refreshing = null;

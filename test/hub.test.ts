@@ -175,3 +175,30 @@ describe("player look (icon + colour)", () => {
     expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
   });
 });
+
+describe("RoomHub's copy of the room", () => {
+  it("applies a valid command and pushes the new views without reading the store", async () => {
+    const store = createMemoryRoomStore();
+    const { a, b } = await joinedPair(createRoomHub(store), createRoomHub(store));
+    await a.request({ type: "start" });
+    const va = await a.view((v) => !!v.game);
+    if (va.game!.status !== "playing") return; // tới trắng on the random deal
+    await new Promise((r) => setTimeout(r, 100)); // let both instances settle on the started game
+    const leader = va.game!.turn === va.meId ? a : b;
+    const other = leader === a ? b : a;
+    const lv = await leader.view((v) => !!v.game);
+    const card = lv.game!.mustInclude ?? Math.min(...lv.hand);
+
+    let loads = 0;
+    const load = store.load.bind(store);
+    store.load = (code: string) => {
+      loads++;
+      return load(code);
+    };
+    expect((await leader.request({ type: "play", cards: [card] })).ok).toBe(true);
+    await leader.view((v) => v.game?.lastPlay?.combo.cards[0] === card);
+    await other.view((v) => v.game?.lastPlay?.combo.cards[0] === card);
+    // The leader's instance saves from its copy and shows its own save; only the other instance reads.
+    expect(loads).toBeLessThanOrEqual(1);
+  });
+});

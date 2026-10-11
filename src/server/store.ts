@@ -28,10 +28,16 @@ export interface RoomStore<S extends CodedRoom = CodedRoom> {
   /** Create a room; false if the code is taken. */
   create(state: S): Promise<boolean>;
   load(code: string): Promise<StoredRoom<S> | null>;
-  /** Compare-and-swap: saves only if the stored version still equals `expectedVersion`, then notifies subscribers. */
+  /**
+   * Compare-and-swap: saves only if the stored version still equals `expectedVersion`, then notifies subscribers.
+   * A successful save always stores version `expectedVersion + 1` (the hub relies on this to cache rooms).
+   */
   save(state: S, expectedVersion: number): Promise<boolean>;
-  /** Called after every successful save of this room (from any instance). Returns an unsubscribe function. */
-  subscribe(code: string, listener: () => void): Promise<() => void>;
+  /**
+   * Called after every successful save of this room (from any instance) with the version just saved.
+   * Returns an unsubscribe function.
+   */
+  subscribe(code: string, listener: (version?: number) => void): Promise<() => void>;
   /** Add a finished game to the leaderboard. Idempotent per `record.id`. */
   recordGame(record: GameRecord): Promise<void>;
   leaderboard(limit: number): Promise<LeaderboardEntry[]>;
@@ -107,13 +113,14 @@ class MemoryRoomStore<S extends CodedRoom> implements RoomStore<S> {
   async save(state: S, expectedVersion: number) {
     const r = this.live(state.code);
     if (!r || r.version !== expectedVersion) return false;
-    this.put(state, expectedVersion + 1);
+    const version = expectedVersion + 1;
+    this.put(state, version);
     // Async like Redis pub/sub, so callers never depend on synchronous delivery.
-    setImmediate(() => this.events.emit(state.code));
+    setImmediate(() => this.events.emit(state.code, version));
     return true;
   }
 
-  async subscribe(code: string, listener: () => void) {
+  async subscribe(code: string, listener: (version?: number) => void) {
     this.events.on(code, listener);
     return () => {
       this.events.off(code, listener);
@@ -186,7 +193,7 @@ type Redis = import("ioredis").Redis;
 class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
   readonly kind = "redis" as const;
   private sub: Redis | null = null;
-  private listeners = new Map<string, Set<() => void>>();
+  private listeners = new Map<string, Set<(version?: number) => void>>();
   private k: ReturnType<typeof keysFor>;
 
   constructor(
@@ -222,14 +229,16 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
     return Number(res) > 0;
   }
 
-  async subscribe(code: string, listener: () => void) {
+  async subscribe(code: string, listener: (version?: number) => void) {
     if (!this.sub) {
       // A connection in subscriber mode cannot run other commands, so use a dedicated one.
       this.sub = this.redis.duplicate();
-      this.sub.on("message", (channel: string) => {
+      // SAVE_SCRIPT publishes the version it just stored.
+      this.sub.on("message", (channel: string, message: string) => {
         if (!channel.startsWith(this.k.channelPrefix)) return;
         const c = channel.slice(this.k.channelPrefix.length, -":changed".length);
-        this.listeners.get(c)?.forEach((fn) => fn());
+        const version = Number(message) || undefined;
+        this.listeners.get(c)?.forEach((fn) => fn(version));
       });
     }
     let set = this.listeners.get(code);
