@@ -123,7 +123,7 @@ Chuẩn bị một lần:
 1. Trên server: clone repo vào một thư mục (ví dụ `/opt/be_game`), tạo `.env` như mục trên và chạy thử `docker compose up -d --build`. Tạo user deploy riêng, thuộc nhóm `docker`, có quyền ghi thư mục đó.
 2. Tạo cặp khoá riêng cho deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""` (đừng commit); thêm `deploy_key.pub` vào `~/.ssh/authorized_keys` của user deploy.
 3. Lấy host key để ghim: `ssh-keyscan -p 22 <host>`.
-4. GitHub → Settings → Environments → tạo `production` (có thể bật Required reviewers để duyệt trước mỗi lần deploy) và đặt các **secret**: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); và **variable** `GAME_DOMAIN` (để kiểm tra health sau deploy).
+4. GitHub → Settings → Environments → tạo `self-hosted` (tách khỏi `Production` của Vercel; chưa đặt secrets thì workflow tự bỏ qua, không báo lỗi) (có thể bật Required reviewers để duyệt trước mỗi lần deploy) và đặt các **secret**: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); và **variable** `GAME_DOMAIN` (để kiểm tra health sau deploy).
 
 ## Giao thức
 

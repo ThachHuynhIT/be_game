@@ -20,14 +20,27 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    environment: production
+    # Its own environment (not Vercel's "Production") holds the DEPLOY_* secrets.
+    environment: self-hosted
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
     steps:
+      # Until the server is set up (no secrets yet) the run is skipped instead of failing on every push.
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_PATH" ]; then
+            echo "::notice title=Deploy skipped::DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH are not set in the self-hosted environment (see README, Tự động deploy)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Prepare SSH
+        if: steps.cfg.outputs.ready == 'true'
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
@@ -35,6 +48,7 @@ jobs:
           printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
 
       - name: Update and restart on the server
+        if: steps.cfg.outputs.ready == 'true'
         run: |
           ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_PATH='$DEPLOY_PATH' bash -s" <<'REMOTE'
@@ -48,7 +62,7 @@ jobs:
           REMOTE
 
       - name: Health check
-        if: vars.GAME_DOMAIN != ''
+        if: steps.cfg.outputs.ready == 'true' && vars.GAME_DOMAIN != ''
         run: |
           for i in $(seq 1 20); do
             if curl -fsS "https://${{ vars.GAME_DOMAIN }}/api/health" | grep -q '"ok":true'; then
