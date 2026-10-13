@@ -279,6 +279,7 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 - `vercel.json`: `regions: ["sin1"]`, `maxDuration: 300` cho `api/ws.ts` và `api/[game]/[kind].ts`. Cần **Fluid compute** và Redis (Upstash, region Singapore).
 - Gói **Hobby giới hạn 12 function**. Hiện có **5**: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts`, `api/[game]/[kind].ts`. Game mới **không** thêm file vào `api/` — chỉ thêm route trong `app.ts` (file động đã bắt mọi `/api/<game>/<kind>`).
 - Kiểm tra sau deploy: `GET /api/health` → `"ok": true, "store": "redis", "region": "sin1"`.
+- Bản tự host đang chạy thật (`game.fudio101.com`, deploy tự động sau CI trên `main`): xem [`SELF_HOSTING.md`](SELF_HOSTING.md).
 
 ---
 

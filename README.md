@@ -87,7 +87,7 @@ Không có Redis thì dùng store trong RAM. Mẫu biến môi trường: `.env.
 1. Trên Vercel: **Add New → Project**, import repo `be_game`. Framework Preset để **Other**; không cần Build Command.
 2. Vào **Settings → Functions**, bật **Fluid compute** (project mới được bật sẵn). WebSocket cần Fluid compute.
 3. Vào **Storage / Marketplace**, thêm **Upstash for Redis** (gói Free), chọn region **Singapore**, rồi gắn vào project `be_game`. Vercel tự thêm `REDIS_URL` / `KV_URL`.
-4. (Tuỳ chọn) Đặt biến môi trường `ALLOWED_ORIGIN=https://<domain-portfolio>,https://*.vercel.app` để chỉ trang của bạn kết nối được.
+4. (Tuỳ chọn) Đặt biến môi trường `ALLOWED_ORIGIN=https://<domain-portfolio>,https://<project>-*-<team-slug>.vercel.app` để chỉ trang của bạn (kể cả bản preview) kết nối được. Đừng dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
 5. Deploy xong, mở `https://<be_game>.vercel.app/api/health`. Kết quả mong đợi: `"ok": true`, `"store": "redis"`, `"region": "sin1"`.
 6. Ở project **portfolio** trên Vercel, thêm `NEXT_PUBLIC_TIENLEN_SERVER_URL=https://<be_game>.vercel.app` rồi redeploy.
 
@@ -117,16 +117,9 @@ Ghi chú vận hành:
 
 ### Tự động deploy (CD qua SSH)
 
-`.github/workflows/deploy.yml` chạy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR), hoặc bấm tay trên `main` (Actions → Deploy → Run workflow). Server chỉ vào được qua Tailscale, nên runner gia nhập tailnet (node tạm, tự xoá), đóng gói đúng commit CI đã test (`git archive`), gửi qua SSH, thay code trong `DEPLOY_PATH` (giữ `data/` và `.env`), chạy `docker compose -f compose.selfhost.yml up -d --build` rồi chờ `/api/health` trong container. Workflow chỉ có hiệu lực khi file đã nằm trên `main`.
+Bản đang chạy thật ở `https://game.fudio101.com` (máy chủ `vsmart-zangyapro`, sau Cloudflare Tunnel + Traefik), dùng `compose.selfhost.yml`: be_game + Redis, không publish cổng nào. `.github/workflows/deploy.yml` tự deploy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR): runner vào tailnet bằng Tailscale OIDC, gửi đúng commit đã test qua SSH, `docker compose up -d --build`, rồi kiểm tra `/api/health`.
 
-`compose.selfhost.yml`: be_game + Redis, không Caddy, không publish port nào. be_game vào network ngoài `traefik_network` của host, Traefik trên host định tuyến `GAME_DOMAIN` (đặt trong `.env` cạnh file compose, bắt buộc) tới cổng 4000 qua label, còn Cloudflare Tunnel đưa traffic public vào Traefik. Redis chỉ nằm trong network riêng của project, dữ liệu ở `./data/redis`. Health check lúc deploy chạy bên trong container (`docker compose exec`). Mỗi lần deploy chỉ xoá đúng image `be_game:local` cũ (theo ID ghi lại trước khi build), không bao giờ prune vì host dùng chung.
-
-Chuẩn bị một lần:
-1. Trên server: thư mục deploy trống hoặc đã có bản be_game (ví dụ `~/apps/be_game`); tạo `.env` với `GAME_DOMAIN` (bắt buộc, ví dụ `game.example.com`) và `ALLOWED_ORIGIN`. Host cần có sẵn Traefik (entrypoint `web`, Docker provider) và network ngoài `traefik_network`. User deploy thuộc nhóm `docker`.
-2. Tạo cặp khoá riêng cho deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""` (đừng commit); thêm vào `~/.ssh/authorized_keys` của user deploy, nên giới hạn: `restrict,from="100.64.0.0/10,fd7a:115c:a1e0::/48" <nội dung deploy_key.pub>`.
-3. Lấy host key để ghim: `ssh-keyscan -p 22 <ip tailnet của server>`.
-4. Tailscale (chủ tailnet làm): tạo tag `tag:ci` (trong `tagOwners`), cho phép `tag:ci` vào `<server>:22` trong ACL/grants, và tạo một trusted credential kiểu workload identity federation cho GitHub Actions (issuer GitHub, gắn `tag:ci`, scope `auth_keys` writable). Không có secret Tailscale nào lưu trên GitHub: mỗi lần chạy, job đưa token OIDC của GitHub (`id-token: write`) cho Tailscale đổi lấy key tạm.
-5. GitHub → Settings → Environments → `self-hosted` (tách khỏi `Production` của Vercel; chưa đặt secrets thì workflow tự bỏ qua, không báo lỗi; có thể bật Required reviewers để duyệt trước mỗi lần deploy), đặt các **secret**: `TS_OAUTH_CLIENT_ID` (client ID của credential), `TS_AUDIENCE` (`api.tailscale.com/<client ID>`), `DEPLOY_HOST` (IP tailnet), `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); **variable** tuỳ chọn `TS_TAGS` (mặc định `tag:ci`) và `GAME_DOMAIN` (kiểm tra health public, khi đã có domain).
+Sơ đồ, nơi đặt từng cấu hình (`.env` trên server, secret GitHub, biến Vercel), cách chuẩn bị một lần, lệnh vận hành, quy tắc trên máy dùng chung và bảng xử lý sự cố: [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
 
 ## Giao thức
 
