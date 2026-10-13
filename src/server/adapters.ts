@@ -291,7 +291,7 @@ export const oanquanAdapter: GameAdapter<OQRoom> = {
     }
     return findSpectator(room, token) ? oqView(room, null, now) : null;
   },
-  tick: tickOQ,
+  tick: (room, now) => tickOQ(room, now),
   nextTickAt: nextOQTickAt,
   summary: oqSummary,
   isActive: isOQActive,
