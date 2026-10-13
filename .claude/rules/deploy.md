@@ -7,11 +7,14 @@ paths:
   - ".dockerignore"
   - "Caddyfile"
   - "docs/SELF_HOSTING.md"
+  - "docs/DEPLOYMENT.md"
+  - "vercel.json"
+  - ".env.example"
 ---
 
 # Deploy / infrastructure rules
 
-Read `docs/SELF_HOSTING.md` first. The live server `vsmart-zangyapro` is an arm64 phone **shared with its owner** (`fudio101`); we are user `zonenop`.
+Read `docs/DEPLOYMENT.md` (environments, release flow) and `docs/SELF_HOSTING.md` (the server) first. Two backends are live at once — self-hosted primary and Vercel backup, separate Redis — and the portfolio fails over between them. The live server `vsmart-zangyapro` is an arm64 phone **shared with its owner** (`fudio101`); we are user `zonenop`.
 
 ## On the server
 - Work only in `/home/zonenop` and in our own containers/images/compose project (`be_game`). Home Assistant, Traefik, cloudflared, `/home/fudio101` and `vsmart-zangyapro-homeserver-*` services are read-only.

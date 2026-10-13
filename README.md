@@ -7,14 +7,19 @@
 Backend cho các game online trên portfolio, gồm luật chơi, phòng chơi và WebSocket realtime. Phần giao diện nằm trong repo [portfolio](https://github.com/ThachHuynhIT/portfolio) (`/tien-len` …) và kết nối tới backend này qua `NEXT_PUBLIC_TIENLEN_SERVER_URL`.
 
 ```
-Trình duyệt (portfolio /tien-len)
-      │  wss://<be_game>/api/ws
-      ▼
-Vercel Function api/ws.ts  (Node http.Server + ws, region sin1, Fluid compute)
-      │  CAS (Lua) + pub/sub
-      ▼
-Redis (Upstash): trạng thái phòng dùng chung giữa các instance
+Trình duyệt (portfolio /tien-len …)
+   │  wss://…/api/ws  (thử máy chính trước, không trả lời thì sang máy dự phòng)
+   ├──────────────────────────────────────┐
+   ▼                                      ▼
+game.fudio101.com  (máy chính)           be-game-omega.vercel.app  (dự phòng)
+Cloudflare Tunnel → Traefik →            Vercel Functions api/*.ts
+src/local.ts trong Docker                (region sin1, Fluid compute)
+   │  CAS (Lua) + pub/sub                   │  CAS (Lua) + pub/sub
+   ▼                                        ▼
+Redis trong compose (./data/redis)       Upstash Redis
 ```
+
+Hai backend chạy cùng code từ `main` nhưng có **Redis riêng** (phòng và bảng điểm không chung). Môi trường, luồng phát hành và lưu ý vận hành: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Game và endpoint
 
@@ -82,14 +87,29 @@ Không có Redis thì dùng store trong RAM. Mẫu biến môi trường: `.env.
 
 Ở repo portfolio, đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (đây cũng là giá trị mặc định khi không đặt), rồi chạy `npm run dev`.
 
+## Môi trường đang chạy
+
+| | Máy chính | Máy dự phòng |
+|---|---|---|
+| URL | `https://game.fudio101.com` | `https://be-game-omega.vercel.app` |
+| Chạy ở | Server tự host `vsmart-zangyapro` (`compose.selfhost.yml`) | Vercel project `be-game` |
+| Deploy | Workflow **Deploy** sau khi CI pass trên `main` | Vercel Git, mỗi push vào `main` (nhánh khác → preview) |
+| Tài liệu | [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) | mục "Deploy lên Vercel" bên dưới |
+
+Luồng từ PR tới hai máy, biến môi trường từng nơi, giữ tương thích, kiểm tra sau deploy, quay lại khi lỗi: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 ## Deploy lên Vercel
+
+Đây là cách dựng máy dự phòng (đã dựng xong; project `be-game` tự deploy từ `main`).
 
 1. Trên Vercel: **Add New → Project**, import repo `be_game`. Framework Preset để **Other**; không cần Build Command.
 2. Vào **Settings → Functions**, bật **Fluid compute** (project mới được bật sẵn). WebSocket cần Fluid compute.
 3. Vào **Storage / Marketplace**, thêm **Upstash for Redis** (gói Free), chọn region **Singapore**, rồi gắn vào project `be_game`. Vercel tự thêm `REDIS_URL` / `KV_URL`.
 4. (Tuỳ chọn) Đặt biến môi trường `ALLOWED_ORIGIN=https://<domain-portfolio>,https://<project>-*-<team-slug>.vercel.app` để chỉ trang của bạn (kể cả bản preview) kết nối được. Đừng dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
 5. Deploy xong, mở `https://<be_game>.vercel.app/api/health`. Kết quả mong đợi: `"ok": true`, `"store": "redis"`, `"region": "sin1"`.
-6. Ở project **portfolio** trên Vercel, thêm `NEXT_PUBLIC_TIENLEN_SERVER_URL=https://<be_game>.vercel.app` rồi redeploy.
+6. Ở project **portfolio** trên Vercel, đặt URL này vào `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` (máy dự phòng) — hoặc vào `NEXT_PUBLIC_TIENLEN_SERVER_URL` nếu dùng Vercel làm máy chính — rồi redeploy.
+
+Preview của mọi nhánh dùng chung store Upstash với production: PR đổi cấu trúc state có thể ảnh hưởng phòng trên máy dự phòng ngay khi push (xem [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#bài-học-đã-gặp)).
 
 Region đã được đặt là `sin1` trong `vercel.json`.
 
@@ -98,9 +118,9 @@ Region đã được đặt là `sin1` trong `vercel.json`.
 - Phải có Redis. Người chơi trong cùng một phòng có thể nằm trên những instance khác nhau, và store trong RAM chỉ dùng được khi chạy một tiến trình duy nhất (chạy local / tự host).
 - WebSocket trên Vercel vẫn đang **Beta**.
 
-## Tự host (VPS, Docker Compose)
+## Tự host trên VPS có IP public (mẫu `docker-compose.yml` + Caddy)
 
-Chạy backend trên server riêng thay cho Vercel: `docker-compose.yml` dựng ba service — `be_game` (`src/local.ts`), `redis` (bật AOF, volume `redis-data`) và `caddy` (HTTPS tự động, proxy cả WebSocket). Chỉ Caddy mở cổng 80/443; Redis và be_game nằm trong mạng nội bộ Docker.
+Mẫu này **không** phải cách máy chính đang chạy (máy chính dùng `compose.selfhost.yml` sau Traefik + Cloudflare Tunnel, xem mục kế tiếp). Dùng nó khi có một VPS mở được cổng 80/443: `docker-compose.yml` dựng ba service — `be_game` (`src/local.ts`), `redis` (bật AOF, volume `redis-data`) và `caddy` (HTTPS tự động, proxy cả WebSocket). Chỉ Caddy mở cổng 80/443; Redis và be_game nằm trong mạng nội bộ Docker.
 
 1. Trỏ DNS (A/AAAA) của một tên miền, ví dụ `game.example.com`, về IP server; mở firewall cổng 80, 443 (TCP) và 443 (UDP).
 2. Trên server: `git clone` repo, `cp .env.example .env`, rồi điền `GAME_DOMAIN=game.example.com` và `ALLOWED_ORIGIN=https://<domain-portfolio>` (không để `*.vercel.app` nếu không cần).
@@ -115,7 +135,7 @@ Ghi chú vận hành:
 - Dùng nginx thay Caddy thì cần `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` và `proxy_read_timeout` dài (ví dụ 3600s), nếu không WebSocket bị cắt sau 60 giây.
 - Chạy nhiều bản `be_game` vẫn đúng vì trạng thái phòng dùng chung qua Redis.
 
-### Tự động deploy (CD qua SSH)
+## Máy chính và tự động deploy (CD qua SSH)
 
 Bản đang chạy thật ở `https://game.fudio101.com` (máy chủ `vsmart-zangyapro`, sau Cloudflare Tunnel + Traefik), dùng `compose.selfhost.yml`: be_game + Redis, không publish cổng nào. `.github/workflows/deploy.yml` tự deploy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR): runner vào tailnet bằng Tailscale OIDC, gửi đúng commit đã test qua SSH, `docker compose up -d --build`, rồi kiểm tra `/api/health`.
 

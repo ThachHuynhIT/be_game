@@ -35,7 +35,8 @@ Before finishing any change: `npm run typecheck && npm test`. CI (`.github/workf
 - [`README.md`](README.md): overview, endpoints, local run, Vercel deploy.
 - [`docs/GUIDE.md`](docs/GUIDE.md): **developer guide** — architecture (hub, store, adapters), WebSocket protocol, tick/deadlines, presence, scoring/leaderboard, HTTP endpoints, env vars, test conventions, adding a new game (both repos), conventions & known traps.
 - [`docs/games/<game>.md`](docs/games/): rules and state machine of each game.
-- [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md): self-hosted server, CD workflow, where every config value lives, runbook, shared-host rules, troubleshooting.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md): **environments and releases** — the two live backends (self-hosted primary, Vercel backup) and how the portfolio fails over, PR → `main` → both backends, env vars per environment, compatibility rules across backends/portfolio, post-deploy checks, incidents & rollback, security, lessons learned.
+- [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md): the self-hosted server — CD workflow steps, where every config value lives, runbook, shared-host rules, troubleshooting.
 
 Update the relevant doc **in the same commit** as the code it describes.
 
@@ -84,8 +85,10 @@ Details: `docs/GUIDE.md` → "Quy ước chung & bẫy thường gặp" and "Th�
 
 ## 🚢 Deploy & the Shared Host
 
-- **Vercel** project `be-game` (`be-game-omega.vercel.app`): kept as fallback.
-- **Self-hosted (live)**: `https://game.fudio101.com` → Cloudflare Tunnel → Traefik → `be_game` on host `vsmart-zangyapro` (an arm64 **phone**, shared with its owner `fudio101`). Deployed by `.github/workflows/deploy.yml` after CI passes on `main`. Everything is in [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
+- **Self-hosted (primary)**: `https://game.fudio101.com` → Cloudflare Tunnel → Traefik → `be_game` on host `vsmart-zangyapro` (an arm64 **phone**, shared with its owner `fudio101`). Deployed by `.github/workflows/deploy.yml` after CI passes on `main`. Details: [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
+- **Vercel** project `be-game` (`be-game-omega.vercel.app`, **backup**): deploys every push to `main` via Vercel Git; other branches get previews that **share the production Upstash Redis** — a PR that changes state shape can affect live backup rooms.
+- The portfolio tries the primary (`GET /api/rooms`, 3 s) and falls back to Vercel for lobbies/new rooms; rooms are pinned to their backend (separate Redis). Keep `GET /api/rooms` cheap and present everywhere, and keep the hub error `"Không tìm thấy phòng"` stable — the portfolio relies on both.
+- Both backends and the portfolio deploy independently: protocol changes add optional fields only; deploy be_game before the portfolio. A red CI on `main` skips the primary deploy while Vercel still deploys (version skew). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 - On that host: work only in `/home/zonenop`; owner's containers/files are read-only; **never** `docker system|volume|builder prune` or `image prune -a`; ask before Docker restart, reboot, `apk add`; never touch kernel/boot/firewall/sshd/Tailscale/WiFi/power.
 - **The owner sometimes edits `~/apps/be_game` directly.** Before any deploy from the repo, diff the server copy against the repo and bring their changes in first.
 - Production deploys of the **portfolio** on Vercel are the user's to trigger.
