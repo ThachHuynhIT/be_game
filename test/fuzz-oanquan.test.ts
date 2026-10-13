@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cellsFor, isQuanCell, quanIndex, rowOf } from "../src/oanquan/board";
 import { type OQState, forfeitPlayer, legalMoves, makeMove, newOQGame, scoreOf, tickGame } from "../src/oanquan/game";
-import { joinOQ, newOQRoom, oqCommand, oqView, tickOQ } from "../src/oanquan/room";
+import { joinOQ, newOQRoom, oqCommand, oqDeltas, oqView, tickOQ } from "../src/oanquan/room";
 
 const names = (id: string) => id;
 
@@ -143,7 +143,7 @@ describe("fuzz oanquan: room level", () => {
       tokens.forEach((t, i) => joinOQ(room, t, `P${i}`, now, () => `id${id++}`));
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       expect(oqCommand(room, tokens[0], { type: "settings", quanNon: r() < 0.5, turnSeconds: 15 }, now).ok).toBe(true);
-      expect(oqCommand(room, tokens[0], { type: "start" }, now).ok).toBe(true);
+      expect(oqCommand(room, tokens[0], { type: "start" }, now, r).ok).toBe(true);
       for (let i = 0; i < 3000 && room.current!.status === "playing"; i++) {
         const g = room.current!;
         const cur = room.seats.findIndex((p) => p?.id === g.turn);
@@ -151,12 +151,12 @@ describe("fuzz oanquan: room level", () => {
         if (r() < 0.8) {
           const me = room.seats.find((p) => p?.token === tok)!.id;
           const m = legalMoves(g, me);
-          if (m.length && r() < 0.8) oqCommand(room, tok, { type: "move", ...pk(m) }, now);
-          else oqCommand(room, tok, { type: "move", cell: Math.floor(r() * 30), dir: pk([1, -1, 0]) as 1 }, now);
+          if (m.length && r() < 0.8) oqCommand(room, tok, { type: "move", ...pk(m) }, now, r);
+          else oqCommand(room, tok, { type: "move", cell: Math.floor(r() * 30), dir: pk([1, -1, 0]) as 1 }, now, r);
         } else {
           now += pk([2_000, 16_000]);
           for (const p of room.seats) if (p && r() < 0.8) p.lastSeen = now;
-          tickOQ(room, now);
+          tickOQ(room, now, r);
         }
         if (r() < 0.2) {
           const view = JSON.stringify([...room.seats.map((p) => oqView(room, p, now)), oqView(room, null, now)]);
@@ -167,8 +167,26 @@ describe("fuzz oanquan: room level", () => {
       if (room.current!.status === "ended") {
         const rec = room.history![room.history!.length - 1];
         expect(rec.results).toHaveLength(n);
-        expect(rec.results.reduce((t, x) => t + x.delta, 0)).toBeLessThanOrEqual(0 + 0);
+        expect(rec.results.reduce((t, x) => t + x.delta, 0)).toBeLessThanOrEqual(0);
       }
     }
   }, 20_000);
+});
+
+describe("oanquan tie scoring", () => {
+  const st = { quanValue: 10, quanNon: true, turnSeconds: 15, first: 2, second: 1 };
+  it("tied places share points rounded down, never creating points", () => {
+    // 4 players, last two tied: places −1 and −2 average −1.5 → both −2 (truncating gave −1 each, a sum of +1).
+    expect(oqDeltas(["a", "b", "c", "d"], { a: 0, b: 1, c: 2, d: 2 }, st)).toEqual({ a: 2, b: 1, c: -2, d: -2 });
+    expect(oqDeltas(["a", "b", "c"], { a: 0, b: 0, c: 2 }, st)).toEqual({ a: 1, b: 1, c: -3 });
+    expect(oqDeltas(["a", "b"], { a: 0, b: 0 }, st)).toEqual({ a: 0, b: 0 });
+    for (const n of [2, 3, 4])
+      for (let mask = 0; mask < 1 << (n - 1); mask++) {
+        const ids = Array.from({ length: n }, (_, i) => `p${i}`);
+        const ranks: Record<string, number> = {};
+        ids.forEach((id, i) => (ranks[id] = i > 0 && mask & (1 << (i - 1)) ? ranks[ids[i - 1]] : i));
+        const sum = Object.values(oqDeltas(ids, ranks, st)).reduce((t, x) => t + x, 0);
+        expect(sum, JSON.stringify(ranks)).toBeLessThanOrEqual(0);
+      }
+  });
 });
