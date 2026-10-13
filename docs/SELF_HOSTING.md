@@ -30,7 +30,7 @@ flowchart LR
 
 - Traffic public đi **Cloudflare Tunnel → Traefik → be_game**. Không cổng nào của be_game hay Redis được publish ra host.
 - GitHub vào máy bằng Tailscale: runner gia nhập tailnet của chủ máy như một node tạm gắn `tag:ci`, rồi SSH vào.
-- Bản trên Vercel (`be-game-omega.vercel.app`) vẫn còn và dùng được để quay lại khi cần.
+- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `game.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Hai máy có Redis riêng nên phòng không chuyển qua lại; ván đang chơi trên máy chính sẽ chờ máy chính sống lại.
 
 ## Máy chủ `vsmart-zangyapro`
 
@@ -51,6 +51,7 @@ flowchart LR
 | GitHub env `self-hosted` (variable) | `GAME_DOMAIN`, `TS_TAGS`? | `game.fudio101.com` (bật bước kiểm tra health public); tag mặc định `tag:ci` | zonenop |
 | Server `~/.ssh/authorized_keys` | `be_game-deploy@github-actions` | Giới hạn `restrict,from="100.64.0.0/10,fd7a:115c:a1e0::/48"`: chỉ từ tailnet, không pty, không forward | zonenop |
 | Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://game.fudio101.com` (production, preview, development). Gắn vào bundle **lúc build**: đổi thì phải redeploy | zonenop |
+| Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | `https://be-game-omega.vercel.app`: máy dự phòng. Máy chính không trả lời thì sảnh và bàn mới dùng máy này; phòng đã có vẫn gắn với máy tạo ra nó (portfolio `docs/GAMES_GUIDE.md` §1.2) | zonenop |
 | Tailscale admin | `tag:ci` + ACL | `tag:ci` chỉ được vào `vsmart-zangyapro:22` | chủ máy |
 | Traefik, cloudflared | `traefik_network`, entrypoint `web`, tunnel | Hạ tầng public | chủ máy |
 
