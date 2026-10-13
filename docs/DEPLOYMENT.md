@@ -51,7 +51,7 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | Biến | Local | Tự host (`~/apps/be_game/.env` + compose) | Vercel `be-game` |
 |---|---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | compose tự đặt `redis://redis:6379` | Upstash (integration), production **và** preview |
-| `ALLOWED_ORIGIN` | trống → mọi origin | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000` | **chưa đặt** → mọi origin (nên đặt giống máy chính) |
+| `ALLOWED_ORIGIN` | trống → mọi origin | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000` | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
 | `GAME_DOMAIN` | — | `game.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |
 | `VERCEL`, `VERCEL_REGION` | — | — | Vercel tự đặt; `/api/health` trả `region: "sin1"` |
