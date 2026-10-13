@@ -12,7 +12,7 @@ import {
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
 import { DEFAULT_QUAN_VALUE, DEFAULT_TURN_SECONDS, MAX_PLAYERS, MIN_PLAYERS, QUAN_VALUE_OPTIONS, TURN_SECONDS_OPTIONS } from "./board";
-import { type OQState, type Result, forfeitPlayer, lentOf, makeMove, newOQGame, nextGameTickAt, scoreOf, tickGame } from "./game";
+import { type OQState, type Random, type Result, forfeitPlayer, lentOf, makeMove, newOQGame, nextGameTickAt, scoreOf, tickGame } from "./game";
 import type { OQCommand, OQRoomSummary, OQRoomView, OQSettings } from "./protocol";
 
 /** Room lifecycle for Ô Ăn Quan — same presence / spectator / scoring rules as the other games. */
@@ -114,14 +114,14 @@ export function leaveOQ(room: OQRoom, token: string, now: number) {
   tickOQ(room, now);
 }
 
-function startOQ(room: OQRoom, host: OQPlayer, now: number): Result {
+function startOQ(room: OQRoom, host: OQPlayer, now: number, random: Random): Result {
   if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới bắt đầu được" };
   if (room.current?.status === "playing") return { ok: false, error: "Ván đang diễn ra" };
   dropGoneSeats(room, now);
   const players = room.seats.filter((p): p is OQPlayer => !!p).map((p) => p.id);
   if (players.length < MIN_PLAYERS) return { ok: false, error: `Cần đủ ${MIN_PLAYERS} người` };
   const st = oqSettingsOf(room);
-  room.current = newOQGame(players, now, { quanValue: st.quanValue, quanNon: st.quanNon, turnMs: st.turnSeconds * 1000 });
+  room.current = newOQGame(players, now, { quanValue: st.quanValue, quanNon: st.quanNon, turnMs: st.turnSeconds * 1000 }, random);
   return { ok: true };
 }
 
@@ -168,10 +168,10 @@ function kickOQ(room: OQRoom, host: OQPlayer, targetId: unknown, now: number): R
   return { ok: true };
 }
 
-export function oqCommand(room: OQRoom, token: string, msg: OQCommand, now: number): Result {
+export function oqCommand(room: OQRoom, token: string, msg: OQCommand, now: number, random: Random = Math.random): Result {
   const p = findByToken(room, token);
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
-  if (msg.type === "start") return startOQ(room, p, now);
+  if (msg.type === "start") return startOQ(room, p, now, random);
   if (msg.type === "kick") return kickOQ(room, p, msg.playerId, now);
   if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
   const g = room.current;
@@ -184,20 +184,26 @@ export function oqCommand(room: OQRoom, token: string, msg: OQCommand, now: numb
 }
 
 /**
- * Record a game that just ended (points, history). Rank points by finishing order (`scoreByRank`);
- * players tied on a rank share the average of the points of the places they occupy (truncated toward zero), so a
- * two-player draw scores 0 for both.
+ * Rank points by finishing order (`scoreByRank`); players tied on a rank share the average of the points of the
+ * places they occupy, rounded down, so a two-player draw scores 0 for both and rounding never creates points
+ * (truncating toward zero would: two tied last places worth −1 and −2 would each pay only 1).
  */
+export function oqDeltas(finished: string[], ranks: Record<string, number>, settings: OQSettings): Record<string, number> {
+  const table = scoreByRank(finished, settings);
+  const deltas: Record<string, number> = {};
+  for (const id of finished) {
+    const group = finished.filter((x) => ranks[x] === ranks[id]);
+    deltas[id] = group.length === 1 ? table[id] : Math.floor(group.reduce((t, x) => t + table[x], 0) / group.length) || 0;
+  }
+  return deltas;
+}
+
+/** Record a game that just ended (points, history). */
 function afterChange(room: OQRoom, now: number) {
   const g = room.current;
   if (!g || g.status !== "ended" || g.recorded) return;
   g.recorded = true;
-  const table = scoreByRank(g.finished, oqSettingsOf(room));
-  const deltas: Record<string, number> = {};
-  for (const id of g.finished) {
-    const group = g.finished.filter((x) => g.ranks[x] === g.ranks[id]);
-    deltas[id] = group.length === 1 ? table[id] : Math.trunc(group.reduce((t, x) => t + table[x], 0) / group.length) || 0;
-  }
+  const deltas = oqDeltas(g.finished, g.ranks, oqSettingsOf(room));
   const firsts = g.finished.filter((id) => g.ranks[id] === 0).length;
   room.gameSeq = (room.gameSeq ?? 0) + 1;
   const record: GameRecord = {
@@ -218,7 +224,7 @@ function afterChange(room: OQRoom, now: number) {
   room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
 }
 
-export function tickOQ(room: OQRoom, now: number): boolean {
+export function tickOQ(room: OQRoom, now: number, random: Random = Math.random): boolean {
   let changed = false;
   const g = room.current;
   if (g?.status === "playing") {
@@ -226,7 +232,7 @@ export function tickOQ(room: OQRoom, now: number): boolean {
       const p = findById(room, id);
       return !p || !isOnline(p, now);
     };
-    if (tickGame(g, now, nameOf(room), absent)) {
+    if (tickGame(g, now, nameOf(room), absent, random)) {
       changed = true;
       afterChange(room, now);
     }
