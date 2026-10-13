@@ -267,6 +267,8 @@ tickGame(s, T + STEP_MS, names, never, dice(1, 2));          // hết giờ mộ
 ```
 Mỗi lần đổ xúc xắc tiêu thụ 2 giá trị (cộng thêm 2 nếu là thẻ "tiện ích gần nhất").
 
+Qua room: `joinTP(room, token, name, now, newId, random = Math.random)` (→ `ensureUniquePieces`), `tpCommand(room, token, msg, now, random = Math.random)` (dùng cho `start` → `newTPGame`, `roll`, `paydebt` / tự trả nợ, và `auto` → `tickTP`), `tickTP(room, now, random = Math.random)` (→ `tickGame` khi đi hộ) và `leaveTP(room, token, now, random = Math.random)` đều nhận `random`; adapter không truyền nên dùng `Math.random`. Fuzz mức phòng trong `test/fuzz-typhu.test.ts` truyền `rng(seed)` và cho `Math.random` ném lỗi.
+
 ## Lưu ý / bẫy thường gặp
 
 - Luôn dùng `rulesOf(s)` (không đọc `s.rules` trực tiếp) và `tpSettingsOf(room)` — phòng/ván cũ trong Redis thiếu field.

@@ -14,6 +14,7 @@ import { DEFAULT_RANK_POINTS, type RankPointsSetting, checkRankPoints, scoreByRa
 import { type Expansion, type MCard, MAX_SEATS, MIN_PLAYERS, PRESET_BY_ID, cleanExpansions, maxPlayers } from "./cards";
 import {
   type MeoState,
+  type Random,
   type Result,
   alterFuture,
   drawCard,
@@ -137,7 +138,7 @@ export function meoHeartbeat(room: MeoRoom, token: string, now: number) {
   if (s && now - s.lastSeen >= HEARTBEAT_WRITE_MS) s.lastSeen = now;
 }
 
-export function leaveMeo(room: MeoRoom, token: string, now: number) {
+export function leaveMeo(room: MeoRoom, token: string, now: number, random: Random = Math.random) {
   const p = findByToken(room, token);
   if (!p) {
     room.spectators = (room.spectators ?? []).filter((x) => x.token !== token);
@@ -148,10 +149,10 @@ export function leaveMeo(room: MeoRoom, token: string, now: number) {
     const idx = room.seats.indexOf(p);
     if (idx >= 0) room.seats[idx] = null;
   }
-  tickMeo(room, now);
+  tickMeo(room, now, random);
 }
 
-function startMeo(room: MeoRoom, host: MeoPlayer, now: number): Result {
+function startMeo(room: MeoRoom, host: MeoPlayer, now: number, random: Random): Result {
   if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới bắt đầu được" };
   if (room.current?.status === "playing") return { ok: false, error: "Ván đang diễn ra" };
   dropGoneSeats(room, now);
@@ -163,7 +164,7 @@ function startMeo(room: MeoRoom, host: MeoPlayer, now: number): Result {
   if (players.length < min) return { ok: false, error: `${label} cần ít nhất ${min} người` };
   if (players.length > max) return { ok: false, error: `${label} chỉ dành cho tối đa ${max} người` };
   const settings = meoSettingsOf(room);
-  room.current = newMeoGame(players, now, expansions, Math.random, {
+  room.current = newMeoGame(players, now, expansions, random, {
     turnMs: settings.turnSeconds * 1000,
     nopeMs: settings.nopeSeconds * 1000,
   });
@@ -200,7 +201,7 @@ function setMeoSettings(room: MeoRoom, host: MeoPlayer, msg: Record<string, unkn
   return { ok: true };
 }
 
-function kickMeo(room: MeoRoom, host: MeoPlayer, targetId: unknown, now: number): Result {
+function kickMeo(room: MeoRoom, host: MeoPlayer, targetId: unknown, now: number, random: Random): Result {
   if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới kích được người chơi" };
   const target = typeof targetId === "string" ? findById(room, targetId) : null;
   if (!target || target.kicked) return { ok: false, error: "Không tìm thấy người chơi" };
@@ -211,7 +212,7 @@ function kickMeo(room: MeoRoom, host: MeoPlayer, targetId: unknown, now: number)
     if (!res.ok) return res;
     target.kicked = true;
     target.left = true;
-    syncCurse(room.current); // a kicked, cursed player drops out of the curse list at once
+    syncCurse(room.current, random); // a kicked, cursed player drops out of the curse list at once
     afterChange(room, now);
     return { ok: true };
   }
@@ -221,11 +222,11 @@ function kickMeo(room: MeoRoom, host: MeoPlayer, targetId: unknown, now: number)
 }
 
 /** Game-specific commands from a seated player. */
-export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: number): Result {
+export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: number, random: Random = Math.random): Result {
   const p = findByToken(room, token);
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
-  if (msg.type === "start") return startMeo(room, p, now);
-  if (msg.type === "kick") return kickMeo(room, p, msg.playerId, now);
+  if (msg.type === "start") return startMeo(room, p, now, random);
+  if (msg.type === "kick") return kickMeo(room, p, msg.playerId, now, random);
   if (msg.type === "settings") return setMeoSettings(room, p, msg as unknown as Record<string, unknown>);
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
@@ -248,7 +249,7 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
       res = insertKitten(g, p.id, msg.position, now, names);
       break;
     case "give":
-      res = giveCard(g, p.id, unblind(g, p.id, msg.card), now, names);
+      res = giveCard(g, p.id, unblind(g, p.id, msg.card), now, names, random);
       break;
     case "dig":
       res = digDeeper(g, p.id, msg.keep === true, now, names);
@@ -262,7 +263,7 @@ export function meoCommand(room: MeoRoom, token: string, msg: MeoCommand, now: n
     default:
       return { ok: false, error: "Lệnh không hợp lệ" };
   }
-  syncCurse(g);
+  syncCurse(g, random);
   if (res.ok) afterChange(room, now);
   return res;
 }
@@ -293,7 +294,7 @@ function afterChange(room: MeoRoom, now: number) {
   room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
 }
 
-export function tickMeo(room: MeoRoom, now: number): boolean {
+export function tickMeo(room: MeoRoom, now: number, random: Random = Math.random): boolean {
   let changed = false;
   const g = room.current;
   if (g?.status === "playing") {
@@ -301,8 +302,8 @@ export function tickMeo(room: MeoRoom, now: number): boolean {
       const p = findById(room, id);
       return !p || !isOnline(p, now);
     };
-    if (tickGame(g, now, nameOf(room), absent)) {
-      syncCurse(g);
+    if (tickGame(g, now, nameOf(room), absent, random)) {
+      syncCurse(g, random);
       changed = true;
       afterChange(room, now);
     }
