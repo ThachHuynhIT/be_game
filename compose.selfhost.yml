@@ -7,11 +7,7 @@
 name: be_game
 services:
   be_game:
-    build:
-      context: .
-      # Lets the deploy prune only be_game's own superseded images (never other projects' on a shared host).
-      labels:
-        app.be_game: "true"
+    build: .
     image: be_game:local
     restart: unless-stopped
     init: true

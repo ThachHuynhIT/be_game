@@ -99,7 +99,8 @@ jobs:
 
           # Swap the code in place. Only data/ (Redis) and .env survive; refuse to wipe a directory that
           # holds anything else and is not a previous be_game deploy (wrong DEPLOY_PATH).
-          others=$(find . -mindepth 1 -maxdepth 1 ! -name data ! -name .env ! -name .release.tar.gz | head -1)
+          # No `| head`: under pipefail a SIGPIPE'd find would abort the deploy at random.
+          others=$(find . -mindepth 1 -maxdepth 1 ! -name data ! -name .env ! -name .release.tar.gz)
           if [ -n "$others" ] && ! grep -qs '"name": "be_game"' package.json; then
             echo "$DEPLOY_PATH is not empty and not a be_game deploy, refusing to clean it" >&2
             exit 1
@@ -110,13 +111,21 @@ jobs:
           echo "$SHA" > REVISION
           mkdir -p data/redis
 
+          # The rebuild moves the be_game:local tag to the new image, so note the old one's ID first and
+          # remove exactly that image afterwards. The host is shared: never a prune. With the containerd
+          # image store the untagged old image is already gone, hence the existence check.
+          old=$(docker image inspect --format '{{.Id}}' be_game:local 2>/dev/null || true)
           docker compose -f compose.selfhost.yml up -d --build --remove-orphans
-          # Dangling be_game images only: the host is shared, so never a global prune.
-          docker image prune -f --filter label=app.be_game=true
+          new=$(docker image inspect --format '{{.Id}}' be_game:local)
+          if [ -n "$old" ] && [ "$old" != "$new" ] && docker image inspect "$old" >/dev/null 2>&1; then
+            docker image rm "$old" || echo "::warning::could not remove the previous be_game image $old"
+          fi
           docker compose -f compose.selfhost.yml ps
 
           for i in $(seq 1 30); do
-            if curl -fs http://127.0.0.1:4000/api/health | grep -q '"ok":true'; then
+            # Captured, not piped into grep -q: under pipefail an early-exiting grep can fail the check.
+            health=$(curl -fs http://127.0.0.1:4000/api/health || true)
+            if [[ $health == *'"ok":true'* ]]; then
               echo "healthy at $SHA"
               exit 0
             fi

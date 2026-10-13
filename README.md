@@ -119,7 +119,7 @@ Ghi chú vận hành:
 
 `.github/workflows/deploy.yml` chạy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR), hoặc bấm tay trên `main` (Actions → Deploy → Run workflow). Server chỉ vào được qua Tailscale, nên runner gia nhập tailnet (node tạm, tự xoá), đóng gói đúng commit CI đã test (`git archive`), gửi qua SSH, thay code trong `DEPLOY_PATH` (giữ `data/` và `.env`), chạy `docker compose -f compose.selfhost.yml up -d --build` rồi chờ `/api/health` trên server. Workflow chỉ có hiệu lực khi file đã nằm trên `main`.
 
-`compose.selfhost.yml`: be_game + Redis, không Caddy, dùng host network (firewall của host chặn traffic tailnet tới port Docker publish kiểu bridge); be_game ở cổng 4000, Redis chỉ nghe `127.0.0.1`, dữ liệu Redis ở `./data/redis`. Deploy chỉ prune image cũ của be_game (label `app.be_game`), không prune toàn host.
+`compose.selfhost.yml`: be_game + Redis, không Caddy, dùng host network (firewall của host chặn traffic tailnet tới port Docker publish kiểu bridge); be_game ở cổng 4000, Redis chỉ nghe `127.0.0.1`, dữ liệu Redis ở `./data/redis`. Mỗi lần deploy chỉ xoá đúng image `be_game:local` cũ (theo ID ghi lại trước khi build), không bao giờ prune vì host dùng chung.
 
 Chuẩn bị một lần:
 1. Trên server: thư mục deploy trống hoặc đã có bản be_game (ví dụ `~/apps/be_game`); tuỳ chọn tạo `.env` với `ALLOWED_ORIGIN`. User deploy thuộc nhóm `docker`.
