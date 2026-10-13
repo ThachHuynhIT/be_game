@@ -117,13 +117,16 @@ Ghi chú vận hành:
 
 ### Tự động deploy (CD qua SSH)
 
-`.github/workflows/deploy.yml` chạy sau khi CI trên `main` pass (hoặc bấm tay: Actions → Deploy → Run workflow): SSH vào server, `git reset --hard origin/main`, `docker compose up -d --build`, rồi gọi `/api/health`. Workflow chỉ có hiệu lực khi file đã nằm trên `main`.
+`.github/workflows/deploy.yml` chạy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR), hoặc bấm tay trên `main` (Actions → Deploy → Run workflow). Server chỉ vào được qua Tailscale, nên runner gia nhập tailnet (node tạm, tự xoá), đóng gói đúng commit CI đã test (`git archive`), gửi qua SSH, thay code trong `DEPLOY_PATH` (giữ `data/` và `.env`), chạy `docker compose -f compose.selfhost.yml up -d --build` rồi chờ `/api/health` trên server. Workflow chỉ có hiệu lực khi file đã nằm trên `main`.
+
+`compose.selfhost.yml`: be_game + Redis, không Caddy, dùng host network (firewall của host chặn traffic tailnet tới port Docker publish kiểu bridge); be_game ở cổng 4000, Redis chỉ nghe `127.0.0.1`, dữ liệu Redis ở `./data/redis`. Deploy chỉ prune image cũ của be_game (label `app.be_game`), không prune toàn host.
 
 Chuẩn bị một lần:
-1. Trên server: clone repo vào một thư mục (ví dụ `/opt/be_game`), tạo `.env` như mục trên và chạy thử `docker compose up -d --build`. Tạo user deploy riêng, thuộc nhóm `docker`, có quyền ghi thư mục đó.
-2. Tạo cặp khoá riêng cho deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""` (đừng commit); thêm `deploy_key.pub` vào `~/.ssh/authorized_keys` của user deploy.
-3. Lấy host key để ghim: `ssh-keyscan -p 22 <host>`.
-4. GitHub → Settings → Environments → tạo `self-hosted` (tách khỏi `Production` của Vercel; chưa đặt secrets thì workflow tự bỏ qua, không báo lỗi) (có thể bật Required reviewers để duyệt trước mỗi lần deploy) và đặt các **secret**: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); và **variable** `GAME_DOMAIN` (để kiểm tra health sau deploy).
+1. Trên server: thư mục deploy trống hoặc đã có bản be_game (ví dụ `~/apps/be_game`); tuỳ chọn tạo `.env` với `ALLOWED_ORIGIN`. User deploy thuộc nhóm `docker`.
+2. Tạo cặp khoá riêng cho deploy: `ssh-keygen -t ed25519 -f deploy_key -N ""` (đừng commit); thêm vào `~/.ssh/authorized_keys` của user deploy, nên giới hạn: `restrict,from="100.64.0.0/10,fd7a:115c:a1e0::/48" <nội dung deploy_key.pub>`.
+3. Lấy host key để ghim: `ssh-keyscan -p 22 <ip tailnet của server>`.
+4. Tailscale (chủ tailnet làm): tạo tag `tag:ci` (trong `tagOwners`), cho phép `tag:ci` vào `<server>:22` trong ACL/grants, và tạo OAuth client có scope `auth_keys` (writable) gắn `tag:ci`.
+5. GitHub → Settings → Environments → `self-hosted` (tách khỏi `Production` của Vercel; chưa đặt secrets thì workflow tự bỏ qua, không báo lỗi; có thể bật Required reviewers để duyệt trước mỗi lần deploy), đặt các **secret**: `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `DEPLOY_HOST` (IP tailnet), `DEPLOY_USER`, `DEPLOY_SSH_KEY` (nội dung `deploy_key`), `DEPLOY_KNOWN_HOSTS` (kết quả bước 3), `DEPLOY_PATH`, tuỳ chọn `DEPLOY_PORT` (mặc định 22); **variable** tuỳ chọn `TS_TAGS` (mặc định `tag:ci`) và `GAME_DOMAIN` (kiểm tra health public, khi đã có domain).
 
 ## Giao thức
 
