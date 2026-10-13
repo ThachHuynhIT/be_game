@@ -123,8 +123,11 @@ jobs:
           docker compose -f compose.selfhost.yml ps
 
           for i in $(seq 1 30); do
+            # No published port: ask from inside the container (node:22 has fetch; the image has no curl).
             # Captured, not piped into grep -q: under pipefail an early-exiting grep can fail the check.
-            health=$(curl -fs http://127.0.0.1:4000/api/health || true)
+            health=$(docker compose -f compose.selfhost.yml exec -T be_game \
+              node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>r.text()).then(t=>console.log(t),()=>{})" \
+              2>/dev/null || true)
             if [[ $health == *'"ok":true'* ]]; then
               echo "healthy at $SHA"
               exit 0
