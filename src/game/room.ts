@@ -77,6 +77,8 @@ export interface RoomState {
   chat?: ChatMessage[];
   /** Host settings; missing on rooms saved before settings existed. */
   settings?: TienLenSettings;
+  /** Seats freed while their player was away (see `rememberGone`). */
+  gone?: GoneSeat[];
 }
 
 export interface TienLenSettings {
@@ -134,7 +136,82 @@ export function newRoom(code: string): RoomState {
   return { code, hostId: "", seats: [null, null, null, null], game: null, turnDeadline: null, lastWinner: null };
 }
 
-export const isOnline = (p: RoomPlayer, now: number) => !p.left && now - p.lastSeen < PRESENCE_TIMEOUT_MS;
+export const isOnline = (p: { left?: boolean; lastSeen: number }, now: number) => !p.left && now - p.lastSeen < PRESENCE_TIMEOUT_MS;
+
+/**
+ * A seat freed while its player was away (dropped after `SEAT_GRACE_MS`, or left between games).
+ * Kept so the player comes back as themselves — same id, wins and points — instead of as a
+ * newcomer with the same name. Server-only: never part of a view or summary.
+ */
+export interface GoneSeat {
+  id: string;
+  token: string;
+  name: string;
+  wins: number;
+  points?: number;
+  games?: number;
+  at: number;
+}
+/** How long a freed seat is remembered (rooms themselves live 12 h), and how many per room. */
+export const GONE_SEAT_TTL_MS = 3 * 60 * 60_000;
+const MAX_GONE_SEATS = 16;
+
+/** The seat fields every game shares. */
+type SeatLike = Omit<RoomPlayer, "points" | "games"> & { points?: number; games?: number };
+type SeatRoom<P extends SeatLike> = { seats: (P | null)[]; gone?: GoneSeat[] };
+
+const nameKey = (name: string) => cleanName(name).toLocaleLowerCase("vi");
+
+/** Remember a seat that is being freed. Kicked players are not remembered. */
+export function rememberGone(room: SeatRoom<SeatLike>, p: SeatLike, now: number) {
+  if (p.kicked) return;
+  const gone = (room.gone ?? []).filter((g) => g.id !== p.id && g.token !== p.token && now - g.at < GONE_SEAT_TTL_MS);
+  gone.push({ id: p.id, token: p.token, name: p.name, wins: p.wins, points: p.points ?? 0, games: p.games ?? 0, at: now });
+  room.gone = gone.slice(-MAX_GONE_SEATS);
+}
+
+/**
+ * The seat a joining player already has: the one holding their token, else an offline seat under
+ * the same name (the same person on a new tab or device, whose token changed), which then takes the
+ * new token. A namesake who is online keeps their seat, so the caller seats the joiner separately.
+ */
+export function findReturning<P extends SeatLike>(room: SeatRoom<P>, token: string, name: string, now: number): P | null {
+  const own = room.seats.find((p) => p?.token === token);
+  if (own) return own;
+  const key = nameKey(name);
+  const namesake = room.seats.find((p) => p && !p.kicked && !isOnline(p, now) && nameKey(p.name) === key) ?? null;
+  if (namesake) namesake.token = token;
+  return namesake;
+}
+
+/**
+ * Take the remembered seat of a player coming back after their seat was freed: by token, else by
+ * name. The caller builds the new seat from it (same id and stats). Expired entries are dropped.
+ */
+export function takeGone(room: SeatRoom<SeatLike>, token: string, name: string, now: number): GoneSeat | null {
+  const seated = new Set(room.seats.flatMap((p) => (p ? [p.id] : [])));
+  const gone = (room.gone ?? []).filter((g) => now - g.at < GONE_SEAT_TTL_MS && !seated.has(g.id));
+  const key = nameKey(name);
+  let i = gone.findIndex((g) => g.token === token);
+  if (i < 0) i = gone.findIndex((g) => nameKey(g.name) === key);
+  const back = i >= 0 ? gone.splice(i, 1)[0] : null;
+  if (gone.length) room.gone = gone;
+  else delete room.gone;
+  return back;
+}
+
+/** A new seat for `token`, continuing a remembered one when there is one. */
+export function seatFor(back: GoneSeat | null, token: string, name: string, now: number, newId: () => string) {
+  return {
+    id: back?.id ?? newId(),
+    token,
+    name: cleanName(name),
+    lastSeen: now,
+    wins: back?.wins ?? 0,
+    points: back?.points ?? 0,
+    games: back?.games ?? 0,
+  };
+}
 
 export const findByToken = (room: RoomState, token: string) => room.seats.find((p) => p?.token === token) ?? null;
 export const findById = (room: RoomState, id: string) => room.seats.find((p) => p?.id === id) ?? null;
@@ -157,7 +234,7 @@ export function joinRoom(
   if (typeof token !== "string" || token.length < 8 || token.length > 128) {
     return { ok: false, error: "Phiên không hợp lệ" };
   }
-  let player = findByToken(room, token);
+  let player = findReturning(room, token, name, now);
   if (player?.kicked) return { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" };
   if (player) {
     if (!inPlayingGame(room, player.id)) player.name = cleanName(name);
@@ -167,7 +244,7 @@ export function joinRoom(
     dropGoneSeats(room, now);
     const free = room.seats.findIndex((s) => s === null);
     if (free < 0) return { ok: false, error: "Phòng đã đủ 4 người" };
-    player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0, points: 0, games: 0 };
+    player = seatFor(takeGone(room, token, name, now), token, name, now, newId);
     room.seats[free] = player;
   }
   player.lastSeen = now;
@@ -193,6 +270,7 @@ export function leaveRoom(room: RoomState, player: RoomPlayer, now: number) {
   if (!inPlayingGame(room, player.id)) {
     const idx = room.seats.indexOf(player);
     if (idx >= 0) room.seats[idx] = null;
+    rememberGone(room, player, now);
   }
   tick(room, now);
 }
@@ -441,6 +519,7 @@ function dropGoneSeats(room: RoomState, now: number): boolean {
   room.seats = room.seats.map((p) => {
     if (p && (p.left || now - p.lastSeen > SEAT_GRACE_MS) && !inPlayingGame(room, p.id)) {
       dropped = true;
+      rememberGone(room, p, now);
       return null;
     }
     return p;
