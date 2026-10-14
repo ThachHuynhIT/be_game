@@ -95,6 +95,12 @@ jobs:
         run: |
           ssh deploy "DEPLOY_PATH='$DEPLOY_PATH' SHA='$SHA' bash -s" <<'REMOTE'
           set -euo pipefail
+          # An absolute folder under our home only. Git Bash on Windows rewrites "/home/..." into
+          # "C:/Program Files/Git/home/..." when a secret is set from it, which would deploy into ~/C:/...
+          case "$DEPLOY_PATH" in
+            "$HOME"/?*) ;;
+            *) echo "DEPLOY_PATH must be an absolute path under $HOME, got: $DEPLOY_PATH" >&2; exit 1 ;;
+          esac
           cd "$DEPLOY_PATH"
 
           # Swap the code in place. Only data/ (Redis) and .env survive; refuse to wipe a directory that
@@ -111,6 +117,12 @@ jobs:
           echo "$SHA" > REVISION
           mkdir -p data/redis
 
+          # Build in this app's own BuildKit builder instead of the daemon's default one, which the owner
+          # shares: its cache can then be capped below without touching anyone else's (no global prune).
+          docker buildx inspect be_game >/dev/null 2>&1 ||
+            docker buildx create --name be_game --driver docker-container >/dev/null
+          export BUILDX_BUILDER=be_game
+
           # The rebuild moves the be_game:local tag to the new image, so note the old one's ID first and
           # remove exactly that image afterwards. The host is shared: never a prune. With the containerd
           # image store the untagged old image is already gone, hence the existence check.
@@ -120,6 +132,11 @@ jobs:
           if [ -n "$old" ] && [ "$old" != "$new" ] && docker image inspect "$old" >/dev/null 2>&1; then
             docker image rm "$old" || echo "::warning::could not remove the previous be_game image $old"
           fi
+          # Keep only the most recent build cache (the npm ci layer makes the next build fast), then stop the
+          # builder container to give its RAM back; its state volume stays for the next deploy.
+          docker buildx prune --builder be_game --force --max-used-space 1gb >/dev/null ||
+            echo "::warning::could not prune the be_game build cache"
+          docker buildx stop be_game || true
           docker compose -f compose.selfhost.yml ps
 
           for i in $(seq 1 30); do
