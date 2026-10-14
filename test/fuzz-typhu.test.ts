@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHANCE, CHEST, type MapSize, boardOf, groupPositions, isOwnable } from "../src/typhu/board";
 import {
   type TPRules,
@@ -368,7 +368,13 @@ describe("fuzz typhu: pure timeouts auto-play", () => {
 });
 
 describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) never leaks tokens", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("runs", () => {
+    // Every random step must come from the seeded `r` passed to the room functions, so a seed is reproducible.
+    vi.spyOn(Math, "random").mockImplementation(() => {
+      throw new Error("Math.random reached from a seeded room-level run");
+    });
     for (let seed = 1; seed <= 25; seed++) {
       const r = rng(seed * 101);
       const room = newTPRoom("FZ" + seed);
@@ -379,17 +385,17 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
       for (let i = 0; i < n; i++) {
         const tok = `token-secret-${seed}-${i}-abcdef`;
         tokens.push(tok);
-        expect(joinTP(room, tok, `P${i}`, now, () => `id${id++}`).ok).toBe(true);
+        expect(joinTP(room, tok, `P${i}`, now, () => `id${id++}`, r).ok).toBe(true);
       }
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       const maps = ["std", "large", "huge"];
       const host = tokens[0];
-      tpCommand(room, host, { type: "settings", map: pk(maps) as MapSize, timeLimit: pk([20, 30]), stepSeconds: 15, startCash: pk([1000, 1500]), buildRule: pk(["even", "chain"]) as "even", needGroup: r() < 0.5, bankruptTo: pk(["bank", "creditor"]) as "bank", parkingPot: r() < 0.5, doubleGo: r() < 0.5 }, now);
-      for (const t of tokens) tpCommand(room, t, { type: "pick", emoji: pk(["🛵", "🐃", "🚲", "🚤", "🐉", "🎩", "🚗", "🐘"]), color: pk(["#ef4444", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#f97316"]) }, now);
+      tpCommand(room, host, { type: "settings", map: pk(maps) as MapSize, timeLimit: pk([20, 30]), stepSeconds: 15, startCash: pk([1000, 1500]), buildRule: pk(["even", "chain"]) as "even", needGroup: r() < 0.5, bankruptTo: pk(["bank", "creditor"]) as "bank", parkingPot: r() < 0.5, doubleGo: r() < 0.5 }, now, r);
+      for (const t of tokens) tpCommand(room, t, { type: "pick", emoji: pk(["🛵", "🐃", "🚲", "🚤", "🐉", "🎩", "🚗", "🐘"]), color: pk(["#ef4444", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#f97316"]) }, now, r);
       const emojis = room.seats.filter(Boolean).map((p) => tpView(room, p!, now).seats.find((x) => x?.id === p!.id)!.piece);
       expect(new Set(emojis.map((e) => e.emoji)).size).toBe(emojis.length);
       expect(new Set(emojis.map((e) => e.color)).size).toBe(emojis.length);
-      expect(tpCommand(room, host, { type: "start" }, now).ok).toBe(true);
+      expect(tpCommand(room, host, { type: "start" }, now, r).ok).toBe(true);
       const cmds = ["roll", "buy", "skip", "end", "payjail", "jailcard", "paydebt", "bankrupt"] as ("roll" | "buy" | "skip" | "end" | "payjail" | "jailcard" | "paydebt" | "bankrupt")[];
       for (let i = 0; i < 1500; i++) {
         const g = room.current!;
@@ -405,11 +411,11 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
         else if (x < 0.9) msg = { type: "tradeanswer", accept: r() < 0.7 };
         else msg = { type: "garbage" } as unknown as TPCommand;
         try {
-          tpCommand(room, tok, msg, now);
+          tpCommand(room, tok, msg, now, r);
           if (r() < 0.3) {
             now += pk([1000, 20_000, 31_000, 70_000]);
             for (const p of room.seats) if (p && r() < 0.9) p.lastSeen = now;
-            tickTP(room, now);
+            tickTP(room, now, r);
           }
           const view = JSON.stringify(room.seats.map((p) => tpView(room, p, now)).concat(tpView(room, null, now)));
           for (const t of tokens) if (view.includes(t)) throw new Error("token leaked in view");

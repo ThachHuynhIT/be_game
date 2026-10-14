@@ -265,6 +265,8 @@ settle(s);   // tickGame(s, T + NOPE_WINDOW_MS * 2 + 500, names, never, () => 0)
 ```
 Truyền `random` (`() => 0`) cho `newMeoGame`, `tickGame`, `giveCard`, `syncCurse` để kết quả cố định; `absent = () => false` (`never`) để không ai bị coi là offline.
 
+Qua room: `meoCommand(room, token, msg, now, random = Math.random)` (dùng cho `start` → `newMeoGame`, `give`, `kick` và `syncCurse`), `tickMeo(room, now, random = Math.random)` (→ `tickGame`, `syncCurse`) và `leaveMeo(room, token, now, random = Math.random)` (gọi `tickMeo`) đều nhận `random`; adapter không truyền nên dùng `Math.random`. `test/fuzz-meono.test.ts` truyền `rng(seed)` vào cả ba và cho `Math.random` ném lỗi.
+
 ## Lưu ý / bẫy thường gặp
 
 - `view.expansions` là `room.expansions` (gói **tick** cho custom) chứ không phải gói đang dùng; khi preset ≠ `custom` hai giá trị có thể khác nhau. Gói thật: `current.expansions` (trong ván) hoặc `packsInPlay(room)` (summary).

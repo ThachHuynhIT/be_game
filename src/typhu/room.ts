@@ -25,6 +25,7 @@ import {
   UNMORTGAGE_FEE_OPTIONS,
 } from "./board";
 import {
+  type Random,
   type Result,
   type TPState,
   answerLoan,
@@ -128,6 +129,7 @@ export function joinTP(
   name: string,
   now: number,
   newId: () => string,
+  random: Random = Math.random,
 ): { ok: true; player: TPPlayer } | { ok: false; error: string } {
   if (typeof token !== "string" || token.length < 8 || token.length > 128) return { ok: false, error: "Phiên không hợp lệ" };
   let player = findByToken(room, token);
@@ -141,7 +143,7 @@ export function joinTP(
     player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0, points: 0, games: 0 };
     room.seats[free] = player;
   }
-  ensureUniquePieces(room);
+  ensureUniquePieces(room, random);
   player.lastSeen = now;
   delete player.left;
   const host = findById(room, room.hostId);
@@ -161,7 +163,7 @@ export function tpHeartbeat(room: TPRoom, token: string, now: number) {
   if (s && now - s.lastSeen >= HEARTBEAT_WRITE_MS) s.lastSeen = now;
 }
 
-export function leaveTP(room: TPRoom, token: string, now: number) {
+export function leaveTP(room: TPRoom, token: string, now: number, random: Random = Math.random) {
   const p = findByToken(room, token);
   if (!p) {
     room.spectators = (room.spectators ?? []).filter((x) => x.token !== token);
@@ -172,10 +174,10 @@ export function leaveTP(room: TPRoom, token: string, now: number) {
     const idx = room.seats.indexOf(p);
     if (idx >= 0) room.seats[idx] = null;
   }
-  tickTP(room, now);
+  tickTP(room, now, random);
 }
 
-function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
+function startTP(room: TPRoom, host: TPPlayer, now: number, random: Random): Result {
   if (room.hostId !== host.id) return { ok: false, error: "Chỉ chủ phòng mới bắt đầu được" };
   if (room.current?.status === "playing") return { ok: false, error: "Ván đang diễn ra" };
   dropGoneSeats(room, now);
@@ -201,7 +203,7 @@ function startTP(room: TPRoom, host: TPPlayer, now: number): Result {
       jailRent: st.jailRent,
       doubleRoll: st.doubleRoll,
     },
-  });
+  }, random);
   return { ok: true };
 }
 
@@ -293,7 +295,7 @@ export function pieceOf(room: TPRoom, p: TPPlayer): { emoji: string; color: stri
 }
 
 /** Everyone must hold a different emoji and colour: a player who collides with an earlier seat gets a random free piece. */
-export function ensureUniquePieces(room: TPRoom, random: () => number = Math.random) {
+export function ensureUniquePieces(room: TPRoom, random: Random = Math.random) {
   const taken: { emoji: string; color: string }[] = [];
   for (const p of room.seats) {
     if (!p) continue;
@@ -327,10 +329,10 @@ function pickPiece(room: TPRoom, p: TPPlayer, emoji: unknown, color: unknown): R
 
 const posOf = (msg: TPCommand) => ("pos" in msg && Number.isInteger(msg.pos) ? msg.pos : -1);
 
-export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: number): Result {
+export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: number, random: Random = Math.random): Result {
   const p = findByToken(room, token);
   if (!p) return { ok: false, error: "Bạn không còn trong phòng" };
-  if (msg.type === "start") return startTP(room, p, now);
+  if (msg.type === "start") return startTP(room, p, now, random);
   if (msg.type === "kick") return kickTP(room, p, msg.playerId, now);
   if (msg.type === "pick") return pickPiece(room, p, msg.emoji, msg.color);
   if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
@@ -338,7 +340,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
     if (msg.on === true) p.auto = true;
     else delete p.auto;
     // A step that is already due (its phase started over ABSENT_MS ago) is played right away.
-    tickTP(room, now);
+    tickTP(room, now, random);
     return { ok: true };
   }
   const g = room.current;
@@ -348,7 +350,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   let res: Result;
   switch (msg.type) {
     case "roll":
-      res = rollDice(g, p.id, now, names);
+      res = rollDice(g, p.id, now, names, random);
       break;
     case "buy":
       res = buySquare(g, p.id, now, names);
@@ -366,7 +368,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
       res = payJail(g, p.id, true, now, names);
       break;
     case "paydebt":
-      res = payDebt(g, p.id, now, names);
+      res = payDebt(g, p.id, now, names, random);
       break;
     case "bankrupt":
       res = declareBankrupt(g, p.id, now, names);
@@ -404,7 +406,7 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
   if (!res.ok) return res;
   // Raised enough while in debt → settle it straight away.
   if ((msg.type === "sell" || msg.type === "mortgage" || msg.type === "sellland") && g.phase === "debt" && g.debt && g.ps[p.id].cash >= g.debt.amount) {
-    payDebt(g, p.id, now, names);
+    payDebt(g, p.id, now, names, random);
   }
   afterChange(room, now);
   return res;
@@ -434,7 +436,7 @@ function afterChange(room: TPRoom, now: number) {
   room.history = [...(room.history ?? []), record].slice(-HISTORY_LIMIT);
 }
 
-export function tickTP(room: TPRoom, now: number): boolean {
+export function tickTP(room: TPRoom, now: number, random: Random = Math.random): boolean {
   let changed = false;
   const g = room.current;
   if (g?.status === "playing") {
@@ -443,7 +445,7 @@ export function tickTP(room: TPRoom, now: number): boolean {
       return !p || !isOnline(p, now);
     };
     const auto = (id: string) => !!findById(room, id)?.auto;
-    if (tickGame(g, now, nameOf(room), absent, Math.random, auto)) {
+    if (tickGame(g, now, nameOf(room), absent, random, auto)) {
       changed = true;
       afterChange(room, now);
     }

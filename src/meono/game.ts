@@ -256,6 +256,8 @@ const CLONEABLE: CardType[] = [
   "slap", "rollcall", "corn",
 ];
 
+export type Random = () => number;
+
 export function newMeoGame(
   players: string[],
   now: number,

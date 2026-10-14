@@ -46,7 +46,10 @@ function allCards(room: MeoRoom): MCard[] {
 
 function runGame(seed: number, n: number) {
   const rand = rng(seed * 7919 + n);
-  const spy = vi.spyOn(Math, "random").mockImplementation(rand);
+  // All game randomness comes from `rand` (passed to the room functions); any Math.random left on the path would make a seed irreproducible.
+  const spy = vi.spyOn(Math, "random").mockImplementation(() => {
+    throw new Error("Math.random reached from a seeded room-level run");
+  });
   const pick = <T,>(a: T[]): T => a[Math.floor(rand() * a.length)];
   let idc = 0;
   const room = newMeoRoom("FUZZ1");
@@ -188,7 +191,7 @@ function runGame(seed: number, n: number) {
           meoHeartbeat(room, players[i].token, now);
           players[i].lastSeen = now;
         }
-        const res = meoCommand(room, host.token, { type: "start" }, now);
+        const res = meoCommand(room, host.token, { type: "start" }, now, rand);
         if (!res.ok) throw new Error(`start failed: ${res.error}`);
         break;
       }
@@ -214,7 +217,7 @@ function runGame(seed: number, n: number) {
           const cmd = randomCmd(p);
           const norm = (_k: string, v: unknown) => (_k === "cursed" || _k === "curseOrder") && (Array.isArray(v) ? !v.length : v && !Object.keys(v as object).length) ? undefined : v;
           const before = JSON.stringify(room, norm);
-          const res = meoCommand(room, p.token, cmd, now);
+          const res = meoCommand(room, p.token, cmd, now, rand);
           hist.push(`${p.name}:${JSON.stringify(cmd)}=>${res.ok ? "ok" : res.error}`);
           if (!res.ok && cmd.type !== "start") {
             const after = JSON.stringify(room, norm);
@@ -229,7 +232,7 @@ function runGame(seed: number, n: number) {
           const i = Math.floor(rand() * n);
           if (rand() < 0.5) {
             online[i] = !online[i];
-            if (!online[i] && rand() < 0.3) leaveMeo(room, players[i].token, now);
+            if (!online[i] && rand() < 0.3) leaveMeo(room, players[i].token, now, rand);
             if (online[i]) {
               const rj = joinMeo(room, players[i].token, players[i].name, now, () => `id${++idc}`);
               if (rj.ok) players[i] = rj.player;
@@ -240,14 +243,14 @@ function runGame(seed: number, n: number) {
           now += pick([50, 400, 1500, 4000, 8000, 16000, 31000]);
           for (let i = 0; i < n; i++) if (online[i]) meoHeartbeat(room, players[i].token, now);
           const before = room.current!.turn;
-          tickMeo(room, now);
+          tickMeo(room, now, rand);
           hist.push(`tick +${now}`);
           // The host kicks anyone who dropped off (their seat forfeits mid-game).
           const hostP = players.find((x) => x.id === room.hostId);
           if (hostP && rand() < 0.3) {
             for (const q of players) {
               if (q !== hostP && !isOnline(q, now) && rand() < 0.5) {
-                const kr = meoCommand(room, hostP.token, { type: "kick", playerId: q.id }, now);
+                const kr = meoCommand(room, hostP.token, { type: "kick", playerId: q.id }, now, rand);
                 hist.push(`kick ${q.name}=>${kr.ok ? "ok" : kr.error}`);
               }
             }
@@ -282,7 +285,7 @@ function runGame(seed: number, n: number) {
       // timers idle once ended
       if (room.current!.turnDeadline !== null) throw new Error("deadline after end");
       if (nextGameTickAt(room.current!) !== null) throw new Error("ended game still schedules");
-      tickMeo(room, now + 1000);
+      tickMeo(room, now + 1000, rand);
       expect(room.gameSeq).toBe(gameNo + 1);
       // drop kicked/left players so the next game can start with the remaining seated players
       now += 1000;
