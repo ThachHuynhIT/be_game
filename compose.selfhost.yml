@@ -1,0 +1,50 @@
+# Self-hosted behind the host's Traefik + Cloudflare Tunnel (no published ports, no Caddy): be_game + Redis.
+#   docker compose -f compose.selfhost.yml up -d --build      → https://${GAME_DOMAIN}
+# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN (required), ALLOWED_ORIGIN.
+#
+# be_game joins the external `traefik_network` (Traefik routes GAME_DOMAIN to it via the labels below);
+# Redis stays on the project's own network and is reachable only by be_game.
+name: be_game
+services:
+  be_game:
+    build: .
+    image: be_game:local
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PORT: "4000"
+      REDIS_URL: redis://redis:6379
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+    depends_on:
+      - redis
+    networks:
+      - default
+      - traefik_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_network"
+      - "traefik.http.routers.be_game.rule=Host(`${GAME_DOMAIN:?set GAME_DOMAIN in .env}`)"
+      - "traefik.http.routers.be_game.entrypoints=web"
+      - "traefik.http.services.be_game.loadbalancer.server.port=4000"
+      - "traefik.http.services.be_game.loadbalancer.healthcheck.path=/api"
+      - "traefik.http.services.be_game.loadbalancer.healthcheck.interval=30s"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      # Bind mount, not a named volume: lives in the deploy directory, so host backups of /home cover it.
+      - ./data/redis:/data
+
+networks:
+  default:
+    name: be_game_default
+  traefik_network:
+    name: traefik_network
+    external: true

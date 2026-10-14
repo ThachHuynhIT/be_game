@@ -51,6 +51,34 @@ const ROOM_TTL_SECONDS = 12 * 60 * 60;
 const ROOM_INDEX_WINDOW_MS = 60 * 60 * 1000;
 /** How long a recorded game id is remembered (dedupes retries). */
 const RECORD_DEDUPE_SECONDS = 30 * 24 * 60 * 60;
+/**
+ * Redis only: lobby reads are served from this process's copy for this long. Every open lobby tab polls
+ * every game's `/rooms` (5–10 s), so without it Redis commands grow with viewers × polls — the Upstash
+ * free tier (500k commands/month) ran out from idle lobby tabs. Stale by at most this much.
+ */
+export const RECENT_ROOMS_CACHE_MS = 4_000;
+/** Redis only: leaderboard reads are cached this long (it only changes when a game ends). */
+export const LEADERBOARD_CACHE_MS = 30_000;
+/** Redis only: expired entries are dropped from the lobby index at most this often (not on every read). */
+export const INDEX_PRUNE_INTERVAL_MS = 60_000;
+
+/** Coalesces concurrent calls and reuses the result for `ttlMs` (per key). */
+class ShortCache<T> {
+  private entries = new Map<string, { at: number; value: Promise<T> }>();
+  constructor(private ttlMs: number) {}
+  get(key: string, load: () => Promise<T>): Promise<T> {
+    const now = Date.now();
+    const hit = this.entries.get(key);
+    if (hit && now - hit.at < this.ttlMs) return hit.value;
+    const value = load();
+    this.entries.set(key, { at: now, value });
+    // A failed read is not cached: the next caller retries.
+    value.catch(() => {
+      if (this.entries.get(key)?.value === value) this.entries.delete(key);
+    });
+    return value;
+  }
+}
 
 /** Redis key layout per game; Tiến Lên keeps its original `tienlen:` keys. */
 function keysFor(game: GameKind) {
@@ -195,6 +223,9 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
   private sub: Redis | null = null;
   private listeners = new Map<string, Set<(version?: number) => void>>();
   private k: ReturnType<typeof keysFor>;
+  private recentCache = new ShortCache<S[]>(RECENT_ROOMS_CACHE_MS);
+  private boardCache = new ShortCache<LeaderboardEntry[]>(LEADERBOARD_CACHE_MS);
+  private lastPrune = 0;
 
   constructor(
     private redis: Redis,
@@ -268,9 +299,15 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
       RECORD_DEDUPE_SECONDS,
       this.k.lbPlayer(""),
     );
+    // Show this instance's own results right away; other instances catch up within LEADERBOARD_CACHE_MS.
+    this.boardCache = new ShortCache(LEADERBOARD_CACHE_MS);
   }
 
-  async leaderboard(limit: number) {
+  leaderboard(limit: number) {
+    return this.boardCache.get(String(limit), () => this.readLeaderboard(limit));
+  }
+
+  private async readLeaderboard(limit: number) {
     const members = await this.redis.zrevrange(this.k.lbPoints, 0, limit - 1);
     if (!members.length) return [];
     const pipe = this.redis.pipeline();
@@ -288,10 +325,17 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
       }));
   }
 
-  async recentRooms(limit: number) {
+  recentRooms(limit: number) {
+    return this.recentCache.get(String(limit), () => this.readRecentRooms(limit));
+  }
+
+  private async readRecentRooms(limit: number) {
     const now = Date.now();
-    // Drop index entries for rooms that have certainly expired.
-    await this.redis.zremrangebyscore(this.k.index, 0, now - ROOM_TTL_SECONDS * 1000);
+    // Drop index entries for rooms that have certainly expired (the read below ignores them anyway).
+    if (now - this.lastPrune >= INDEX_PRUNE_INTERVAL_MS) {
+      this.lastPrune = now;
+      await this.redis.zremrangebyscore(this.k.index, 0, now - ROOM_TTL_SECONDS * 1000);
+    }
     const codes = await this.redis.zrevrangebyscore(this.k.index, "+inf", now - ROOM_INDEX_WINDOW_MS, "LIMIT", 0, limit);
     if (!codes.length) return [];
     const pipe = this.redis.pipeline();
@@ -342,6 +386,10 @@ export function getRoomStore<S extends CodedRoom = CodedRoom>(game: GameKind = "
   }
   return store as Promise<RoomStore<S>>;
 }
+
+/** For tests: a Redis-backed store over any ioredis-compatible client (e.g. a fake that counts commands). */
+export const createRedisRoomStore = <S extends CodedRoom = CodedRoom>(redis: Redis, game: GameKind = "tienlen"): RoomStore<S> =>
+  new RedisRoomStore<S>(redis, game);
 
 /** For tests. */
 export const createMemoryRoomStore = <S extends CodedRoom = CodedRoom>(): RoomStore<S> => new MemoryRoomStore<S>();

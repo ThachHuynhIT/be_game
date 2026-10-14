@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 # Vercel
 .vercel
+
+# Claude Code: commit shared rules (.claude/rules/), keep local state out
+.claude/worktrees/
+.claude/settings.local.json

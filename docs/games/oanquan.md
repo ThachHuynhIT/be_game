@@ -108,7 +108,7 @@ stateDiagram-v2
 
 ## Lệnh (client → server)
 
-`oqCommand(room, token, msg, now)`. Lỗi chung: `"Bạn không còn trong phòng"`, `"Chưa bắt đầu ván"`, `"Bạn không chơi ván này"`, `"Lệnh không hợp lệ"`.
+`oqCommand(room, token, msg, now, random = Math.random)` (`random` dùng khi `start` tạo ván). Lỗi chung: `"Bạn không còn trong phòng"`, `"Chưa bắt đầu ván"`, `"Bạn không chơi ván này"`, `"Lệnh không hợp lệ"`.
 
 | `type` | Trường | Khi nào được | Tác dụng | Lỗi thường gặp |
 |---|---|---|---|---|
@@ -137,7 +137,7 @@ stateDiagram-v2
 ## Kết thúc ván & tính điểm
 
 - `finish(reason, sole)`: tính `ranks`, `finished`, `winner` như trên.
-- `afterChange` (room): `scoreByRank(finished, settings)` (`+first, +second, …, −second, −first`, 2 người `+first / −first`). **Chung hạng** chia nhau điểm trung bình của các vị trí họ chiếm (cắt về 0, nên 2 người hoà = 0 điểm cả hai); `rank` trong `GameRecord` là hạng chung; `wins` chỉ tăng cho người **duy nhất** hạng nhất. Record `{ id: "<code>-<gameSeq>-<at>", at, instantWin: null, results }` vào `history`; hub ghi bảng xếp hạng.
+- `afterChange` (room): `scoreByRank(finished, settings)` (`+first, +second, …, −second, −first`, 2 người `+first / −first`). **Chung hạng** chia nhau điểm trung bình của các vị trí họ chiếm, **làm tròn xuống** (`oqDeltas`: `Math.floor(...) || 0`, `|| 0` để không ra `-0`). Làm tròn chỉ có thể bớt điểm nên tổng điểm một ván không bao giờ dương; 2 người hoà = 0 điểm cả hai. (Trước đây cắt về 0: hai người chung hạng chót (−1, −2) mỗi người chỉ mất 1, ván 4 người tổng +1 — fuzz đã bắt.) `rank` trong `GameRecord` là hạng chung; `wins` chỉ tăng cho người **duy nhất** hạng nhất. Record `{ id: "<code>-<gameSeq>-<at>", at, instantWin: null, results }` vào `history`; hub ghi bảng xếp hạng.
 
 ## Test
 
@@ -148,7 +148,7 @@ stateDiagram-v2
 Viết test tất định:
 - `const s = newOQGame(["a","b"], T, { quanValue: 10, quanNon: true }, () => 0); s.players = ["a","b"]; s.turn = "a";`
 - Dựng bàn tuỳ ý bằng cách gán `s.dan = [...12 số]`, `s.quan = [bool, bool]`, `s.captured[id] = {dan, quan}`; tổng dân bảo toàn = `Σ dan + Σ captured.dan` (dùng để kiểm tra).
-- `tickGame(s, now, names, absent, random)` nhận `random` để chọn nước đi hộ; room `tickOQ` không nhận `random` (dùng `Math.random`).
+- `tickGame(s, now, names, absent, random)` nhận `random` để chọn nước đi hộ; ở mức phòng `tickOQ(room, now, random = Math.random)` và `oqCommand(..., random)` cũng nhận `random` — test phòng (`test/fuzz-oanquan.test.ts`) truyền RNG có seed để không phụ thuộc `Math.random` (trước đây test này thỉnh thoảng đỏ trên CI).
 
 ## Lưu ý / bẫy thường gặp
 

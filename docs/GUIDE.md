@@ -2,13 +2,13 @@
 
 Tài liệu này mô tả be_game đủ chi tiết để sửa / thêm tính năng mà **không cần đọc source trước**. Mọi tên file, hàm, hằng số và hình dạng message dưới đây đều lấy từ code hiện tại. Khi code đổi, cập nhật tài liệu cùng commit.
 
-Mục lục: [Tổng quan](#tổng-quan) · [Kiến trúc](#kiến-trúc) · [Giao thức WebSocket](#giao-thức-websocket) · [Tick & deadline](#tick--deadline) · [Presence, khán giả, emoji, chat](#presence-heartbeat-mất-kết-nối) · [Lịch sử, điểm, leaderboard](#lịch-sử-ván-điểm-xếp-hạng-và-leaderboard) · [HTTP endpoints](#http-endpoints) · [Chạy local, env, test, deploy](#chạy-local) · [Thêm một game mới](#thêm-một-game-mới) · [Quy ước & bẫy](#quy-ước-chung--bẫy-thường-gặp)
+Mục lục: [Tổng quan](#tổng-quan) · [Kiến trúc](#kiến-trúc) · [Giao thức WebSocket](#giao-thức-websocket) · [Tick & deadline](#tick--deadline) · [Presence, khán giả, emoji, chat](#presence-heartbeat-mất-kết-nối) · [Lịch sử, điểm, leaderboard](#lịch-sử-ván-điểm-xếp-hạng-và-leaderboard) · [HTTP endpoints](#http-endpoints) · [Chạy local, env, test, deploy](#chạy-local) · [Môi trường & phát hành](DEPLOYMENT.md) · [Server tự host](SELF_HOSTING.md) · [Thêm một game mới](#thêm-một-game-mới) · [Quy ước & bẫy](#quy-ước-chung--bẫy-thường-gặp)
 
 ---
 
 ## Tổng quan
 
-be_game là backend realtime (Node `http.Server` + `ws`) cho các game online trên site portfolio. Nó chạy trên **Vercel Functions** (WebSocket, Fluid compute) với trạng thái phòng lưu trong **Redis**, hoặc chạy một tiến trình local với store trong RAM. Frontend nằm ở repo `portfolio` (Next.js), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`).
+be_game là backend realtime (Node `http.Server` + `ws`) cho các game online trên site portfolio. Cùng một code chạy ở ba kiểu: **tiến trình Node** (`src/local.ts`, Docker) với Redis — đây là máy chính `play-api.fudio101.com`; **Vercel Functions** (WebSocket, Fluid compute) với Upstash Redis — máy dự phòng `be-game-omega.vercel.app`; và local với store trong RAM. Frontend nằm ở repo `portfolio` (Next.js), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`) và tự chuyển sang `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` khi máy chính không trả lời. Môi trường và luồng phát hành: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 | Game | `GameKind` | Thư mục | Số người | Route frontend | WebSocket | Tài liệu |
 |---|---|---|---|---|---|---|
@@ -69,8 +69,8 @@ interface RoomStore<S extends CodedRoom> {
   save(state, expectedVersion): Promise<boolean>; // CAS: chỉ lưu nếu version khớp, rồi publish
   subscribe(code, listener): Promise<() => void>; // gọi sau mỗi save thành công (mọi instance)
   recordGame(record: GameRecord): Promise<void>;  // idempotent theo record.id
-  leaderboard(limit): Promise<LeaderboardEntry[]>;
-  recentRooms(limit): Promise<S[]>;            // mới cập nhật trước
+  leaderboard(limit): Promise<LeaderboardEntry[]>; // Redis: cache trong process 30 s (LEADERBOARD_CACHE_MS), xoá cache khi process này recordGame
+  recentRooms(limit): Promise<S[]>;            // mới cập nhật trước; Redis: cache trong process 4 s (RECENT_ROOMS_CACHE_MS), gộp lời gọi đồng thời, dọn index tối đa 1 lần/phút
 }
 ```
 
@@ -257,13 +257,16 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | Lấy biến đầu tiên có giá trị (`redisUrl()`). Bắt buộc trên Vercel |
-| `ALLOWED_ORIGIN` | trống → cho phép mọi origin | Danh sách cách nhau dấu phẩy, `*` khớp `[a-z0-9-.]+`, có `*` đơn lẻ = cho tất cả. Request không có `Origin` (client không phải trình duyệt) và trang cùng host luôn được phép. Dùng cho cả upgrade WS (403) lẫn CORS HTTP |
+| `ALLOWED_ORIGIN` | trống → cho phép mọi origin | Danh sách cách nhau dấu phẩy, `*` khớp `[a-z0-9-.]+`, có `*` đơn lẻ = cho tất cả. Request không có `Origin` (client không phải trình duyệt) và trang cùng host luôn được phép. Dùng cho cả upgrade WS (403; qua Cloudflare/Traefik thường hiện thành 502) lẫn CORS HTTP. Không dùng `https://*.vercel.app` |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Chỉ cho `src/local.ts` |
+| `GAME_DOMAIN` | — | Chỉ cho file compose: tên miền public (Caddy trong `docker-compose.yml`, label Traefik trong `compose.selfhost.yml` — bắt buộc) |
 | `VERCEL`, `VERCEL_REGION` | Vercel tự đặt | Cảnh báo thiếu Redis; trường `region` của health |
+
+Giá trị thật ở từng môi trường: [`DEPLOYMENT.md` → Biến môi trường](DEPLOYMENT.md#biến-môi-trường-theo-nơi-chạy).
 
 ## Test
 
-- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 21 file / khoảng 340 test, chạy vài giây.
+- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 25 file / khoảng 360 test, chạy dưới một phút. CI chạy toàn bộ trên mỗi PR và mỗi push vào `main`; **CI đỏ trên `main` chặn deploy máy chính**, nên test phải tất định (không phụ thuộc `Math.random()`/`Date.now()` chưa inject).
 - Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`).
 - **Fuzz test** (`test/fuzz-<game>.test.ts`, mỗi game một file; Bang và Ô Ăn Quan còn có thêm test ngẫu nhiên riêng): chơi ngẫu nhiên có seed với 2…N người, gồm cả **lệnh rác** và lệnh bất hợp lệ lấy từ view hiện tại, hết giờ (`tick`), người vắng mặt, kick, rời bàn. Kiểm tra bất biến: không exception, ván luôn kết thúc, bảo toàn bài / quân / tiền, state JSON round-trip bằng nhau, lệnh bị từ chối **không** làm đổi state, view không lộ token hay bài ẩn của người khác. Chạy mặc định vài seed (dưới ~5 s mỗi file); tăng bằng biến môi trường `FUZZ_SEEDS` (Mèo Nổ, Tiến Lên) khi cần soi kỹ. Khi thêm luật mới nên chạy lại fuzz của game đó.
 - **Quy ước**:
@@ -274,11 +277,14 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
   - Token test phải ≥ 8 ký tự (`"token-0-xxxxxx"`).
   - Test qua hub: `createRoomHub(createMemoryRoomStore(), xxxAdapter)` rồi `hub.createRoom()` / `hub.mutate(code, …)`.
 
-## Deploy (Vercel)
+## Deploy
 
-- `vercel.json`: `regions: ["sin1"]`, `maxDuration: 300` cho `api/ws.ts` và `api/[game]/[kind].ts`. Cần **Fluid compute** và Redis (Upstash, region Singapore).
-- Gói **Hobby giới hạn 12 function**. Hiện có **5**: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts`, `api/[game]/[kind].ts`. Game mới **không** thêm file vào `api/` — chỉ thêm route trong `app.ts` (file động đã bắt mọi `/api/<game>/<kind>`).
-- Kiểm tra sau deploy: `GET /api/health` → `"ok": true, "store": "redis", "region": "sin1"`.
+Merge vào `main` deploy **hai backend độc lập**: Vercel (máy dự phòng, qua Vercel Git) và máy tự host (máy chính, qua workflow Deploy sau khi CI xanh). Môi trường, luồng phát hành, giữ tương thích giữa hai máy và portfolio, kiểm tra sau deploy, quay lại: [`DEPLOYMENT.md`](DEPLOYMENT.md). Thao tác trên server: [`SELF_HOSTING.md`](SELF_HOSTING.md).
+
+Riêng Vercel:
+- `vercel.json`: `regions: ["sin1"]`, `maxDuration: 300` cho `api/ws.ts` và `api/[game]/[kind].ts`. Cần **Fluid compute** và Redis (Upstash, region Singapore). Preview của mọi nhánh dùng **chung** store Upstash với production.
+- Gói **Hobby giới hạn 12 function**. Hiện có **5**: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts`, `api/[game]/[kind].ts`. Game mới **không** thêm file vào `api/` — chỉ thêm route trong `app.ts` (file động đã bắt mọi `/api/<game>/<kind>`). `/api` trần không phải function nên trả 404 trên Vercel (local/tự host thì trả danh sách route).
+- Kiểm tra sau deploy: `GET /api/health` → `"ok": true, "store": "redis", "region": "sin1"` (tự host: `"region": "local"`).
 
 ---
 
@@ -325,6 +331,8 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 - **Mã phòng**: `randomCode()` 5 ký tự từ `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (không I, O, 0, 1); server nhận tối đa 8 ký tự, viết hoa.
 - **Dedupe leaderboard theo `record.id = code-gameSeq-at`** trong 30 ngày (`at` = lúc ván kết thúc), nên mã phòng được tạo lại sau khi hết hạn vẫn ghi đủ ván. Memory store giữ `recorded` mãi trong process.
 - **Ngẫu nhiên phải đi hết đường xuống**: test có seed chỉ tất định khi mọi lần bốc ngẫu nhiên đều đi qua `random` được truyền vào. Ở mức phòng, Cờ Cá Ngựa (`cnCommand`, `tickCN`), Ô Ăn Quan (`oqCommand`, `tickOQ`), Mèo Nổ (`meoCommand`, `tickMeo`, `leaveMeo`) và Cờ Tỷ Phú (`joinTP`, `tpCommand`, `tickTP`, `leaveTP`) đều nhận `random = Math.random` ở tham số cuối; adapter không truyền nên server vẫn dùng `Math.random`. Fuzz mức phòng của Mèo Nổ và Cờ Tỷ Phú truyền RNG có seed và cho `Math.random` **ném lỗi**, nên lỡ còn chỗ gọi thẳng thì test đỏ ngay chứ không chập chờn. Các id tin nhắn/emoji (`src/game/room.ts`) và độ trễ thử lại CAS (`hub.ts`) dùng `Math.random` cũng được, vì không ảnh hưởng luật chơi. Test chập chờn nguy hiểm vì CI đỏ trên `main` chặn deploy máy chính.
+- **Hai chỗ portfolio dựa vào**: `GET /api/rooms` (portfolio dùng để thử máy chủ còn sống — phải luôn có trên mọi môi trường và rẻ) và chuỗi lỗi `"Không tìm thấy phòng"` của hub (portfolio dựa vào nó để thử máy còn lại khi mở link mời). Đổi một trong hai thì đổi portfolio cùng đợt.
+- **Hai backend chạy cùng lúc** (tự host + Vercel) và deploy không cùng thời điểm với portfolio: thay đổi giao thức chỉ thêm field optional, không đổi tên/bỏ trong một bước ([`DEPLOYMENT.md` → Giữ tương thích](DEPLOYMENT.md#giữ-tương-thích-khi-đổi-code)).
 - `MAX_RANK_POINTS` được khai báo hai lần (`src/game/scoring.ts` và `src/game/room.ts`, cùng 20); `updateSettings` của Tiến Lên tự kiểm tra thay vì gọi `checkRankPoints`.
 
 ### Lỗi đã bắt bằng fuzz (để biết loại bẫy cần tránh)
@@ -333,4 +341,5 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 - **Mèo Nổ**: `mplay [x, x]` (trùng id lá bài) làm `takeFromHand` trả `null` → từ chối trùng id. Kick người đang có lượt khi lời mời Dọn rác / Góp nồi / Nuôi xác sống mở: `eliminate` phải chuyển lượt. `playerRange` kẹp theo `maxPlayers(packs)` (preset `zombiechaos` tối đa 6). `kickMeo` gọi `syncCurse` ngay sau forfeit.
 - **Cờ Tỷ Phú**: chủ nợ phá sản / bị kick giữa lúc con nợ đang `debt` → nợ chuyển về ngân hàng, không để tiền vào ghế đã phá sản.
 - **Điểm hạng**: `-second` ra `-0` khi Nhì = 0 làm room khác bản JSON round-trip → dùng `0 - x`.
+- **Chia điểm khi chung hạng** (Ô Ăn Quan): lấy trung bình rồi cắt về 0 làm hai người chung hạng chót (−1, −2) mỗi người chỉ mất 1, tổng ván +1 → làm tròn **xuống** (`Math.floor(...) || 0`) để làm tròn chỉ có thể bớt điểm. Bất biến chung: tổng điểm một ván không bao giờ dương.
 - Chung: mọi trạng thái phải là JSON thuần và `JSON.parse(JSON.stringify(state))` phải bằng chính nó (kể cả `-0`, `undefined`, `NaN`).
