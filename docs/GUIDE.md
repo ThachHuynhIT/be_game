@@ -69,8 +69,8 @@ interface RoomStore<S extends CodedRoom> {
   save(state, expectedVersion): Promise<boolean>; // CAS: chỉ lưu nếu version khớp, rồi publish
   subscribe(code, listener): Promise<() => void>; // gọi sau mỗi save thành công (mọi instance)
   recordGame(record: GameRecord): Promise<void>;  // idempotent theo record.id
-  leaderboard(limit): Promise<LeaderboardEntry[]>;
-  recentRooms(limit): Promise<S[]>;            // mới cập nhật trước
+  leaderboard(limit): Promise<LeaderboardEntry[]>; // Redis: cache trong process 30 s (LEADERBOARD_CACHE_MS), xoá cache khi process này recordGame
+  recentRooms(limit): Promise<S[]>;            // mới cập nhật trước; Redis: cache trong process 4 s (RECENT_ROOMS_CACHE_MS), gộp lời gọi đồng thời, dọn index tối đa 1 lần/phút
 }
 ```
 
