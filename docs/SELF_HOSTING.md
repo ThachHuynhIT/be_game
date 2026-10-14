@@ -1,6 +1,6 @@
 # be_game — Tự host và tự động deploy
 
-Tài liệu vận hành bản be_game chạy trên máy chủ riêng `vsmart-zangyapro`, public ở `https://game.fudio101.com`, deploy tự động từ GitHub Actions. Phần kiến trúc code, giao thức và luật chơi nằm ở [`GUIDE.md`](GUIDE.md). Khi đổi workflow, compose hay cấu hình server, cập nhật file này trong cùng commit.
+Tài liệu vận hành bản be_game chạy trên máy chủ riêng `vsmart-zangyapro`, public ở `https://play-api.fudio101.com`, deploy tự động từ GitHub Actions. Phần kiến trúc code, giao thức và luật chơi nằm ở [`GUIDE.md`](GUIDE.md). Khi đổi workflow, compose hay cấu hình server, cập nhật file này trong cùng commit.
 
 Mục lục: [Sơ đồ](#sơ-đồ) · [Máy chủ](#máy-chủ-vsmart-zangyapro) · [Cấu hình](#cấu-hình-nằm-ở-đâu) · [Luồng deploy](#luồng-deploy) · [Vận hành](#vận-hành) · [Quy tắc máy dùng chung](#quy-tắc-trên-máy-dùng-chung) · [Xử lý sự cố](#xử-lý-sự-cố) · [Vì sao làm vậy](#vì-sao-làm-vậy)
 
@@ -12,7 +12,7 @@ Mục lục: [Sơ đồ](#sơ-đồ) · [Máy chủ](#máy-chủ-vsmart-zangyapr
 flowchart LR
   subgraph Internet
     B["Trình duyệt<br/>portfolio-thach.vercel.app<br/>+ preview"]
-    CF["Cloudflare<br/>game.fudio101.com"]
+    CF["Cloudflare<br/>play-api.fudio101.com"]
     GH["GitHub Actions<br/>CI → Deploy"]
   end
   subgraph Host["vsmart-zangyapro (chủ máy: fudio101)"]
@@ -30,7 +30,7 @@ flowchart LR
 
 - Traffic public đi **Cloudflare Tunnel → Traefik → be_game**. Không cổng nào của be_game hay Redis được publish ra host.
 - GitHub vào máy bằng Tailscale: runner gia nhập tailnet của chủ máy như một node tạm gắn `tag:ci`, rồi SSH vào.
-- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `game.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Hai máy có Redis riêng nên phòng không chuyển qua lại; ván đang chơi trên máy chính sẽ chờ máy chính sống lại.
+- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Hai máy có Redis riêng nên phòng không chuyển qua lại; ván đang chơi trên máy chính sẽ chờ máy chính sống lại.
 
 ## Máy chủ `vsmart-zangyapro`
 
@@ -43,14 +43,15 @@ flowchart LR
 
 | Nơi | Tên | Giá trị / ý nghĩa | Ai quản lý |
 |---|---|---|---|
-| Server `~/apps/be_game/.env` | `GAME_DOMAIN` | `game.fudio101.com` — bắt buộc, Traefik route theo tên này | zonenop |
-| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000` | zonenop |
+| Server `~/apps/be_game/.env` | `GAME_DOMAIN` | `play-api.fudio101.com` — bắt buộc, Traefik route theo tên này | zonenop |
+| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000,https://zonenop-game.vercel.app,https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app,https://play.fudio101.com` | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
 | GitHub env `self-hosted` (secret) | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_PORT`? | IP tailnet của server, `zonenop`, `/home/zonenop/apps/be_game`, mặc định 22 | zonenop |
 | GitHub env `self-hosted` (secret) | `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | Private key `be_game-deploy@github-actions`; host key đã ghim bằng `ssh-keyscan` | zonenop |
-| GitHub env `self-hosted` (variable) | `GAME_DOMAIN`, `TS_TAGS`? | `game.fudio101.com` (bật bước kiểm tra health public); tag mặc định `tag:ci` | zonenop |
+| GitHub env `self-hosted` (variable) | `GAME_DOMAIN`, `TS_TAGS`? | `play-api.fudio101.com` (bật bước kiểm tra health public); tag mặc định `tag:ci` | zonenop |
 | Server `~/.ssh/authorized_keys` | `be_game-deploy@github-actions` | Giới hạn `restrict,from="100.64.0.0/10,fd7a:115c:a1e0::/48"`: chỉ từ tailnet, không pty, không forward | zonenop |
-| Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://game.fudio101.com` (production, preview, development). Gắn vào bundle **lúc build**: đổi thì phải redeploy | zonenop |
+| zonenop-game tự host (`~/apps/zonenop-game`) | — | Frontend ở `https://play.fudio101.com`, gọi be_game qua `https://play-api.fudio101.com`; hai hostname cùng tunnel và Traefik của chủ máy | zonenop |
+| Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://play-api.fudio101.com` (production, preview, development). Gắn vào bundle **lúc build**: đổi thì phải redeploy | zonenop |
 | Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | `https://be-game-omega.vercel.app`: máy dự phòng. Máy chính không trả lời thì sảnh và bàn mới dùng máy này; phòng đã có vẫn gắn với máy tạo ra nó (portfolio `docs/GAMES_GUIDE.md` §1.2) | zonenop |
 | Tailscale admin | `tag:ci` + ACL | `tag:ci` chỉ được vào `vsmart-zangyapro:22` | chủ máy |
 | Traefik, cloudflared | `traefik_network`, entrypoint `web`, tunnel | Hạ tầng public | chủ máy |
@@ -90,7 +91,7 @@ Mọi lệnh dưới đây chạy trên server trong `~/apps/be_game` (`ssh vsma
 |---|---|
 | Trạng thái | `dc ps` · `cat REVISION` |
 | Health (trong container) | `dc exec -T be_game node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>r.text()).then(console.log)"` |
-| Health (public) | `curl https://game.fudio101.com/api/health` (từ máy bất kỳ) |
+| Health (public) | `curl https://play-api.fudio101.com/api/health` (từ máy bất kỳ) |
 | Log | `dc logs -f --tail 100 be_game` |
 | Khởi động lại be_game | `dc restart be_game` |
 | Áp dụng `.env` mới | `dc up -d` |

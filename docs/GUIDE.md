@@ -8,7 +8,7 @@ Mục lục: [Tổng quan](#tổng-quan) · [Kiến trúc](#kiến-trúc) · [Gi
 
 ## Tổng quan
 
-be_game là backend realtime (Node `http.Server` + `ws`) cho các game online trên site portfolio. Cùng một code chạy ở ba kiểu: **tiến trình Node** (`src/local.ts`, Docker) với Redis — đây là máy chính `game.fudio101.com`; **Vercel Functions** (WebSocket, Fluid compute) với Upstash Redis — máy dự phòng `be-game-omega.vercel.app`; và local với store trong RAM. Frontend nằm ở repo `portfolio` (Next.js), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`) và tự chuyển sang `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` khi máy chính không trả lời. Môi trường và luồng phát hành: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+be_game là backend realtime (Node `http.Server` + `ws`) cho các game online trên site portfolio. Cùng một code chạy ở ba kiểu: **tiến trình Node** (`src/local.ts`, Docker) với Redis — đây là máy chính `play-api.fudio101.com`; **Vercel Functions** (WebSocket, Fluid compute) với Upstash Redis — máy dự phòng `be-game-omega.vercel.app`; và local với store trong RAM. Frontend nằm ở repo `portfolio` (Next.js), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`) và tự chuyển sang `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` khi máy chính không trả lời. Môi trường và luồng phát hành: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 | Game | `GameKind` | Thư mục | Số người | Route frontend | WebSocket | Tài liệu |
 |---|---|---|---|---|---|---|
