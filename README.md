@@ -11,7 +11,7 @@ Trình duyệt (portfolio /tien-len …)
    │  wss://…/api/ws  (thử máy chính trước, không trả lời thì sang máy dự phòng)
    ├──────────────────────────────────────┐
    ▼                                      ▼
-game.fudio101.com  (máy chính)           be-game-omega.vercel.app  (dự phòng)
+play-api.fudio101.com  (máy chính)           be-game-omega.vercel.app  (dự phòng)
 Cloudflare Tunnel → Traefik →            Vercel Functions api/*.ts
 src/local.ts trong Docker                (region sin1, Fluid compute)
    │  CAS (Lua) + pub/sub                   │  CAS (Lua) + pub/sub
@@ -91,7 +91,7 @@ Không có Redis thì dùng store trong RAM. Mẫu biến môi trường: `.env.
 
 | | Máy chính | Máy dự phòng |
 |---|---|---|
-| URL | `https://game.fudio101.com` | `https://be-game-omega.vercel.app` |
+| URL | `https://play-api.fudio101.com` | `https://be-game-omega.vercel.app` |
 | Chạy ở | Server tự host `vsmart-zangyapro` (`compose.selfhost.yml`) | Vercel project `be-game` |
 | Deploy | Workflow **Deploy** sau khi CI pass trên `main` | Vercel Git, mỗi push vào `main` (nhánh khác → preview) |
 | Tài liệu | [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) | mục "Deploy lên Vercel" bên dưới |
@@ -137,7 +137,7 @@ Ghi chú vận hành:
 
 ## Máy chính và tự động deploy (CD qua SSH)
 
-Bản đang chạy thật ở `https://game.fudio101.com` (máy chủ `vsmart-zangyapro`, sau Cloudflare Tunnel + Traefik), dùng `compose.selfhost.yml`: be_game + Redis, không publish cổng nào. `.github/workflows/deploy.yml` tự deploy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR): runner vào tailnet bằng Tailscale OIDC, gửi đúng commit đã test qua SSH, `docker compose up -d --build`, rồi kiểm tra `/api/health`.
+Bản đang chạy thật ở `https://play-api.fudio101.com` (máy chủ `vsmart-zangyapro`, sau Cloudflare Tunnel + Traefik), dùng `compose.selfhost.yml`: be_game + Redis, không publish cổng nào. `.github/workflows/deploy.yml` tự deploy mỗi khi CI pass trên một lần push vào `main` (gồm cả merge PR): runner vào tailnet bằng Tailscale OIDC, gửi đúng commit đã test qua SSH, `docker compose up -d --build`, rồi kiểm tra `/api/health`.
 
 Sơ đồ, nơi đặt từng cấu hình (`.env` trên server, secret GitHub, biến Vercel), cách chuẩn bị một lần, lệnh vận hành, quy tắc trên máy dùng chung và bảng xử lý sự cố: [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
 

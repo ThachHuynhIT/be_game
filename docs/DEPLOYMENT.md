@@ -1,6 +1,6 @@
 # be_game — Môi trường, phát hành và lưu ý vận hành
 
-be_game chạy **hai backend thật cùng lúc**, cùng code từ nhánh `main`: server tự host `https://game.fudio101.com` là máy chính, Vercel `https://be-game-omega.vercel.app` là máy dự phòng. Portfolio tự chuyển sang máy dự phòng khi máy chính không trả lời. Tài liệu này mô tả các môi trường, luồng từ PR tới hai backend, những gì phải giữ tương thích, và các bài học vận hành. Thao tác trên server (lệnh, cấu hình, sự cố) nằm ở [`SELF_HOSTING.md`](SELF_HOSTING.md); kiến trúc code ở [`GUIDE.md`](GUIDE.md).
+be_game chạy **hai backend thật cùng lúc**, cùng code từ nhánh `main`: server tự host `https://play-api.fudio101.com` là máy chính, Vercel `https://be-game-omega.vercel.app` là máy dự phòng. Portfolio tự chuyển sang máy dự phòng khi máy chính không trả lời. Tài liệu này mô tả các môi trường, luồng từ PR tới hai backend, những gì phải giữ tương thích, và các bài học vận hành. Thao tác trên server (lệnh, cấu hình, sự cố) nằm ở [`SELF_HOSTING.md`](SELF_HOSTING.md); kiến trúc code ở [`GUIDE.md`](GUIDE.md).
 
 Mục lục: [Môi trường](#các-môi-trường) · [Portfolio chọn backend](#portfolio-chọn-backend-thế-nào) · [Luồng phát hành](#luồng-phát-hành) · [Biến môi trường](#biến-môi-trường-theo-nơi-chạy) · [Giữ tương thích](#giữ-tương-thích-khi-đổi-code) · [Kiểm tra sau deploy](#kiểm-tra-sau-deploy) · [Sự cố và quay lại](#sự-cố-và-quay-lại) · [Bảo mật](#bảo-mật) · [Bài học](#bài-học-đã-gặp)
 
@@ -10,7 +10,7 @@ Mục lục: [Môi trường](#các-môi-trường) · [Portfolio chọn backend
 
 | Môi trường | URL | Chạy ở đâu | Store | Được deploy khi | Vai trò |
 |---|---|---|---|---|---|
-| **Tự host (chính)** | `https://game.fudio101.com` | Điện thoại `vsmart-zangyapro` (arm64), `compose.selfhost.yml`, sau Cloudflare Tunnel + Traefik của chủ máy | Redis trong compose, `./data/redis` | Workflow **Deploy** sau khi CI pass trên một lần push vào `main` | Phục vụ portfolio |
+| **Tự host (chính)** | `https://play-api.fudio101.com` | Điện thoại `vsmart-zangyapro` (arm64), `compose.selfhost.yml`, sau Cloudflare Tunnel + Traefik của chủ máy | Redis trong compose, `./data/redis` | Workflow **Deploy** sau khi CI pass trên một lần push vào `main` | Phục vụ portfolio |
 | **Vercel production (dự phòng)** | `https://be-game-omega.vercel.app` | Vercel Functions, region `sin1`, Fluid compute | Upstash Redis (Singapore) | Vercel Git: **mỗi push vào `main`** | Portfolio tự chuyển sang khi máy chính không trả lời; nơi quay về khi cần |
 | **Vercel preview** | `be-game-<hash>-thachs-projects-48e5eaf9.vercel.app` | Như trên | **Cùng Upstash Redis với production** (xem [Bài học](#bài-học-đã-gặp)) | Vercel Git: **mỗi push vào mọi nhánh khác** | Thử PR với frontend thật |
 | **Local** | `http://localhost:4000` | `npm run dev` | RAM (hoặc `REDIS_URL` nếu đặt) | Tay | Phát triển, test |
@@ -18,7 +18,7 @@ Mục lục: [Môi trường](#các-môi-trường) · [Portfolio chọn backend
 
 ```mermaid
 flowchart LR
-  P["portfolio<br/>(trình duyệt)"] -- "1. thử GET /api/rooms (3 s)" --> M["game.fudio101.com<br/>máy chính · Redis riêng"]
+  P["portfolio<br/>(trình duyệt)"] -- "1. thử GET /api/rooms (3 s)" --> M["play-api.fudio101.com<br/>máy chính · Redis riêng"]
   P -- "2. không trả lời → dùng" --> V["be-game-omega.vercel.app<br/>dự phòng · Upstash"]
   GH["push main"] -- "CI pass → workflow Deploy" --> M
   GH -- "Vercel Git" --> V
@@ -51,8 +51,8 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | Biến | Local | Tự host (`~/apps/be_game/.env` + compose) | Vercel `be-game` |
 |---|---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | compose tự đặt `redis://redis:6379` | Upstash (integration), production **và** preview |
-| `ALLOWED_ORIGIN` | trống → mọi origin | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000` | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
-| `GAME_DOMAIN` | — | `game.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
+| `ALLOWED_ORIGIN` | trống → mọi origin | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000,https://zonenop-game.vercel.app,https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app,https://play.fudio101.com` | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
+| `GAME_DOMAIN` | — | `play-api.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |
 | `VERCEL`, `VERCEL_REGION` | — | — | Vercel tự đặt; `/api/health` trả `region: "sin1"` |
 
@@ -71,7 +71,7 @@ Ba thứ được deploy độc lập và không cùng lúc: máy chính, máy d
 ## Kiểm tra sau deploy
 
 ```bash
-curl -s https://game.fudio101.com/api/health        # "ok":true,"store":"redis","region":"local"
+curl -s https://play-api.fudio101.com/api/health        # "ok":true,"store":"redis","region":"local"
 curl -s https://be-game-omega.vercel.app/api/health # "ok":true,"store":"redis","region":"sin1"
 ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên máy chính
 ```

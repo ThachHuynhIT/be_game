@@ -85,7 +85,7 @@ Details: `docs/GUIDE.md` → "Quy ước chung & bẫy thường gặp" and "Th�
 
 ## 🚢 Deploy & the Shared Host
 
-- **Self-hosted (primary)**: `https://game.fudio101.com` → Cloudflare Tunnel → Traefik → `be_game` on host `vsmart-zangyapro` (an arm64 **phone**, shared with its owner `fudio101`). Deployed by `.github/workflows/deploy.yml` after CI passes on `main`. Details: [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
+- **Self-hosted (primary)**: `https://play-api.fudio101.com` → Cloudflare Tunnel → Traefik → `be_game` on host `vsmart-zangyapro` (an arm64 **phone**, shared with its owner `fudio101`). Deployed by `.github/workflows/deploy.yml` after CI passes on `main`. Details: [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
 - **Vercel** project `be-game` (`be-game-omega.vercel.app`, **backup**): deploys every push to `main` via Vercel Git; other branches get previews that **share the production Upstash Redis** — a PR that changes state shape can affect live backup rooms.
 - The portfolio tries the primary (`GET /api/rooms`, 3 s) and falls back to Vercel for lobbies/new rooms; rooms are pinned to their backend (separate Redis). Keep `GET /api/rooms` cheap and present everywhere, and keep the hub error `"Không tìm thấy phòng"` stable — the portfolio relies on both.
 - Both backends and the portfolio deploy independently: protocol changes add optional fields only; deploy be_game before the portfolio. A red CI on `main` skips the primary deploy while Vercel still deploys (version skew). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
