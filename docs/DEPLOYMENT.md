@@ -102,6 +102,7 @@ ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên 
 **Hạ tầng / Vercel**
 - Trên Vercel chỉ có 5 function (`api/*.ts`); `/api` trần **không phải function → 404**. Đừng dùng `/api` để kiểm tra máy còn sống; dùng `/api/rooms` hoặc `/api/health`.
 - **Preview của be_game dùng chung Upstash Redis với production.** Một PR đổi cấu trúc state hay khoá Redis có thể làm hỏng phòng trên máy dự phòng ngay khi push nhánh. Với thay đổi kiểu đó: tránh mở phòng trên preview, hoặc tách store cho preview (Vercel → Storage → chỉ gắn store riêng cho Preview).
+- **Upstash free tier (500k lệnh/tháng) cạn vì tab sảnh để mở**, không phải vì ván chơi: mỗi tab poll `/rooms` của cả 7 game mỗi 5–10 s, mỗi lần 2 + số phòng lệnh Redis. Vì vậy `recentRooms` / `leaderboard` của store Redis được cache ngắn trong process (`src/server/store.ts`) và dọn index tối đa 1 lần/phút. Không dùng cache CDN (`s-maxage`) cho các endpoint này: header CORS phụ thuộc `Origin`. Preview của mọi nhánh cũng tốn quota này.
 - Gói Hobby giới hạn WebSocket 300 giây/kết nối; server gửi `reconnect` trước khi hết hạn (README → "Giới hạn của Vercel"). Máy tự host không có giới hạn này.
 
 **Máy tự host**
