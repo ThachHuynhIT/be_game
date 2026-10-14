@@ -108,6 +108,7 @@ ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên 
 **Máy tự host**
 - Firewall của host chặn traffic tailnet tới cổng Docker publish kiểu bridge → đi qua Traefik (`traefik_network`), không publish cổng.
 - Host dùng containerd image store: build lại cùng tag thì image cũ tự biến mất; image không có `curl` → health check bằng `node -e "fetch(...)"` trong container.
+- Build cache: mỗi app build bằng BuildKit builder riêng (`be_game`, `zonenop-game`), deploy tự dọn còn tối đa 1 GB / 2 GB rồi tắt builder. Không prune builder `default` (dùng chung với chủ máy); xem [`SELF_HOSTING.md`](SELF_HOSTING.md).
 - Máy là điện thoại: có thể tắt cứng bất cứ lúc nào → `restart: unless-stopped`, dữ liệu ghi xuống đĩa (bind mount, AOF), và portfolio có máy dự phòng.
 - Chủ máy có thể sửa file trong `~/apps/be_game` trực tiếp → so với repo trước khi deploy.
 
