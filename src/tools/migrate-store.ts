@@ -63,7 +63,7 @@ export async function migrateAll(src: Redis, dst: Redis, dryRun: boolean): Promi
   return out;
 }
 
-/** exec() reports per-command failures in its replies instead of rejecting, so check them to keep the transaction all-or-error. */
+/** exec() reports per-command failures in its replies instead of rejecting, so surface them (Redis does not roll back the rest of the transaction). */
 async function execAll(tx: ChainableCommander): Promise<void> {
   const replies = await tx.exec();
   const failed = replies?.find(([err]) => err);
@@ -125,7 +125,7 @@ async function main(argv: string[]) {
   } catch (e) {
     if (!dryRun) {
       console.error(
-        `stopped during ${current}: games listed above are done — do NOT re-run them (leaderboards would be added twice)`,
+        `stopped during ${current}: games listed above are fully copied; ${current} may be partly applied. Do NOT re-run as-is (leaderboards would be added twice) - check the destination first.`,
       );
     }
     throw e;
@@ -137,7 +137,7 @@ async function main(argv: string[]) {
 
 if (process.argv[1]?.replace(/\\/g, "/").endsWith("tools/migrate-store.ts")) {
   main(process.argv.slice(2)).catch((e) => {
-    console.error(e instanceof Error ? e.message : "migration failed");
+    console.error((e instanceof Error && e.message) || "migration failed");
     process.exitCode = 1;
   });
 }
