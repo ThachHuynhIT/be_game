@@ -95,6 +95,9 @@ export function shutdownGameServer(server: Server): Promise<void> {
 
 const pathOf = (req: IncomingMessage) => new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/$/, "") || "/";
 
+/** A Redis outside this machine (Upstash…) means both backends share rooms; the compose `redis` service does not. */
+export const isSharedStoreHost = (host: string | null) => !!host && !["redis", "localhost", "127.0.0.1", "[::1]"].includes(host);
+
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(body));
 }
@@ -149,6 +152,7 @@ async function health(res: ServerResponse) {
     region: process.env.VERCEL_REGION ?? "local",
     redisConfigured: !!url,
     redisHost: url ? new URL(url).hostname : null,
+    sharedStore: isSharedStoreHost(url ? new URL(url).hostname : null),
     games: Object.keys(ADAPTERS),
   };
   try {
