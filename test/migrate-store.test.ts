@@ -9,8 +9,8 @@ import { keysFor } from "../src/server/store";
 const CLI = resolve(process.cwd(), "src/tools/migrate-store.ts");
 const TSX = resolve(process.cwd(), "node_modules/tsx/dist/cli.mjs");
 /** Runs the real CLI through tsx. Fake hosts only: the refusal checks exit before any connection is attempted. */
-function runCli(args: string[]) {
-  const r = spawnSync(process.execPath, [TSX, CLI, ...args], { encoding: "utf8", timeout: 30_000 });
+function runCli(args: string[], env: Record<string, string> = {}) {
+  const r = spawnSync(process.execPath, [TSX, CLI, ...args], { encoding: "utf8", timeout: 30_000, env: { ...process.env, ...env } });
   return { status: r.status, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
@@ -92,6 +92,23 @@ describe("CLI guards", () => {
     expect(r.status).toBe(1);
     expect(r.output).not.toContain("SECRETPW");
     expect(r.output).toContain("invalid --from URL");
+  }, 30_000);
+
+  it("reads env:NAME values (the URL never goes on argv) and still never prints a malformed one", () => {
+    const r = runCli(["--from", "env:MIGRATE_TEST_FROM", "--to", "redis://x:y@h2:6379", "--dry-run"], { MIGRATE_TEST_FROM: "redis://u:SECRETPW@h:99999" });
+    expect(r.status).toBe(1);
+    expect(r.output).toContain("invalid --from URL");
+    expect(r.output).not.toContain("SECRETPW");
+    expect(r.output).not.toContain("is not set");
+  }, 30_000);
+
+  it("refuses env:NAME that is unset or empty, with a fixed message", () => {
+    for (const env of [{}, { MIGRATE_TEST_UNSET: "" }] as Record<string, string>[]) {
+      const r = runCli(["--from", "redis://a:b@h:6379", "--to", "env:MIGRATE_TEST_UNSET", "--dry-run"], env);
+      expect(r.status).toBe(1);
+      expect(r.output).toContain("--to env:MIGRATE_TEST_UNSET is not set");
+      expect(r.output).not.toContain("→");
+    }
   }, 30_000);
 
   it("refuses to migrate a store into itself, before connecting", () => {

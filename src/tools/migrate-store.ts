@@ -1,6 +1,7 @@
 // One-off copy of rooms and leaderboards from one Redis to another (e.g. the phone's local Redis → Upstash).
 // Leaderboards are ADDED to the destination (run it once); rooms are copied only when the destination lacks them.
-// Usage: tsx src/tools/migrate-store.ts --from <redis url> --to <redis url> [--dry-run]
+// Usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run]
+// `env:NAME` reads the URL from that environment variable, so a password never appears on the command line (visible in `ps`).
 import type { ChainableCommander, Redis } from "ioredis";
 import { GAME_KINDS, type GameKind, keysFor } from "../server/store";
 
@@ -70,6 +71,18 @@ async function execAll(tx: ChainableCommander): Promise<void> {
   if (failed?.[0]) throw failed[0];
 }
 
+/** `env:NAME` → process.env[NAME]; anything else is returned as given. Null (fixed message, no value) when the variable is unset or empty. */
+function resolveStoreArg(raw: string, flag: "--from" | "--to"): string | null {
+  if (!raw.startsWith("env:")) return raw;
+  const name = raw.slice(4);
+  const value = name ? process.env[name] : undefined;
+  if (!value) {
+    console.error(`${flag} env:${name} is not set`);
+    return null;
+  }
+  return value;
+}
+
 /** Parses a store URL without ever echoing it: the message is fixed, so a password in the URL cannot leak. */
 function parseStoreUrl(raw: string, flag: "--from" | "--to"): URL | null {
   try {
@@ -91,11 +104,17 @@ async function main(argv: string[]) {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const from = arg("--from");
-  const to = arg("--to");
+  const fromArg = arg("--from");
+  const toArg = arg("--to");
   const dryRun = argv.includes("--dry-run");
+  if (!fromArg || !toArg) {
+    console.error("usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run]");
+    process.exitCode = 1;
+    return;
+  }
+  const from = resolveStoreArg(fromArg, "--from");
+  const to = resolveStoreArg(toArg, "--to");
   if (!from || !to) {
-    console.error("usage: tsx src/tools/migrate-store.ts --from <redis url> --to <redis url> [--dry-run]");
     process.exitCode = 1;
     return;
   }

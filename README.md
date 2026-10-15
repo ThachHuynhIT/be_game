@@ -19,7 +19,7 @@ src/local.ts trong Docker                (region sin1, Fluid compute)
 Redis trong compose (./data/redis)       Upstash Redis
 ```
 
-Hai backend chạy cùng code từ `main` nhưng có **Redis riêng** (phòng và bảng điểm không chung). Môi trường, luồng phát hành và lưu ý vận hành: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy (như sơ đồ) cho đến khi máy chính chuyển sang Upstash của máy dự phòng; sau đó hai máy **dùng chung** một kho (phòng, sảnh, bảng điểm là một), xem mục "Portfolio chọn backend thế nào" trong `docs/DEPLOYMENT.md`. Môi trường, luồng phát hành và lưu ý vận hành: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Game và endpoint
 

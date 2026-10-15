@@ -123,32 +123,41 @@ Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash c�
 
 **Công cụ** `src/tools/migrate-store.ts` (có trong image), chép phòng và bảng xếp hạng giữa hai Redis:
 
-- Bảng xếp hạng được **cộng thêm** vào đích (điểm, số ván, số thắng), nên chỉ chạy **một lần mỗi chiều**; chạy lại là cộng đôi. Luôn `--dry-run` trước.
+- Bảng xếp hạng được **cộng thêm** vào đích (điểm, số ván, số thắng), nên chỉ chạy **một lần** (chiều duy nhất dùng là Redis cục bộ → Upstash); chạy lại là cộng đôi. Luôn `--dry-run` trước.
 - Phòng chỉ được chép khi đích chưa có mã đó (giữ TTL và điểm trong sảnh). Dấu chống ghi điểm hai lần (`lb:done:*`) không chép.
+- `--from`/`--to` nhận URL hoặc `env:TÊN_BIẾN` (đọc URL từ biến môi trường; biến thiếu hoặc rỗng thì báo `--to env:TÊN is not set`, không in giá trị). Dùng `env:` cho URL có mật khẩu để nó không hiện trong `ps`.
 - Từ chối chạy khi `--from` và `--to` là cùng một store; chỉ in tên host, không in URL hay mật khẩu.
 - Báo lỗi giữa chừng thì nó nói đã dừng ở game nào: game đó có thể đã áp dụng một phần. **Đừng chạy lại nguyên lệnh**, kiểm tra đích trước.
 
 **Chuyển sang kho chung** (≈ 1–2 phút máy chính gián đoạn; máy dự phòng vẫn chạy). Trên server, trong `~/apps/be_game`:
 
-1. Nhập URL Upstash không để lại trong lịch sử shell (URL lấy từ biến `REDIS_URL`/`KV_URL` của project Vercel `be-game`): `read -rs UPSTASH_URL; export UPSTASH_URL`.
-2. `docker compose -f compose.selfhost.yml stop be_game`
-3. Chạy thử, đọc số liệu:
+1. Nhập URL Upstash, không để lại trong lịch sử shell và không đưa lên dòng lệnh (URL lấy từ biến `REDIS_URL`/`KV_URL` của project Vercel `be-game`): `read -rs UPSTASH_URL; export UPSTASH_URL`.
+2. Chạy thử khi be_game còn chạy (chỉ đọc), xem số liệu. Công cụ nhận `env:TÊN_BIẾN` thay cho URL, nên URL không nằm trong `ps` của máy dùng chung:
 
    ```bash
-   docker compose -f compose.selfhost.yml run --rm --no-deps be_game \
-     node_modules/.bin/tsx src/tools/migrate-store.ts --from redis://redis:6379 --to "$UPSTASH_URL" --dry-run
+   docker compose -f compose.selfhost.yml run --rm --no-deps -e UPSTASH_URL be_game \
+     node_modules/.bin/tsx src/tools/migrate-store.ts --from redis://redis:6379 --to env:UPSTASH_URL --dry-run
    ```
 
-4. Chạy thật (cùng lệnh, bỏ `--dry-run`) **đúng một lần**.
-5. Thêm `REDIS_URL=<URL Upstash>` vào `~/apps/be_game/.env`; `chmod 600 .env`; `unset UPSTASH_URL`.
+3. `docker compose -f compose.selfhost.yml stop be_game` (để Redis cục bộ không đổi trong lúc chép).
+4. Chạy thật: cùng lệnh, bỏ `--dry-run`, **đúng một lần**.
+5. Ghi URL vào `.env` mà không lộ ra lịch sử shell (UPSTASH_URL vẫn đang được export), rồi xoá biến:
+
+   ```bash
+   sed -i '/^REDIS_URL=/d' .env
+   printf 'REDIS_URL=%s\n' "$UPSTASH_URL" >> .env
+   chmod 600 .env
+   unset UPSTASH_URL
+   ```
+
 6. `docker compose -f compose.selfhost.yml up -d be_game`
 7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải cùng `redisHost` và `sharedStore: true`; bảng xếp hạng có cả điểm cũ của máy chính.
 
-**Quay lại Redis cục bộ**: xoá dòng `REDIS_URL` trong `.env` rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. Muốn mang dữ liệu phát sinh trên Upstash về, chạy script `--from <Upstash> --to redis://redis:6379` (`--dry-run` trước, một lần) **trước khi** đổi `.env`. Lưu ý: bảng xếp hạng bị cộng chồng, vì Upstash đã chứa điểm cũ của máy chính gộp lúc chuyển sang, và chúng sẽ được cộng thêm lần nữa vào Redis cục bộ. Nếu không chấp nhận số cao hơn thì bỏ bước chép này.
+**Quay lại Redis cục bộ**: xoá dòng `REDIS_URL` trong `.env` (`sed -i '/^REDIS_URL=/d' .env`) rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. **Không** chép ngược Upstash → Redis cục bộ bằng `migrate-store`: điểm cũ của máy chính đã được gộp vào Upstash lúc chuyển sang, chép ngược sẽ cộng chúng lần thứ hai vào bảng xếp hạng cục bộ. Hệ quả: Redis cục bộ giữ bảng xếp hạng đúng như lúc chuyển; điểm kiếm được trên Upstash sau đó vẫn ở Upstash (máy dự phòng tiếp tục dùng) và không được mang về. Chuyển sang kho chung lần nữa sau khi quay lại chỉ cần đặt lại dòng `REDIS_URL` (bước 5–6), **không** chạy lại `migrate-store` (sẽ cộng đôi điểm).
 
 ### Đếm lệnh Redis (Upstash)
 
-Đặt `BE_GAME_COUNT_COMMANDS=1` trong `.env` rồi `dc up -d`: be_game log `[be_game] redis commands last 60s: <n>` mỗi 60 giây (chỉ đếm tiến trình đó, không tính máy dự phòng). Xem bằng `dc logs --tail 20 be_game`. Dùng để quy ra lệnh/giờ so với hạn mức Upstash; xong thì bỏ dòng này, `dc up -d`.
+Đặt `BE_GAME_COUNT_COMMANDS=1` trong `.env` rồi `dc up -d` (compose chuyển biến này vào container): be_game log `[be_game] redis commands last 60s: <n>` mỗi 60 giây (chỉ đếm tiến trình đó, không tính máy dự phòng). Xem bằng `dc logs --tail 20 be_game`. Dùng để quy ra lệnh/giờ so với hạn mức Upstash; xong thì bỏ dòng này, `dc up -d`.
 
 ## Quy tắc trên máy dùng chung
 
@@ -175,7 +184,7 @@ Theo skill `zangyapro-host` (bắt buộc với người và với AI agent):
 | CI fail ở "Validate compose files" | `compose.selfhost.yml` bắt buộc `GAME_DOMAIN` | Bước CI phải truyền `GAME_DOMAIN=game.example.com` |
 | Deploy xong container không được tạo lại | Image mới cùng manifest với image đang chạy (code không đổi) | Bình thường; đổi code thì sẽ tạo lại |
 | `docker image rm` báo "No such image" | Máy dùng containerd image store, image cũ đã tự dọn khi tag chuyển | Script đã kiểm tra tồn tại trước khi xoá |
-| **Hết hạn mức Upstash → cả hai máy lỗi** (log `[be_game] redis:` báo lỗi, `/api/health` trả `ok:false` ở cả hai máy) | Kho chung là điểm hỏng chung: Upstash hết lệnh thì máy chính và máy dự phòng cùng hỏng | Quay lại Redis cục bộ ngay (xoá `REDIS_URL` trong `.env`, `dc up -d be_game`) để máy chính phục vụ lại; nâng gói hoặc đặt trần ngân sách trên Upstash, hoặc giảm tần suất ghi heartbeat (spec §5), rồi chuyển lại. Đo trước bằng `BE_GAME_COUNT_COMMANDS=1` |
+| **Hết hạn mức Upstash → cả hai máy lỗi** (log `[be_game] redis:` báo lỗi, `/api/health` trả `ok:false` ở cả hai máy) | Kho chung là điểm hỏng chung: Upstash hết lệnh thì máy chính và máy dự phòng cùng hỏng | Quay lại Redis cục bộ ngay (xoá `REDIS_URL` trong `.env`, `dc up -d be_game`) để máy chính phục vụ lại; nâng gói hoặc đặt trần ngân sách trên Upstash, hoặc giảm tần suất ghi heartbeat (cần sửa code, có test: spec §5), rồi đặt lại `REDIS_URL` (không chạy lại `migrate-store`). Đo trước bằng `BE_GAME_COUNT_COMMANDS=1` |
 | WebSocket 502 khi mở | Origin không có trong `ALLOWED_ORIGIN` | Thêm origin, `dc up -d` |
 | CI thỉnh thoảng đỏ ở test fuzz | Test/code còn chỗ dùng ngẫu nhiên không inject | Sửa cho tất định; deploy chỉ chạy khi CI xanh |
 
