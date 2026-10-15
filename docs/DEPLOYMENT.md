@@ -10,7 +10,7 @@ Mục lục: [Môi trường](#các-môi-trường) · [Portfolio chọn backend
 
 | Môi trường | URL | Chạy ở đâu | Store | Được deploy khi | Vai trò |
 |---|---|---|---|---|---|
-| **Tự host (chính)** | `https://play-api.fudio101.com` | Điện thoại `vsmart-zangyapro` (arm64), `compose.selfhost.yml`, sau Cloudflare Tunnel + Traefik của chủ máy | Redis trong compose, `./data/redis` | Workflow **Deploy** sau khi CI pass trên một lần push vào `main` | Phục vụ portfolio |
+| **Tự host (chính)** | `https://play-api.fudio101.com` | Điện thoại `vsmart-zangyapro` (arm64), `compose.selfhost.yml`, sau Cloudflare Tunnel + Traefik của chủ máy | Upstash chung với máy dự phòng (sau khi chuyển; trước đó và khi quay lại: Redis trong compose, `./data/redis`) | Workflow **Deploy** sau khi CI pass trên một lần push vào `main` | Phục vụ portfolio |
 | **Vercel production (dự phòng)** | `https://be-game-omega.vercel.app` | Vercel Functions, region `sin1`, Fluid compute | Upstash Redis (Singapore) | Vercel Git: **mỗi push vào `main`** | Portfolio tự chuyển sang khi máy chính không trả lời; nơi quay về khi cần |
 | **Vercel preview** | `be-game-<hash>-thachs-projects-48e5eaf9.vercel.app` | Như trên | **Cùng Upstash Redis với production** (xem [Bài học](#bài-học-đã-gặp)) | Vercel Git: **mỗi push vào mọi nhánh khác** | Thử PR với frontend thật |
 | **Local** | `http://localhost:4000` | `npm run dev` | RAM (hoặc `REDIS_URL` nếu đặt) | Tay | Phát triển, test |
@@ -18,11 +18,15 @@ Mục lục: [Môi trường](#các-môi-trường) · [Portfolio chọn backend
 
 ```mermaid
 flowchart LR
-  P["portfolio<br/>(trình duyệt)"] -- "1. thử GET /api/rooms (3 s)" --> M["play-api.fudio101.com<br/>máy chính · Redis riêng"]
-  P -- "2. không trả lời → dùng" --> V["be-game-omega.vercel.app<br/>dự phòng · Upstash"]
+  P["portfolio<br/>(trình duyệt)"] -- "1. thử GET /api/rooms (3 s)" --> M["play-api.fudio101.com<br/>máy chính"]
+  P -- "2. không trả lời → dùng" --> V["be-game-omega.vercel.app<br/>dự phòng"]
+  M -- "REDIS_URL" --> U[("Upstash Redis<br/>kho chung")]
+  V -- "REDIS_URL" --> U
   GH["push main"] -- "CI pass → workflow Deploy" --> M
   GH -- "Vercel Git" --> V
 ```
+
+Sơ đồ vẽ trạng thái **sau khi chuyển sang kho chung**; khi `REDIS_URL` của máy chính trống, máy chính dùng Redis cục bộ trong compose.
 
 ## Portfolio chọn backend thế nào
 
@@ -30,7 +34,7 @@ flowchart LR
 
 - `NEXT_PUBLIC_TIENLEN_SERVER_URL` = máy chính, `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` = máy dự phòng. Cả hai được gắn vào bundle **lúc build**: đổi thì phải redeploy portfolio.
 - Sảnh và bàn mới dùng máy đầu tiên trả lời `GET /api/rooms` trong 3 giây; lựa chọn được nhớ 60 giây.
-- **Hai máy có Redis riêng**: phòng, sảnh và bảng điểm không chung. Mỗi phòng được ghim vào máy tạo ra nó; kết nối lại luôn về đúng máy đó. Ván đang chơi trên máy chính sẽ chờ máy chính sống lại, không chuyển sang dự phòng.
+- **Hai máy dùng chung Upstash** (sau khi chuyển; cách chuyển và quay lại: [`SELF_HOSTING.md`](SELF_HOSTING.md#chuyển-sang--quay-lại-kho-chung)): phòng, sảnh và bảng điểm là một. Mỗi phòng vẫn được ghim vào máy tạo ra nó; máy đó không trả lời thì client (zonenop-game, bản có failover theo phòng) tự thử máy còn lại và vào lại đúng phòng đang chơi (cùng mã, lượt, bài, tiền). `GET /api/health` của mỗi máy trả `redisHost` và `sharedStore`: hai máy phải báo cùng `redisHost`, `sharedStore: true`. Khi hai máy còn Redis riêng (trước khi chuyển, hoặc sau khi quay lại Redis cục bộ), `sharedStore` là `false` và hành vi cũ giữ nguyên: phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại.
 - Link mời chưa biết máy: thử máy đang dùng, gặp "Không tìm thấy phòng" thì thử máy còn lại.
 
 Hệ quả cho backend: **`GET /api/rooms` phải luôn rẻ và luôn có trên mọi môi trường** (portfolio dùng nó để thử máy còn sống), và chuỗi lỗi `"Không tìm thấy phòng"` của hub là một phần của giao thức — đổi nó thì phải đổi `ROOM_NOT_FOUND` bên portfolio cùng lúc.
@@ -50,7 +54,7 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 
 | Biến | Local | Tự host (`~/apps/be_game/.env` + compose) | Vercel `be-game` |
 |---|---|---|---|
-| `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | compose tự đặt `redis://redis:6379` | Upstash (integration), production **và** preview |
+| `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | trống → compose dùng `redis://redis:6379`; đặt URL Upstash (bí mật, quyền `600`) để dùng chung kho với máy dự phòng | Upstash (integration), production **và** preview |
 | `ALLOWED_ORIGIN` | trống → mọi origin | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000,https://zonenop-game.vercel.app,https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app,https://play.fudio101.com` | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
 | `GAME_DOMAIN` | — | `play-api.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |

@@ -32,4 +32,6 @@ Read `docs/DEPLOYMENT.md` (environments, release flow) and `docs/SELF_HOSTING.md
 - `DEPLOY_PATH` must stay an absolute path under `$HOME` (the script refuses anything else). Set path secrets from Git Bash with `MSYS_NO_PATHCONV=1`, or `/home/...` turns into `C:/Program Files/Git/home/...`.
 - Deploy only from `workflow_run` of a **push** CI on `main` (or a manual run on `main`); PR CI must never deploy. Keep `id-token: write` (Tailscale OIDC) and pin the server host key (`StrictHostKeyChecking yes`).
 - Test workflow script changes by extracting the `REMOTE` script and running it against the server (twice, to cover the "nothing changed" path) before pushing; report what was verified in the PR.
+- The shared Upstash URL (`REDIS_URL` in the server `.env`) is a secret: never print it, commit it, put it in GitHub secrets or paste it in a doc/PR (placeholders like `rediss://default:<password>@<host>.upstash.io:6379` only). Enter it with `read -rs` so it stays out of shell history.
+- `src/tools/migrate-store.ts` ADDS leaderboards to the destination: run it once per direction, `--dry-run` first, and never re-run after a failure without checking the destination. Switching the server to/from the shared store follows `docs/SELF_HOSTING.md` → "Chuyển sang / quay lại kho chung".
 - Production deploys of the portfolio (Vercel) are the user's call.

@@ -1,6 +1,6 @@
 # Self-hosted behind the host's Traefik + Cloudflare Tunnel (no published ports, no Caddy): be_game + Redis.
 #   docker compose -f compose.selfhost.yml up -d --build      → https://${GAME_DOMAIN}
-# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN (required), ALLOWED_ORIGIN.
+# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN (required), ALLOWED_ORIGIN, REDIS_URL (optional).
 #
 # be_game joins the external `traefik_network` (Traefik routes GAME_DOMAIN to it via the labels below);
 # Redis stays on the project's own network and is reachable only by be_game.
@@ -16,7 +16,9 @@ services:
       - no-new-privileges:true
     environment:
       PORT: "4000"
-      REDIS_URL: redis://redis:6379
+      # Set REDIS_URL in .env to the shared Upstash URL so the Vercel backup sees the same rooms; leave it unset
+      # (or empty) to use the local redis service.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
     depends_on:
       - redis
