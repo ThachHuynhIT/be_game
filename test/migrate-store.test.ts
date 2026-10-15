@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import RedisMock from "ioredis-mock";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrateAll, migrateGame, migratedMarkerKey, runMigration } from "../src/tools/migrate-store";
 import { keysFor } from "../src/server/store";
 
@@ -20,6 +20,12 @@ let dst: R;
 const k = keysFor("typhu");
 
 // ioredis-mock keeps data per port (verified: a set on port 1 is null on port 2), so no keyPrefix is needed.
+afterEach(() => {
+  // Each mock subscribes to a shared per-port emitter; disconnect releases it.
+  src.disconnect();
+  dst.disconnect();
+});
+
 beforeEach(async () => {
   src = new RedisMock({ port: 1 });
   dst = new RedisMock({ port: 2 });

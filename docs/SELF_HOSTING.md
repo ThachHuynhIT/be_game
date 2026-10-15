@@ -119,7 +119,7 @@ Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại 
 
 1. `dc ps` (be_game đã lên, `restart: unless-stopped`), `/api/health` trong container và public cùng trả `"ok":true`.
 2. `cat REVISION` khớp commit trên Vercel (không thì xem [Luồng phát hành](DEPLOYMENT.md#luồng-phát-hành)).
-3. **Đồng hồ**: so `now` của `play-api.fudio101.com/api/health` với `be-game-omega.vercel.app/api/health` (gọi liên tiếp): lệch ≤ ~2 giây. Máy vừa tắt cứng có thể giờ sai tới khi đồng bộ NTP; khi dùng kho chung, đồng hồ lệch làm sai hạn chót lượt, `lastSeen` và điểm chỉ mục sảnh (do máy này ghi, máy kia so với giờ của mình). Lệch thì báo chủ máy sửa NTP, và trong lúc đó cân nhắc quay lại Redis cục bộ.
+3. **Đồng hồ**: so `now` của `play-api.fudio101.com/api/health` với `be-game-omega.vercel.app/api/health` (gọi cùng lúc, ví dụ `curl -s A & curl -s B & wait`): lệch ≤ ~2 giây. Máy vừa tắt cứng có thể giờ sai tới khi đồng bộ NTP; khi dùng kho chung, đồng hồ lệch làm sai hạn chót lượt, `lastSeen` và điểm chỉ mục sảnh (do máy này ghi, máy kia so với giờ của mình). Lệch thì báo chủ máy sửa NTP, và trong lúc đó cân nhắc quay lại Redis cục bộ.
 4. Nếu đang ở kho chung: `redisHost` của hai máy vẫn giống nhau.
 
 ## Chuyển sang / quay lại kho chung
@@ -131,7 +131,7 @@ Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash c�
 **Công cụ** `src/tools/migrate-store.ts` (có trong image), chép phòng và bảng xếp hạng giữa hai Redis:
 
 - Bảng xếp hạng được **cộng thêm** vào đích (điểm, số ván, số thắng), nên chỉ chạy **một lần** (chiều duy nhất dùng là Redis cục bộ → Upstash); chạy lại là cộng đôi. Luôn `--dry-run` trước.
-- Chống chạy lại: chạy thật thành công thì công cụ ghi khoá `be_game:migrated:<host nguồn>:<cổng nguồn>` (giá trị = giờ ISO) vào đích. Chạy thật lần sau từ cùng nguồn bị từ chối, không ghi gì, in `already migrated from <host> at <giờ>: re-running would add leaderboards twice (pass --force to override)` và thoát mã 1. `--force` bỏ qua kiểm tra này, chỉ dùng khi đã biết chắc đích chưa nhận bảng xếp hạng của nguồn (ví dụ đã xoá khoá và dữ liệu thử). `--dry-run` không ghi gì, chỉ báo nếu khoá đã có. Chạy lỗi giữa chừng thì **không** có khoá (xem dòng cuối của danh sách này).
+- Chống chạy lại: chạy thật thành công thì công cụ ghi khoá `be_game:migrated:<host nguồn>:<cổng nguồn>` (giá trị = giờ ISO) vào đích. Chạy thật lần sau từ cùng nguồn bị từ chối, không ghi gì, in `already migrated from <host> at <giờ>: re-running would add leaderboards twice (pass --force to override)` và thoát mã 1. `--force` bỏ qua kiểm tra này, chỉ dùng khi đã biết chắc đích chưa nhận bảng xếp hạng của nguồn (ví dụ dữ liệu thử đã bị xoá khỏi đích nhưng khoá còn lại). `--dry-run` không ghi gì, chỉ báo nếu khoá đã có. Chạy lỗi giữa chừng thì **không** có khoá (xem dòng cuối của danh sách này).
 - Phòng chỉ được chép khi đích chưa có mã đó (giữ TTL và điểm trong sảnh). Dấu chống ghi điểm hai lần (`lb:done:*`) không chép.
 - `--from`/`--to` nhận URL hoặc `env:TÊN_BIẾN` (đọc URL từ biến môi trường; biến thiếu hoặc rỗng thì báo `--to env:TÊN is not set`, không in giá trị). Dùng `env:` cho URL có mật khẩu để nó không hiện trong `ps`.
 - Từ chối chạy khi `--from` và `--to` là cùng một store; chỉ in tên host, không in URL hay mật khẩu.
@@ -174,7 +174,7 @@ Chỉ chuyển khi **tất cả** những điều dưới đây đúng. Chưa m�
 
 6. `docker compose -f compose.selfhost.yml up -d be_game`
 7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải **cùng `redisHost`**. `sharedStore: true` chỉ có nghĩa "máy này dùng Redis ở xa" (Vercel luôn báo `true`), nên không dùng nó để biết hai máy có chung kho hay không: so `redisHost`. Bảng xếp hạng có cả điểm cũ của máy chính.
-   - **Đồng hồ**: lấy trường `now` (epoch ms) của hai `/api/health` (gọi liên tiếp, hai giá trị phải chênh ≤ ~2000 ms, đã gồm độ trễ mạng). Lệch hơn thì sửa NTP của điện thoại (báo chủ máy) trước khi cho chạy. Lý do: hạn chót lượt chơi, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi nhưng máy kia so sánh với giờ của mình; đồng hồ lệch làm bàn bị coi là hết hạn hoặc đã rời sớm/muộn, và sảnh dọn nhầm phòng.
+   - **Đồng hồ**: lấy trường `now` (epoch ms) của hai `/api/health` (gọi cùng lúc, ví dụ `curl -s A & curl -s B & wait`; hai giá trị phải chênh ≤ ~2000 ms, đã gồm độ trễ mạng). Lệch hơn thì sửa NTP của điện thoại (báo chủ máy) trước khi cho chạy. Lý do: hạn chót lượt chơi, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi nhưng máy kia so sánh với giờ của mình; đồng hồ lệch làm bàn bị coi là hết hạn hoặc đã rời sớm/muộn, và sảnh dọn nhầm phòng.
 
 ### Quay lại Redis cục bộ
 

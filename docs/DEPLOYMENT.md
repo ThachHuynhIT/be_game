@@ -82,7 +82,7 @@ ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên 
 ```
 
 - Commit trên Vercel: Vercel → project `be-game` → Deployments (bản Production). Hai commit phải giống nhau; khác thì xem bước 3 của [Luồng phát hành](#luồng-phát-hành).
-- Khi hai máy dùng chung kho: `redisHost` của hai máy giống nhau, và **đồng hồ lệch ≤ ~2 giây** (so trường `now` của hai `/api/health`, gọi liên tiếp). Lý do: hạn chót lượt, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi còn máy kia so với giờ của mình.
+- Khi hai máy dùng chung kho: `redisHost` của hai máy giống nhau, và **đồng hồ lệch ≤ ~2 giây** (so trường `now` của hai `/api/health`, gọi cùng lúc). Lý do: hạn chót lượt, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi còn máy kia so với giờ của mình.
 - Thử WebSocket thật: mở portfolio, tạo bàn, kiểm tra vào được.
 - Workflow Deploy đã tự kiểm tra health trong container và (vì có variable `GAME_DOMAIN`) qua domain public.
 
