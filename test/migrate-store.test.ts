@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import RedisMock from "ioredis-mock";
 import { beforeEach, describe, expect, it } from "vitest";
-import { migrateAll, migrateGame } from "../src/tools/migrate-store";
+import { migrateAll, migrateGame, migratedMarkerKey, runMigration } from "../src/tools/migrate-store";
 import { keysFor } from "../src/server/store";
 
 // vitest runs from the repo root (npm test), so paths are resolved from the cwd (tsconfig is CommonJS, no import.meta).
@@ -83,6 +83,65 @@ describe("migrateAll", () => {
   it("covers every game", async () => {
     const all = await migrateAll(src as never, dst as never, true);
     expect(all.map((r) => r.game).sort()).toEqual(["bang", "cangua", "meono", "oanquan", "splendor", "tienlen", "typhu"]);
+  });
+});
+
+describe("runMigration re-run guard", () => {
+  const source = { host: "redis", port: "6379" };
+  const marker = migratedMarkerKey(source);
+  const at = new Date("2026-10-15T08:00:00.000Z");
+  const run = (o: { dryRun?: boolean; force?: boolean } = {}) =>
+    runMigration(src as never, dst as never, { source, dryRun: o.dryRun ?? false, force: o.force ?? false, now: () => at });
+
+  it("names the marker after the source host and port", () => {
+    expect(marker).toBe("be_game:migrated:redis:6379");
+  });
+
+  it("sets the marker (ISO time) after a successful real run", async () => {
+    await seedPlayer(src, "lan", { name: "Lan", points: 10, games: 3, wins: 1, last: 200 });
+    const out = await run();
+    expect(out.status).toBe("done");
+    expect(await dst.get(marker)).toBe("2026-10-15T08:00:00.000Z");
+  });
+
+  it("refuses a second real run: no writes, no leaderboard change", async () => {
+    await seedPlayer(src, "lan", { name: "Lan", points: 10, games: 3, wins: 1, last: 200 });
+    await run();
+    await seedPlayer(src, "minh", { name: "Minh", points: 5, games: 1, wins: 1, last: 300 });
+    const before = await dst.dbsize();
+    const out = await run();
+    expect(out).toEqual({
+      status: "refused",
+      message: "already migrated from redis at 2026-10-15T08:00:00.000Z: re-running would add leaderboards twice (pass --force to override)",
+    });
+    expect(Number(await dst.zscore(k.lbPoints, "lan"))).toBe(10);
+    expect(await dst.zscore(k.lbPoints, "minh")).toBeNull();
+    expect(await dst.dbsize()).toBe(before);
+  });
+
+  it("--force runs again (and adds again)", async () => {
+    await seedPlayer(src, "lan", { name: "Lan", points: 10, games: 3, wins: 1, last: 200 });
+    await run();
+    const out = await run({ force: true });
+    expect(out.status).toBe("done");
+    expect(Number(await dst.zscore(k.lbPoints, "lan"))).toBe(20);
+  });
+
+  it("a dry run writes no marker and still runs when the marker exists, only reporting it", async () => {
+    const first = await run({ dryRun: true });
+    expect(first).toMatchObject({ status: "done", alreadyMigratedAt: null });
+    expect(await dst.exists(marker)).toBe(0);
+    await dst.set(marker, "2026-01-01T00:00:00.000Z");
+    const second = await run({ dryRun: true });
+    expect(second).toMatchObject({ status: "done", alreadyMigratedAt: "2026-01-01T00:00:00.000Z" });
+    expect(await dst.get(marker)).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("leaves no marker when a game fails midway", async () => {
+    await seedPlayer(src, "lan", { name: "Lan", points: 10, games: 3, wins: 1, last: 200 });
+    const failing = { ...dst, get: dst.get.bind(dst), multi: () => { throw new Error("boom"); } };
+    await expect(runMigration(src as never, failing as never, { source, dryRun: false, force: false })).rejects.toThrow("boom");
+    expect(await dst.exists(marker)).toBe(0);
   });
 });
 

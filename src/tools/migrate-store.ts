@@ -1,6 +1,8 @@
 // One-off copy of rooms and leaderboards from one Redis to another (e.g. the phone's local Redis → Upstash).
 // Leaderboards are ADDED to the destination (run it once); rooms are copied only when the destination lacks them.
-// Usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run]
+// A successful real run leaves a marker key in the destination (`be_game:migrated:<source host>:<port>`); a later real run from the same
+// source is refused unless --force is passed, because adding the leaderboards a second time would double every total.
+// Usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run] [--force]
 // `env:NAME` reads the URL from that environment variable, so a password never appears on the command line (visible in `ps`).
 import type { ChainableCommander, Redis } from "ioredis";
 import { GAME_KINDS, type GameKind, keysFor } from "../server/store";
@@ -64,6 +66,41 @@ export async function migrateAll(src: Redis, dst: Redis, dryRun: boolean): Promi
   return out;
 }
 
+/** Where a migration marker lives: one per source store, in the destination. */
+export function migratedMarkerKey(source: { host: string; port: string }): string {
+  return `be_game:migrated:${source.host}:${source.port}`;
+}
+
+export type MigrationOutcome =
+  | { status: "refused"; message: string }
+  | { status: "done"; results: MigrateResult[]; alreadyMigratedAt: string | null };
+
+/**
+ * The guarded run: refuses (no writes) when the destination already carries the marker for this source, unless `force`;
+ * after a successful non-dry run it sets the marker (ISO time). A dry run never writes, it only reports an existing marker.
+ * `onResult` fires after each game so the CLI can print progress; a throw leaves no marker (the caller must check the destination).
+ */
+export async function runMigration(
+  src: Redis,
+  dst: Redis,
+  opts: { source: { host: string; port: string }; dryRun: boolean; force: boolean; now?: () => Date; onResult?: (r: MigrateResult, game: GameKind) => void; onStart?: (game: GameKind) => void },
+): Promise<MigrationOutcome> {
+  const markerKey = migratedMarkerKey(opts.source);
+  const at = await dst.get(markerKey);
+  if (at && !opts.dryRun && !opts.force) {
+    return { status: "refused", message: `already migrated from ${opts.source.host} at ${at}: re-running would add leaderboards twice (pass --force to override)` };
+  }
+  const results: MigrateResult[] = [];
+  for (const game of GAME_KINDS) {
+    opts.onStart?.(game);
+    const r = await migrateGame(src, dst, game, opts.dryRun);
+    results.push(r);
+    opts.onResult?.(r, game);
+  }
+  if (!opts.dryRun) await dst.set(markerKey, (opts.now?.() ?? new Date()).toISOString());
+  return { status: "done", results, alreadyMigratedAt: at };
+}
+
 /** exec() reports per-command failures in its replies instead of rejecting, so surface them (Redis does not roll back the rest of the transaction). */
 async function execAll(tx: ChainableCommander): Promise<void> {
   const replies = await tx.exec();
@@ -107,8 +144,9 @@ async function main(argv: string[]) {
   const fromArg = arg("--from");
   const toArg = arg("--to");
   const dryRun = argv.includes("--dry-run");
+  const force = argv.includes("--force");
   if (!fromArg || !toArg) {
-    console.error("usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run]");
+    console.error("usage: tsx src/tools/migrate-store.ts --from <redis url|env:NAME> --to <redis url|env:NAME> [--dry-run] [--force]");
     process.exitCode = 1;
     return;
   }
@@ -136,10 +174,20 @@ async function main(argv: string[]) {
   if (!dryRun) console.log("Leaderboards are ADDED to the destination: run this once.");
   let current: GameKind = GAME_KINDS[0];
   try {
-    for (const game of GAME_KINDS) {
-      current = game;
-      const r = await migrateGame(src, dst, game, dryRun);
-      console.log(`${r.game}: players ${r.players}, rooms copied ${r.roomsCopied}, rooms already there ${r.roomsSkipped}`);
+    const outcome = await runMigration(src, dst, {
+      source: { host: fromUrl.hostname, port: fromUrl.port || "6379" },
+      dryRun,
+      force,
+      onStart: (game) => {
+        current = game;
+      },
+      onResult: (r) => console.log(`${r.game}: players ${r.players}, rooms copied ${r.roomsCopied}, rooms already there ${r.roomsSkipped}`),
+    });
+    if (outcome.status === "refused") {
+      console.error(outcome.message);
+      process.exitCode = 1;
+    } else if (outcome.alreadyMigratedAt && dryRun) {
+      console.log(`note: already migrated from ${fromUrl.hostname} at ${outcome.alreadyMigratedAt}; a real run would be refused (pass --force to override)`);
     }
   } catch (e) {
     if (!dryRun) {
