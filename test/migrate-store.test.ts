@@ -1,7 +1,18 @@
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import RedisMock from "ioredis-mock";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrateAll, migrateGame } from "../src/tools/migrate-store";
 import { keysFor } from "../src/server/store";
+
+// vitest runs from the repo root (npm test), so paths are resolved from the cwd (tsconfig is CommonJS, no import.meta).
+const CLI = resolve(process.cwd(), "src/tools/migrate-store.ts");
+const TSX = resolve(process.cwd(), "node_modules/tsx/dist/cli.mjs");
+/** Runs the real CLI through tsx. Fake hosts only: the refusal checks exit before any connection is attempted. */
+function runCli(args: string[]) {
+  const r = spawnSync(process.execPath, [TSX, CLI, ...args], { encoding: "utf8", timeout: 30_000 });
+  return { status: r.status, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
 
 type R = InstanceType<typeof RedisMock>;
 let src: R;
@@ -73,4 +84,21 @@ describe("migrateAll", () => {
     const all = await migrateAll(src as never, dst as never, true);
     expect(all.map((r) => r.game).sort()).toEqual(["bang", "cangua", "meono", "oanquan", "splendor", "tienlen", "typhu"]);
   });
+});
+
+describe("CLI guards", () => {
+  it("never prints a store password, even when a URL is malformed", () => {
+    const r = runCli(["--from", "redis://u:SECRETPW@h:99999", "--to", "redis://x:y@h2:6379", "--dry-run"]);
+    expect(r.status).toBe(1);
+    expect(r.output).not.toContain("SECRETPW");
+    expect(r.output).toContain("invalid --from URL");
+  }, 30_000);
+
+  it("refuses to migrate a store into itself, before connecting", () => {
+    const r = runCli(["--from", "redis://a:SAMEPW@h:6379", "--to", "redis://b:OTHERPW@h:6379"]);
+    expect(r.status).toBe(1);
+    expect(r.output).toContain("--from and --to are the same store");
+    expect(r.output).not.toContain("SAMEPW");
+    expect(r.output).not.toContain("→");
+  }, 30_000);
 });
