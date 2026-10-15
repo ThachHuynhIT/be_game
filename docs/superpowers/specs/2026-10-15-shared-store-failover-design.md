@@ -123,7 +123,7 @@ mục 3 tự trở lại hành vi cũ).
 1. **Unit (be_game, vitest):** `migrate-store` chạy trên hai instance `ioredis-mock` (devDependency mới, 8.x) làm nguồn và đích: gộp bảng xếp hạng cộng đúng (cùng người ở hai nguồn → tổng), phòng đã có ở đích không bị
    ghi đè, TTL được giữ (± vài giây), `--dry-run` không ghi gì, `lb:done:*` không chép.
 2. **Unit (zonenop-game, vitest):** tách quyết định thử máy khác thành hàm thuần
-   (`nextBasesAfterUnreachable(roomBase, candidates)` hoặc tương đương) và test: máy ghim không trả lời → thử máy còn
+   `basesToTry(roomBase: string | null, candidates: string[], pinnedUnreachable: boolean): string[]` và test: máy ghim không trả lời → thử máy còn
    lại; máy còn lại `not-found` → giữ máy ghim; máy ghim trả lời → không thử máy khác.
 3. **Thử thật trên máy (bắt buộc trước khi chuyển điện thoại):** một Redis local dùng chung, hai be_game local
    (cổng 4123 chính, 4124 phụ), frontend dev trỏ `NEXT_PUBLIC_TIENLEN_SERVER_URL=:4123`,
