@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import { isSharedStoreHost } from "../src/server/app";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createGameServer, isSharedStoreHost } from "../src/server/app";
 import { GAME_KINDS, countCommands, keysFor } from "../src/server/store";
 
 describe("shared store helpers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it("lists every game", () => {
     expect([...GAME_KINDS].sort()).toEqual(["bang", "cangua", "meono", "oanquan", "splendor", "tienlen", "typhu"]);
   });
@@ -32,6 +36,22 @@ describe("shared store helpers", () => {
     vi.advanceTimersByTime(5000);
     expect(ticks).toEqual([2, 1]);
     expect(sent).toEqual(["GET", "SET", "GET"]);
-    vi.useRealTimers();
   });
+});
+
+describe("GET /api/health", () => {
+  it("reports the server clock (epoch ms) so two backends can be compared", async () => {
+    const server = createGameServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const before = Date.now();
+      const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`);
+      const body = (await res.json()) as { now: unknown };
+      expect(typeof body.now).toBe("number");
+      expect(body.now as number).toBeGreaterThanOrEqual(before);
+      expect(Math.abs((body.now as number) - Date.now())).toBeLessThan(10_000);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }, 20_000);
 });

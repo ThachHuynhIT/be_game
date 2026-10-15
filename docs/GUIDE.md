@@ -231,7 +231,7 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
 |---|---|
 | `GET /api/<game>/rooms` (Tiến Lên: `/api/rooms`) | `{ok, rooms}`: lấy `recentRooms(60)` → lọc `isActive` → tối đa 30 → `summary`. Summary chung: `{code, status: "waiting"|"playing", players: [{name, connected, points}], spectators: number, games: gameSeq}` (Mèo Nổ thêm `expansions`) |
 | `GET /api/<game>/leaderboard?limit=20` | Như trên |
-| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, region, redisConfigured, redisHost, sharedStore, games}` (`sharedStore` = host Redis không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức kho dùng chung với máy khác). Mỗi bước timeout 5 s |
+| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, games}` (`now` = `Date.now()` của máy trả lời, để so lệch đồng hồ giữa hai máy dùng chung kho; `sharedStore` = host Redis của **chính máy đó** không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức "máy này dùng Redis ở xa", không có nghĩa hai máy cùng kho: muốn biết thì so `redisHost` của cả hai). Mỗi bước timeout 5 s |
 | `GET /` hoặc `/api` | `{ok:true, service:"be_game", routes}` |
 
 Lưu ý: health tạo một phòng rác `HC…` trong namespace `tienlen` mỗi lần gọi (hết hạn sau 12 h, không có người nên không hiện ở lobby).

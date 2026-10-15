@@ -139,7 +139,7 @@ async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResp
   }
 }
 
-/** create → load → subscribe → save → pub/sub round trip, with timings. Never returns secrets. */
+/** create → load → subscribe → save → pub/sub round trip, with timings. `now` (epoch ms) lets an operator compare the clocks of two backends sharing a store. Never returns secrets. */
 async function health(res: ServerResponse) {
   const stepsMs: Record<string, number> = {};
   let start = Date.now();
@@ -179,8 +179,8 @@ async function health(res: ServerResponse) {
     mark("save");
     await withTimeout(got, 3000, "pubsub").catch(() => {});
     mark("pubsub");
-    json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, ...info });
+    json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, now: Date.now(), ...info });
   } catch (err) {
-    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, ...info });
+    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, now: Date.now(), ...info });
   }
 }
