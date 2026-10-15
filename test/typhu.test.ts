@@ -217,6 +217,37 @@ describe("cards", () => {
     expect(s.ps.a.cash).toBe(1520);
     expect(s.ps.b.cash).toBe(1490);
   });
+  // Draw the first card of either deck matching `pick`: Khí vận at 2 (1+1), Cơ hội at 7 (3+4).
+  function drawCard(s: TPState, pick: (c: (typeof CHEST)[number]) => boolean) {
+    const chest = CHEST.findIndex(pick);
+    if (chest >= 0) {
+      s.chest = [chest];
+      rollDice(s, "a", T, names, dice(1, 1));
+    } else {
+      s.chance = [CHANCE.findIndex(pick)];
+      rollDice(s, "a", T, names, dice(3, 4));
+    }
+  }
+
+  it("money per owned lot: the log says how much was received", () => {
+    const s = game();
+    s.deeds[1] = { owner: "a", houses: 0, mortgaged: false };
+    s.deeds[3] = { owner: "a", houses: 0, mortgaged: false };
+    drawCard(s, (c) => c.effect.kind === "perprop" && c.effect.amount === 15);
+    expect(s.ps.a.cash).toBe(1530);
+    expect(s.log.at(-1)?.text).toBe("a nhận 30tr (2 ô đất × 15tr)");
+    expect(s.log.at(-1)?.tone).toBe("money");
+  });
+
+  it("plain money card: the log says how much was received", () => {
+    const s = game();
+    const pick = (c: (typeof CHEST)[number]) => c.effect.kind === "money" && c.effect.amount > 0;
+    drawCard(s, pick);
+    const card = [...CHEST, ...CHANCE].find(pick)!;
+    const amount = (card.effect as { amount: number }).amount;
+    expect(s.ps.a.cash).toBe(1500 + amount);
+    expect(s.log.at(-1)?.text).toBe(`a nhận ${amount}tr`);
+  });
 });
 
 describe("debt and bankruptcy", () => {

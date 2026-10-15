@@ -423,8 +423,10 @@ function applyEffect(s: TPState, id: string, e: CardEffect, now: number, names: 
   const p = s.ps[id];
   switch (e.kind) {
     case "money":
-      if (e.amount >= 0) p.cash += e.amount;
-      else charge(s, id, -e.amount, null, "thẻ bài", now, names);
+      if (e.amount >= 0) {
+        p.cash += e.amount;
+        log(s, now, `${names(id)} nhận ${money(e.amount)}`, "money");
+      } else charge(s, id, -e.amount, null, "thẻ bài", now, names);
       return;
     case "goto": {
       // Card targets are standard-map positions; look the square up by name on bigger maps.
@@ -477,10 +479,14 @@ function applyEffect(s: TPState, id: string, e: CardEffect, now: number, names: 
       s.rollAgain = true;
       return;
     case "perprop": {
-      const total = Math.abs(e.amount) * ownedBy(s, id).length;
+      const lots = ownedBy(s, id).length;
+      const total = Math.abs(e.amount) * lots;
+      const detail = `(${lots} ô đất × ${money(Math.abs(e.amount))})`;
       if (total === 0) log(s, now, `${names(id)} chưa có ô đất nào — không được gì, không mất gì`, "info");
-      else if (e.amount > 0) p.cash += total;
-      else charge(s, id, total, null, "thuế đất", now, names);
+      else if (e.amount > 0) {
+        p.cash += total;
+        log(s, now, `${names(id)} nhận ${money(total)} ${detail}`, "money");
+      } else charge(s, id, total, null, `thuế đất ${detail}`, now, names);
       return;
     }
     case "nearestfree": {
