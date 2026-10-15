@@ -153,7 +153,7 @@ Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash c�
 6. `docker compose -f compose.selfhost.yml up -d be_game`
 7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải cùng `redisHost` và `sharedStore: true`; bảng xếp hạng có cả điểm cũ của máy chính.
 
-**Quay lại Redis cục bộ**: xoá dòng `REDIS_URL` trong `.env` (`sed -i '/^REDIS_URL=/d' .env`) rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. **Không** chép ngược Upstash → Redis cục bộ bằng `migrate-store`: điểm cũ của máy chính đã được gộp vào Upstash lúc chuyển sang, chép ngược sẽ cộng chúng lần thứ hai vào bảng xếp hạng cục bộ. Hệ quả: Redis cục bộ giữ bảng xếp hạng đúng như lúc chuyển; điểm kiếm được trên Upstash sau đó vẫn ở Upstash (máy dự phòng tiếp tục dùng) và không được mang về. Chuyển sang kho chung lần nữa sau khi quay lại chỉ cần đặt lại dòng `REDIS_URL` (bước 5–6), **không** chạy lại `migrate-store` (sẽ cộng đôi điểm).
+**Quay lại Redis cục bộ**: xoá dòng `REDIS_URL` trong `.env` (`sed -i '/^REDIS_URL=/d' .env`) rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. **Không** chép ngược Upstash → Redis cục bộ bằng `migrate-store`: điểm cũ của máy chính đã được gộp vào Upstash lúc chuyển sang, chép ngược sẽ cộng chúng lần thứ hai vào bảng xếp hạng cục bộ. Hệ quả: Redis cục bộ giữ bảng xếp hạng đúng như lúc chuyển; điểm kiếm được trên Upstash sau đó vẫn ở Upstash (máy dự phòng tiếp tục dùng) và không được mang về. Chuyển sang kho chung lần nữa sau khi quay lại chỉ cần nhập lại URL (bước 1) rồi đặt lại dòng `REDIS_URL` (bước 5–6), **không** chạy lại `migrate-store` (sẽ cộng đôi điểm).
 
 ### Đếm lệnh Redis (Upstash)
 
