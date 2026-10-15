@@ -34,18 +34,18 @@ Sơ đồ vẽ trạng thái **sau khi chuyển sang kho chung**; khi `REDIS_URL
 
 - `NEXT_PUBLIC_TIENLEN_SERVER_URL` = máy chính, `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` = máy dự phòng. Cả hai được gắn vào bundle **lúc build**: đổi thì phải redeploy portfolio.
 - Sảnh và bàn mới dùng máy đầu tiên trả lời `GET /api/rooms` trong 3 giây; lựa chọn được nhớ 60 giây.
-- **Hai máy dùng chung Upstash** (sau khi chuyển; cách chuyển và quay lại: [`SELF_HOSTING.md`](SELF_HOSTING.md#chuyển-sang--quay-lại-kho-chung)): phòng, sảnh và bảng điểm là một. Mỗi phòng vẫn được ghim vào máy tạo ra nó; máy đó không trả lời thì client tự thử máy còn lại (cần bản zonenop-game có failover theo phòng; bản cũ vẫn chờ máy đã ghim) và vào lại đúng phòng đang chơi (cùng mã, lượt, bài, tiền). `GET /api/health` của mỗi máy trả `redisHost` và `sharedStore`: hai máy phải báo cùng `redisHost`, `sharedStore: true`. Khi hai máy còn Redis riêng (trước khi chuyển, hoặc sau khi quay lại Redis cục bộ), `sharedStore` là `false` và hành vi cũ giữ nguyên: phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại.
+- **Hai máy dùng chung Upstash** (sau khi chuyển; cách chuyển và quay lại: [`SELF_HOSTING.md`](SELF_HOSTING.md#chuyển-sang--quay-lại-kho-chung)): phòng, sảnh và bảng điểm là một. Mỗi phòng vẫn được ghim vào máy tạo ra nó; máy đó không trả lời thì client tự thử máy còn lại (cần bản zonenop-game có failover theo phòng; bản cũ vẫn chờ máy đã ghim) và vào lại đúng phòng đang chơi (cùng mã, lượt, bài, tiền). **Đây là thiết kế, chưa được chạy thử đầu-cuối**: buổi diễn tập failover thật (spec §7.3) chưa làm, và việc chuyển máy chính sang Upstash chưa xảy ra; diễn tập (hoặc văn bản miễn của chủ dự án) là điều kiện bắt buộc trước khi chuyển ([`SELF_HOSTING.md` → Điều kiện trước khi chuyển](SELF_HOSTING.md#điều-kiện-trước-khi-chuyển)). `GET /api/health` của mỗi máy trả `redisHost`, `sharedStore` và `now` (đồng hồ của máy đó, epoch ms). `sharedStore` tính **theo từng máy** và chỉ có nghĩa "máy này dùng Redis ở xa" (Vercel luôn báo `true`): nó **không** cho biết hai máy có chung kho. Muốn biết hai máy có chung kho hay không thì so `redisHost` của cả hai: phải giống nhau. Khi máy chính còn Redis riêng (trước khi chuyển, hoặc sau khi quay lại Redis cục bộ), `redisHost` của hai máy khác nhau và hành vi cũ giữ nguyên: phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại.
 - Link mời chưa biết máy: thử máy đang dùng, gặp "Không tìm thấy phòng" thì thử máy còn lại.
 
 Hệ quả cho backend: **`GET /api/rooms` phải luôn rẻ và luôn có trên mọi môi trường** (portfolio dùng nó để thử máy còn sống), và chuỗi lỗi `"Không tìm thấy phòng"` của hub là một phần của giao thức — đổi nó thì phải đổi `ROOM_NOT_FOUND` bên portfolio cùng lúc.
 
 ## Luồng phát hành
 
-1. **Nhánh → PR vào `main`.** CI (`.github/workflows/ci.yml`): `npm run typecheck`, `npm test` (gồm fuzz), kiểm tra hai file compose, build image Docker và gọi thử `/api`. Vercel build **preview** cho nhánh; dùng nó để thử với portfolio nếu cần (preview dùng chung Redis dự phòng — cẩn thận khi PR đổi cấu trúc state).
+1. **Nhánh → PR vào `main`.** CI (`.github/workflows/ci.yml`): `npm run typecheck`, `npm test` (gồm fuzz), kiểm tra hai file compose, build image Docker và gọi thử `/api`. Vercel build **preview** cho nhánh; dùng nó để thử với portfolio nếu cần (preview dùng chung Redis dự phòng — cẩn thận khi PR đổi cấu trúc state; **sau khi chuyển sang kho chung thì kho đó cũng là kho của máy chính**, nên preview có thể làm hỏng cả phòng máy chính đang phục vụ).
 2. **Merge vào `main`.** Hai việc chạy **song song, độc lập**:
    - Vercel deploy production → máy dự phòng chạy commit mới sau khoảng 1 phút.
    - CI chạy trên `main`; xanh thì workflow **Deploy** đưa đúng commit đó lên máy chính (Tailscale OIDC → SSH → `docker compose up -d --build` → health). Chi tiết từng bước: [`SELF_HOSTING.md` → Luồng deploy](SELF_HOSTING.md#luồng-deploy).
-3. CI trên `main` đỏ (ví dụ test chập chờn) thì **máy chính không được deploy nhưng Vercel vẫn deploy** → hai máy lệch phiên bản. Sửa CI rồi push lại, hoặc chạy Deploy bằng tay (Actions → Deploy → Run workflow, trên `main`) sau khi CI xanh.
+3. CI trên `main` đỏ (ví dụ test chập chờn) thì **máy chính không được deploy nhưng Vercel vẫn deploy** → hai máy lệch phiên bản. **Sau khi chuyển sang kho chung, lệch phiên bản nghĩa là code cũ và code mới cùng đọc, tick và ghi lại cùng một JSON phòng**, có thể kéo dài hàng giờ nếu CI `main` đỏ và điện thoại chậm hơn Vercel. Vì vậy **sửa CI đỏ trên `main` trước tiên** (ưu tiên hơn mọi việc khác), rồi push lại, hoặc chạy Deploy bằng tay (Actions → Deploy → Run workflow, trên `main`) sau khi CI xanh.
 4. Thay đổi cần cả frontend: merge và deploy be_game **trước**, kiểm tra cả hai máy, rồi mới deploy portfolio (xem mục dưới).
 
 Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ deploy. Không push thẳng vào `main`.
@@ -67,6 +67,7 @@ Secret của workflow Deploy (environment `self-hosted` trên GitHub) và biến
 Ba thứ được deploy độc lập và không cùng lúc: máy chính, máy dự phòng, portfolio (bundle cố định lúc build, người chơi có thể còn mở tab cũ hàng giờ). Vì vậy:
 
 - **Giao thức chỉ thêm, không đổi tên hay bỏ trong một bước.** Field mới trong lệnh client → server phải optional ở server; field mới trong view phải optional ở client (portfolio khai báo `?`). Muốn bỏ một field: bỏ chỗ dùng ở portfolio trước, deploy, rồi mới bỏ ở be_game.
+- **Hai máy dùng chung kho thì thay đổi hình dạng state phải qua cả hai máy cùng commit** (hoặc giữ tương thích cả hai chiều: code cũ đọc/ghi lại được state mới và ngược lại, vì máy lệch phiên bản vẫn tick và lưu phòng). Đừng merge thay đổi state khi `main` đang đỏ hoặc hai máy đang lệch; kiểm tra `REVISION` và commit Vercel trùng nhau trước và sau khi merge.
 - **State trong Redis sống qua deploy** (TTL 12 giờ, AOF trên máy chính). Code mới phải đọc được phòng tạo bởi code cũ: settings qua `xxxSettingsOf(room)`, field mới optional có mặc định (GUIDE → "Phòng cũ trong Redis").
 - **Thứ tự deploy khi frontend cần backend mới:** be_game (`main` → cả hai máy) → kiểm tra cả hai `/api/health` → portfolio.
 - **Bản sao ở portfolio** (`src/lib/<game>/`): đổi luật/kiểu ở be_game thì sửa bản portfolio trong cùng đợt (GUIDE → "Đồng bộ với portfolio").
@@ -76,23 +77,26 @@ Ba thứ được deploy độc lập và không cùng lúc: máy chính, máy d
 
 ```bash
 curl -s https://play-api.fudio101.com/api/health        # "ok":true,"store":"redis","region":"local"
-curl -s https://be-game-omega.vercel.app/api/health # "ok":true,"store":"redis","region":"sin1"
+curl -s https://be-game-omega.vercel.app/api/health # "ok":true,"store":"redis","region":"sin1"; thêm `now`, `redisHost`
 ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên máy chính
 ```
 
 - Commit trên Vercel: Vercel → project `be-game` → Deployments (bản Production). Hai commit phải giống nhau; khác thì xem bước 3 của [Luồng phát hành](#luồng-phát-hành).
+- Khi hai máy dùng chung kho: `redisHost` của hai máy giống nhau, và **đồng hồ lệch ≤ ~2 giây** (so trường `now` của hai `/api/health`, gọi liên tiếp). Lý do: hạn chót lượt, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi còn máy kia so với giờ của mình.
 - Thử WebSocket thật: mở portfolio, tạo bàn, kiểm tra vào được.
 - Workflow Deploy đã tự kiểm tra health trong container và (vì có variable `GAME_DOMAIN`) qua domain public.
 
 ## Sự cố và quay lại
 
-| Tình huống | Ảnh hưởng | Làm gì |
-|---|---|---|
-| Máy chính tắt (pin, mất điện, mạng) | Bàn mới tự sang Vercel; bàn đang chơi trên máy chính treo tới khi máy sống lại | `tailscale status \| grep vsmart`; offline thì báo chủ máy (chỉ họ bật lại được). Không cần đổi gì ở portfolio |
-| Bản mới lỗi trên cả hai máy | Mọi người chơi | Revert commit trên `main` → cả hai máy tự deploy lại. Gấp: Vercel → Instant Rollback cho máy dự phòng |
-| Bản mới chỉ lỗi trên máy chính (môi trường khác) | Người chơi trên máy chính | Revert, hoặc tạm chuyển hẳn sang Vercel: đổi `NEXT_PUBLIC_TIENLEN_SERVER_URL` của portfolio về `https://be-game-omega.vercel.app` rồi redeploy portfolio |
-| Workflow Deploy đỏ | Máy chính giữ bản cũ, Vercel đã có bản mới (lệch) | Đọc log; bảng sự cố ở [`SELF_HOSTING.md`](SELF_HOSTING.md#xử-lý-sự-cố) |
-| Upstash hết quota / lỗi | Máy dự phòng và mọi preview hỏng; máy chính không ảnh hưởng | Kiểm tra trên Vercel Storage |
+Hai cột trạng thái: **trước khi chuyển** là hiện tại (máy chính dùng Redis cục bộ, chưa chuyển); **sau khi chuyển** là trạng thái đích khi máy chính và máy dự phòng chung Upstash (chưa diễn tập, xem [Portfolio chọn backend](#portfolio-chọn-backend-thế-nào)).
+
+| Tình huống | Trước khi chuyển | Sau khi chuyển | Làm gì |
+|---|---|---|---|
+| Máy chính tắt (pin, mất điện, mạng) | Bàn mới tự sang Vercel; bàn đang chơi trên máy chính treo tới khi máy sống lại | Bàn mới sang Vercel; bàn đang chơi được thiết kế để tiếp tục trên Vercel (cùng phòng, trong ~15 giây) vì state nằm ở Upstash. **Chưa kiểm chứng đầu-cuối** | `tailscale status \| grep vsmart`; offline thì báo chủ máy (chỉ họ bật lại được). Không cần đổi gì ở portfolio. Máy lên lại: làm theo [danh sách sau khi máy tắt cứng](SELF_HOSTING.md#sau-khi-máy-tắt-cứng--bật-lại) (gồm kiểm tra đồng hồ) |
+| Bản mới lỗi trên cả hai máy | Mọi người chơi | Mọi người chơi; nếu lỗi nằm ở state ghi vào Upstash thì phòng trong kho cũng có thể hỏng | Revert commit trên `main` → cả hai máy tự deploy lại. Gấp: Vercel → Instant Rollback cho máy dự phòng |
+| Bản mới chỉ lỗi trên máy chính (môi trường khác) | Người chơi trên máy chính | Như trước; thêm: máy dự phòng (code cũ) vẫn đọc/ghi chung phòng với máy chính (code mới), xem [Giữ tương thích](#giữ-tương-thích-khi-đổi-code) | Revert, hoặc tạm chuyển hẳn sang Vercel: đổi `NEXT_PUBLIC_TIENLEN_SERVER_URL` của portfolio về `https://be-game-omega.vercel.app` rồi redeploy portfolio |
+| Workflow Deploy đỏ | Máy chính giữ bản cũ, Vercel đã có bản mới (lệch) | Như trước, nhưng hai phiên bản cùng ghi một JSON phòng: sửa nhanh, và state chỉ được đổi khi cả hai máy cùng commit | Đọc log; bảng sự cố ở [`SELF_HOSTING.md`](SELF_HOSTING.md#xử-lý-sự-cố) |
+| Upstash hết quota / lỗi | Máy dự phòng và mọi preview hỏng; máy chính không ảnh hưởng | **Cả hai máy hỏng** (kho chung là điểm hỏng chung; kể cả máy chính): quay lại Redis cục bộ ngay, xem [`SELF_HOSTING.md`](SELF_HOSTING.md#xử-lý-sự-cố) (cùng một hàng) và lưu ý phòng cũ sau khi quay lại | Kiểm tra trên Vercel Storage / bảng điều khiển Upstash; sau khi chuyển làm theo `SELF_HOSTING.md` |
 
 ## Bảo mật
 
@@ -105,8 +109,8 @@ ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên 
 
 **Hạ tầng / Vercel**
 - Trên Vercel chỉ có 5 function (`api/*.ts`); `/api` trần **không phải function → 404**. Đừng dùng `/api` để kiểm tra máy còn sống; dùng `/api/rooms` hoặc `/api/health`.
-- **Preview của be_game dùng chung Upstash Redis với production.** Một PR đổi cấu trúc state hay khoá Redis có thể làm hỏng phòng trên máy dự phòng ngay khi push nhánh. Với thay đổi kiểu đó: tránh mở phòng trên preview, hoặc tách store cho preview (Vercel → Storage → chỉ gắn store riêng cho Preview).
-- **Upstash free tier (500k lệnh/tháng) cạn vì tab sảnh để mở**, không phải vì ván chơi: mỗi tab poll `/rooms` của cả 7 game mỗi 5–10 s, mỗi lần 2 + số phòng lệnh Redis. Vì vậy `recentRooms` / `leaderboard` của store Redis được cache ngắn trong process (`src/server/store.ts`) và dọn index tối đa 1 lần/phút. Không dùng cache CDN (`s-maxage`) cho các endpoint này: header CORS phụ thuộc `Origin`. Preview của mọi nhánh cũng tốn quota này.
+- **Preview của be_game dùng chung Upstash Redis với production.** Một PR đổi cấu trúc state hay khoá Redis có thể làm hỏng phòng trên máy dự phòng ngay khi push nhánh. **Sau khi chuyển sang kho chung, kho này cũng là kho của máy chính**: preview giờ có thể làm hỏng cả phòng đang được điện thoại phục vụ, không chỉ máy dự phòng. Với thay đổi kiểu đó: tránh mở phòng trên preview, hoặc tách store cho preview (Vercel → Storage → chỉ gắn store riêng cho Preview).
+- **Upstash free tier (500k lệnh/tháng) cạn vì tab sảnh để mở**, không phải vì ván chơi: mỗi tab poll `/rooms` của cả 7 game mỗi 5–10 s, mỗi lần 2 + số phòng lệnh Redis. Vì vậy `recentRooms` / `leaderboard` của store Redis được cache ngắn trong process (`src/server/store.ts`) và dọn index tối đa 1 lần/phút. Không dùng cache CDN (`s-maxage`) cho các endpoint này: header CORS phụ thuộc `Origin`. Preview của mọi nhánh cũng tốn quota này. Sau khi chuyển, poll sảnh và `/api/health` của **máy chính** cũng đi vào Upstash, nên đo tốc độ lệnh thật trước khi chuyển ([`SELF_HOSTING.md` → Đếm lệnh Redis](SELF_HOSTING.md#đếm-lệnh-redis-upstash)).
 - Gói Hobby giới hạn WebSocket 300 giây/kết nối; server gửi `reconnect` trước khi hết hạn (README → "Giới hạn của Vercel"). Máy tự host không có giới hạn này.
 
 **Máy tự host**
@@ -119,7 +123,7 @@ ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên 
 **CI / script**
 - Script deploy chạy với `set -euo pipefail`: `| head` hay `| grep -q` làm lệnh trước nhận SIGPIPE → thoát 141 ngẫu nhiên. Lấy output vào biến rồi so.
 - `compose.selfhost.yml` bắt buộc `GAME_DOMAIN` → mọi `docker compose config` trong CI phải truyền giá trị mẫu.
-- **Test dùng `Math.random()` chưa inject sẽ chập chờn trên CI**, và CI đỏ trên `main` chặn deploy máy chính (Vercel vẫn deploy → lệch phiên bản). Mọi hàm phòng/ván nhận `random`, test truyền RNG có seed.
+- **Test dùng `Math.random()` chưa inject sẽ chập chờn trên CI**, và CI đỏ trên `main` chặn deploy máy chính (Vercel vẫn deploy → lệch phiên bản; sau khi chuyển sang kho chung, hai phiên bản cùng ghi chung state phòng, nên đây là việc sửa đầu tiên). Mọi hàm phòng/ván nhận `random`, test truyền RNG có seed.
 
 **Giao thức**
 - Origin bị từ chối: be_game trả 403, nhưng qua Cloudflare/Traefik thường thành **502** khi mở WebSocket. Thấy 502 thì kiểm tra `ALLOWED_ORIGIN` trước.

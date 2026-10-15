@@ -30,7 +30,7 @@ flowchart LR
 
 - Traffic public đi **Cloudflare Tunnel → Traefik → be_game**. Không cổng nào của be_game hay Redis được publish ra host.
 - GitHub vào máy bằng Tailscale: runner gia nhập tailnet của chủ máy như một node tạm gắn `tag:ci`, rồi SSH vào.
-- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Trước khi chuyển sang kho chung (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)) hai máy có Redis riêng nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash: máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng.
+- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Trước khi chuyển sang kho chung (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)) hai máy có Redis riêng nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash và thiết kế là máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng. **Việc này chưa được chạy thử đầu-cuối** (buổi diễn tập failover thật, spec §7.3, chưa làm), nên chưa được coi là đã kiểm chứng; diễn tập là điều kiện bắt buộc trước khi chuyển (xem [Điều kiện trước khi chuyển](#điều-kiện-trước-khi-chuyển)).
 
 ## Máy chủ `vsmart-zangyapro`
 
@@ -115,32 +115,54 @@ Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại 
 
 **Sao lưu**: khi `REDIS_URL` trống, phòng và bảng xếp hạng nằm trong `./data/redis` (bind mount, AOF bật); sau khi chuyển sang kho chung dữ liệu mới nằm ở Upstash, `./data/redis` chỉ còn dữ liệu lúc chuyển (giữ để quay lại). Chủ máy sao lưu `/home`, nên thư mục này được backup; Docker named volume thì không. Thư mục do uid 999 (redis) sở hữu, đọc bằng `docker exec be_game-redis-1 …`.
 
+### Sau khi máy tắt cứng / bật lại
+
+1. `dc ps` (be_game đã lên, `restart: unless-stopped`), `/api/health` trong container và public cùng trả `"ok":true`.
+2. `cat REVISION` khớp commit trên Vercel (không thì xem [Luồng phát hành](DEPLOYMENT.md#luồng-phát-hành)).
+3. **Đồng hồ**: so `now` của `play-api.fudio101.com/api/health` với `be-game-omega.vercel.app/api/health` (gọi liên tiếp): lệch ≤ ~2 giây. Máy vừa tắt cứng có thể giờ sai tới khi đồng bộ NTP; khi dùng kho chung, đồng hồ lệch làm sai hạn chót lượt, `lastSeen` và điểm chỉ mục sảnh (do máy này ghi, máy kia so với giờ của mình). Lệch thì báo chủ máy sửa NTP, và trong lúc đó cân nhắc quay lại Redis cục bộ.
+4. Nếu đang ở kho chung: `redisHost` của hai máy vẫn giống nhau.
+
 ## Chuyển sang / quay lại kho chung
 
-Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash của project Vercel `be-game`) để ván đang chơi không kẹt khi điện thoại sập. Đây là trạng thái đích; việc chuyển là một bước vận hành riêng, làm khi đã đo hạn mức Upstash. Thiết kế đầy đủ: [`docs/superpowers/specs/2026-10-15-shared-store-failover-design.md`](superpowers/specs/2026-10-15-shared-store-failover-design.md).
+Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash của project Vercel `be-game`) để ván đang chơi không kẹt khi điện thoại sập. Đây là trạng thái đích; việc chuyển là một bước vận hành riêng, **chưa thực hiện**, và chỉ làm khi đã đủ [điều kiện bên dưới](#điều-kiện-trước-khi-chuyển). Thiết kế đầy đủ: [`docs/superpowers/specs/2026-10-15-shared-store-failover-design.md`](superpowers/specs/2026-10-15-shared-store-failover-design.md).
 
 `compose.selfhost.yml` lấy `REDIS_URL` của be_game từ `.env` (`${REDIS_URL:-redis://redis:6379}`). Container `redis` cục bộ vẫn chạy và giữ dữ liệu cũ nên quay lại nhanh. Không đổi code server.
 
 **Công cụ** `src/tools/migrate-store.ts` (có trong image), chép phòng và bảng xếp hạng giữa hai Redis:
 
 - Bảng xếp hạng được **cộng thêm** vào đích (điểm, số ván, số thắng), nên chỉ chạy **một lần** (chiều duy nhất dùng là Redis cục bộ → Upstash); chạy lại là cộng đôi. Luôn `--dry-run` trước.
+- Chống chạy lại: chạy thật thành công thì công cụ ghi khoá `be_game:migrated:<host nguồn>:<cổng nguồn>` (giá trị = giờ ISO) vào đích. Chạy thật lần sau từ cùng nguồn bị từ chối, không ghi gì, in `already migrated from <host> at <giờ>: re-running would add leaderboards twice (pass --force to override)` và thoát mã 1. `--force` bỏ qua kiểm tra này, chỉ dùng khi đã biết chắc đích chưa nhận bảng xếp hạng của nguồn (ví dụ đã xoá khoá và dữ liệu thử). `--dry-run` không ghi gì, chỉ báo nếu khoá đã có. Chạy lỗi giữa chừng thì **không** có khoá (xem dòng cuối của danh sách này).
 - Phòng chỉ được chép khi đích chưa có mã đó (giữ TTL và điểm trong sảnh). Dấu chống ghi điểm hai lần (`lb:done:*`) không chép.
 - `--from`/`--to` nhận URL hoặc `env:TÊN_BIẾN` (đọc URL từ biến môi trường; biến thiếu hoặc rỗng thì báo `--to env:TÊN is not set`, không in giá trị). Dùng `env:` cho URL có mật khẩu để nó không hiện trong `ps`.
 - Từ chối chạy khi `--from` và `--to` là cùng một store; chỉ in tên host, không in URL hay mật khẩu.
 - Báo lỗi giữa chừng thì nó nói đã dừng ở game nào: game đó có thể đã áp dụng một phần. **Đừng chạy lại nguyên lệnh**, kiểm tra đích trước.
 
-**Chuyển sang kho chung** (≈ 1–2 phút máy chính gián đoạn; máy dự phòng vẫn chạy). Trên server, trong `~/apps/be_game`:
+### Điều kiện trước khi chuyển
+
+Chỉ chuyển khi **tất cả** những điều dưới đây đúng. Chưa mục nào được làm tại thời điểm viết tài liệu này.
+
+1. **Đã diễn tập failover thật** (spec §7.3), hoặc chủ dự án đã **ghi rõ bằng văn bản** là bỏ qua (ghi vào PR/ghi chú phát hành, nêu người quyết định và ngày). Diễn tập gồm: hai backend cùng trỏ vào Upstash thật; mở một ván, tắt một backend giữa ván; ván phải tiếp tục sau ≤ 15 giây, bot kết nối lại, người chơi vào lại đúng phòng; chạy `migrate-store` với Upstash thật (cả `--dry-run` lẫn chạy thật trên dữ liệu thử). Đến nay chỉ mới có test tự động và hành vi theo thiết kế, **chưa có lần chạy đầu-cuối nào**: đừng coi "máy chính sập thì client vào lại cùng phòng" là sự thật đã kiểm chứng.
+2. **Đã đo tốc độ lệnh Redis thật** của máy chính ([Đếm lệnh Redis](#đếm-lệnh-redis-upstash), 24–48 giờ khi còn dùng Redis cục bộ) và so với gói Upstash đang có. Tốc độ lệnh Upstash chưa từng được đo.
+3. **Hai máy chạy cùng một commit** và CI trên `main` đang xanh (xem [Giữ tương thích](DEPLOYMENT.md#giữ-tương-thích-khi-đổi-code): sau khi chuyển, code cũ và mới đọc/ghi chung JSON phòng).
+4. **Đồng hồ hai máy lệch ≤ ~2 giây** (so `now` của hai `/api/health`, xem bước 7).
+5. Bước chạy thử (`--dry-run`) cho thấy `rooms already there` = 0, hoặc chủ dự án chấp nhận những ván đó kết thúc (bước 2).
+
+### Chuyển sang kho chung
+
+(≈ 1–2 phút máy chính gián đoạn; máy dự phòng vẫn chạy.) Trên server, trong `~/apps/be_game`:
 
 1. Nhập URL Upstash, không để lại trong lịch sử shell và không đưa lên dòng lệnh (URL lấy từ biến `REDIS_URL`/`KV_URL` của project Vercel `be-game`): `read -rs UPSTASH_URL; export UPSTASH_URL`.
-2. Chạy thử khi be_game còn chạy (chỉ đọc), xem số liệu. Công cụ nhận `env:TÊN_BIẾN` thay cho URL, nên URL không nằm trong `ps` của máy dùng chung:
+2. Chạy thử khi be_game còn chạy (chỉ đọc), xem số liệu. Công cụ nhận `env:TÊN_BIẾN` thay cho URL, nên URL không nằm trong `ps` của máy dùng chung. `--label traefik.enable=false` để Traefik không bao giờ chuyển traffic thật vào container chạy một lần này (nó thừa hưởng nhãn route của be_game):
 
    ```bash
-   docker compose -f compose.selfhost.yml run --rm --no-deps -e UPSTASH_URL be_game \
+   docker compose -f compose.selfhost.yml run --rm --no-deps --label traefik.enable=false -e UPSTASH_URL be_game \
      node_modules/.bin/tsx src/tools/migrate-store.ts --from redis://redis:6379 --to env:UPSTASH_URL --dry-run
    ```
 
+   Đọc kết quả mỗi game: `rooms copied N` là số phòng sẽ được chép; `rooms already there N` là số mã phòng **đã có ở cả hai nơi** (Upstash đang giữ phòng cùng mã). Bản trên Redis cục bộ của phòng đó **không được chép** và sẽ mất sau khi chuyển (máy chính chuyển sang đọc Upstash, nơi chỉ còn bản kia). Nếu N > 0 lúc chuyển thì những ván đó trên máy chính kết thúc: báo người chơi, hoặc đợi ván xong rồi mới chuyển.
+
 3. `docker compose -f compose.selfhost.yml stop be_game` (để Redis cục bộ không đổi trong lúc chép).
-4. Chạy thật: cùng lệnh, bỏ `--dry-run`, **đúng một lần**.
+4. Chạy thật: cùng lệnh (vẫn giữ `--label traefik.enable=false`), bỏ `--dry-run`, **đúng một lần**. Thành công thì công cụ ghi khoá chống chạy lại vào Upstash; lần chạy thật thứ hai bị từ chối trừ khi có `--force` (đừng dùng).
 5. Ghi URL vào `.env` mà không lộ ra lịch sử shell (UPSTASH_URL vẫn đang được export), rồi xoá biến:
 
    ```bash
@@ -151,13 +173,27 @@ Mục tiêu: máy chính và máy dự phòng dùng **một** Redis (Upstash c�
    ```
 
 6. `docker compose -f compose.selfhost.yml up -d be_game`
-7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải cùng `redisHost` và `sharedStore: true`; bảng xếp hạng có cả điểm cũ của máy chính.
+7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải **cùng `redisHost`**. `sharedStore: true` chỉ có nghĩa "máy này dùng Redis ở xa" (Vercel luôn báo `true`), nên không dùng nó để biết hai máy có chung kho hay không: so `redisHost`. Bảng xếp hạng có cả điểm cũ của máy chính.
+   - **Đồng hồ**: lấy trường `now` (epoch ms) của hai `/api/health` (gọi liên tiếp, hai giá trị phải chênh ≤ ~2000 ms, đã gồm độ trễ mạng). Lệch hơn thì sửa NTP của điện thoại (báo chủ máy) trước khi cho chạy. Lý do: hạn chót lượt chơi, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi nhưng máy kia so sánh với giờ của mình; đồng hồ lệch làm bàn bị coi là hết hạn hoặc đã rời sớm/muộn, và sảnh dọn nhầm phòng.
 
-**Quay lại Redis cục bộ**: xoá dòng `REDIS_URL` trong `.env` (`sed -i '/^REDIS_URL=/d' .env`) rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. **Không** chép ngược Upstash → Redis cục bộ bằng `migrate-store`: điểm cũ của máy chính đã được gộp vào Upstash lúc chuyển sang, chép ngược sẽ cộng chúng lần thứ hai vào bảng xếp hạng cục bộ. Hệ quả: Redis cục bộ giữ bảng xếp hạng đúng như lúc chuyển; điểm kiếm được trên Upstash sau đó vẫn ở Upstash (máy dự phòng tiếp tục dùng) và không được mang về. Chuyển sang kho chung lần nữa sau khi quay lại chỉ cần nhập lại URL (bước 1) rồi đặt lại dòng `REDIS_URL` (bước 5–6), **không** chạy lại `migrate-store` (sẽ cộng đôi điểm).
+### Quay lại Redis cục bộ
+
+Xoá dòng `REDIS_URL` trong `.env` (`sed -i '/^REDIS_URL=/d' .env`) rồi `docker compose -f compose.selfhost.yml up -d be_game`. Client không cần đổi. **Không** chép ngược Upstash → Redis cục bộ bằng `migrate-store`: điểm cũ của máy chính đã được gộp vào Upstash lúc chuyển sang, chép ngược sẽ cộng chúng lần thứ hai vào bảng xếp hạng cục bộ. Hệ quả: Redis cục bộ giữ bảng xếp hạng đúng như lúc chuyển; điểm kiếm được trên Upstash sau đó vẫn ở Upstash (máy dự phòng tiếp tục dùng) và không được mang về. Chuyển sang kho chung lần nữa sau khi quay lại chỉ cần nhập lại URL (bước 1) rồi đặt lại dòng `REDIS_URL` (bước 5–6), **không** chạy lại `migrate-store` (sẽ cộng đôi điểm; khoá chống chạy lại trong Upstash cũng sẽ từ chối).
+
+**Phòng cũ sau khi quay lại**: Redis cục bộ vẫn giữ các phòng đã chép lúc chuyển, với trạng thái **của lúc chuyển**, trong tối đa 12 giờ (TTL). Quay lại trong 12 giờ đầu thì người chơi bị ghim vào máy chính có thể vào lại bản sao cũ đó, trong khi máy dự phòng vẫn phục vụ bản trên Upstash: hai bản của cùng một mã phòng, lệch nhau. Vì vậy **ván đang chơi lúc quay lại coi như mất/chơi lại**; báo người chơi, đừng cố nối tiếp. Cũng không có cách mang về: điểm kiếm được trên Redis cục bộ trong lúc quay lại **không** được chuyển sang Upstash khi chuyển lần nữa (không có chép ngược, và không chạy migrate lần hai), nên chúng mất khỏi bảng xếp hạng chung.
 
 ### Đếm lệnh Redis (Upstash)
 
 Đặt `BE_GAME_COUNT_COMMANDS=1` trong `.env` rồi `dc up -d` (compose chuyển biến này vào container): be_game log `[be_game] redis commands last 60s: <n>` mỗi 60 giây (chỉ đếm tiến trình đó, không tính máy dự phòng). Xem bằng `dc logs --tail 20 be_game`. Dùng để quy ra lệnh/giờ so với hạn mức Upstash; xong thì bỏ dòng này, `dc up -d`.
+
+**Đo trước khi chuyển (khuyến nghị, và là một điều kiện)**: bật `BE_GAME_COUNT_COMMANDS=1` trên điện thoại **khi còn dùng Redis cục bộ**, để chạy 24–48 giờ với lưu lượng thật. Cách này cho tốc độ lệnh thật mà không đụng tới Upstash, rồi so với gói Upstash (quota lệnh/tháng, và trần lệnh/giây nếu có).
+
+Bộ đếm **thiếu** những phần sau, nên chỉ là cận dưới:
+- Kết nối subscriber (`SUBSCRIBE`/`UNSUBSCRIBE` trên client `duplicate()`) không được đếm.
+- Upstash có thể tính tiền `EVAL` (script lưu phòng, kể cả các lệnh bên trong) và lượt phát pub/sub khác cách đếm ở đây.
+- **Bảng điều khiển Upstash mới là nguồn sự thật.** Sau khi chuyển, theo dõi nó ngay những ngày đầu và so với số đã đo.
+
+Sau khi chuyển, **lưu lượng của chính điện thoại cũng đi vào Upstash**: tab sảnh poll `/rooms` tới máy chính, và `/api/health` của máy chính (ghi/đọc thật, cả lúc deploy lẫn các lần kiểm tra) cũng chạm Upstash. Đây đúng là bài học trong [`DEPLOYMENT.md`](DEPLOYMENT.md#bài-học-đã-gặp): tab sảnh để mở đã làm cạn gói miễn phí. Số đo trước khi chuyển đã gồm phần poll sảnh của máy chính; phần poll vào máy dự phòng thì cộng thêm.
 
 ## Quy tắc trên máy dùng chung
 
