@@ -61,7 +61,7 @@ Next 16 / React 19, vitest. Playwright (`playwright-core` ở `%TEMP%/shots`, Ed
 - `export const GAME_KINDS: readonly GameKind[]` (đúng 7 game, cùng thứ tự type).
 - `export function keysFor(game: GameKind)` (đã có, thêm `export`).
 - `export const isSharedStoreHost = (host: string | null) => boolean` trong `app.ts`: `true` khi host khác rỗng và không
-  phải `redis`, `localhost`, `127.0.0.1`, `::1`.
+  phải `redis`, `localhost`, `127.0.0.1`, `[::1]`.
 - `/api/health` thêm `sharedStore: boolean`.
 - `export function countCommands(redis: { sendCommand: (...a: any[]) => any }, onTick: (n: number) => void, everyMs?: number): () => void`
   trong `store.ts` — bọc `sendCommand` đếm lệnh, gọi `onTick(count)` mỗi `everyMs` (mặc định 60 000) rồi về 0; trả hàm dừng.
@@ -86,7 +86,7 @@ describe("shared store helpers", () => {
   });
   it("tells a shared (remote) Redis from the local compose one", () => {
     expect(isSharedStoreHost("happy-osprey-296234.upstash.io")).toBe(true);
-    for (const h of ["redis", "localhost", "127.0.0.1", "::1", "", null]) expect(isSharedStoreHost(h)).toBe(false);
+    for (const h of ["redis", "localhost", "127.0.0.1", "[::1]", "", null]) expect(isSharedStoreHost(h)).toBe(false);
   });
   it("counts commands per interval and stops cleanly", () => {
     vi.useFakeTimers();
@@ -146,8 +146,10 @@ export function countCommands(redis: { sendCommand: (...a: any[]) => any }, onTi
 
 ```ts
 /** A Redis outside this machine (Upstash…) means both backends share rooms; the compose `redis` service does not. */
-export const isSharedStoreHost = (host: string | null) => !!host && !["redis", "localhost", "127.0.0.1", "::1"].includes(host);
+export const isSharedStoreHost = (host: string | null) => !!host && !["redis", "localhost", "127.0.0.1", "[::1]"].includes(host);
 ```
+  (`new URL("redis://[::1]:6379").hostname` là `"[::1]"`, có ngoặc.) Nếu import `app.ts` trong test kéo theo tác dụng
+  phụ (mở Redis, listen…), chuyển `isSharedStoreHost` sang `store.ts` và import từ đó — ghi lại trong báo cáo.
   và trong `health()` thêm vào `info`: `sharedStore: isSharedStoreHost(url ? new URL(url).hostname : null),`.
   Nếu `GameKind` hiện là union viết tay, có thể đổi thành `export type GameKind = (typeof GAME_KINDS)[number]` và bỏ
   `satisfies` — miễn typecheck sạch và test đúng 7 game.
@@ -444,6 +446,8 @@ không ghi vào file nào trong repo). Không có URL → task dừng ở NEEDS_
 - [ ] **Step 3: Đo hạn mức** — bàn Cờ Tỷ Phú 4 người (`$TEMP/shots/typhu-bots.mjs` với `GAME_SERVER=http://localhost:4123`
   + 1 người Playwright) chơi 10 phút; đọc các dòng `redis commands last 60s` trong `be-a.log`; quy ra lệnh/giờ-bàn.
   Ghi kèm "Upstash có thể tính mỗi lệnh trong EVAL → nhân tối đa ~5" và đề nghị người dùng đối chiếu dashboard.
+  Nếu bộ đếm báo 0 trong khi ván đang chạy (auto-pipelining của ioredis đi vòng qua `sendCommand`), không sửa thêm:
+  ghi nhận và dựa vào dashboard Upstash (người dùng đọc số trước/sau 10 phút).
 - [ ] **Step 4: Diễn tập Cờ Tỷ Phú** — trong ván đang chơi (người Playwright trên `localhost:3105` đang ở `:4123`):
   ghi lại lượt hiện tại, tiền, vị trí của mọi người; dừng tiến trình 4123 (theo cổng, kiểm command line); trong ≤ 15 s
   trang hiện lại bàn, cùng mã phòng, cùng lượt/tiền/vị trí; người chơi đi tiếp được một nước; bot (nối 4123) cũng phải
