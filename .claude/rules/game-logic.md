@@ -18,6 +18,7 @@ paths:
 - `settings` is refused while a game is running and copied into the game state at `start`.
 - Views/summaries decide visibility: never include `token`; private data only for the owning player, never for spectators.
 - Every game must end: timeouts and absent players are handled in `tickGame`/`tickXxx`, and `nextGameTickAt` returns the next deadline.
-- **Portfolio sync**: `cards.ts`/`board.ts` (and `src/game/{cards,combos,rules}.ts`) are copied verbatim into `portfolio/src/lib/<game>/`; `protocol.ts` has a hand-edited copy there. Change both together and say so in the PR.
+- **Frontend sync**: `cards.ts`/`board.ts` (and `src/game/{cards,combos,rules}.ts`) are copied verbatim into `zonenop-game/src/lib/<game>/`; `protocol.ts` has a hand-edited copy there. Change both together and say so in the PR.
+- **Seats**: every `joinXxx` re-attaches through `findReturning` (own token, else an offline same-name seat), and every path that frees a seat (not kick) calls `rememberGone` so `takeGone`/`seatFor` restore id and stats (`room.gone`, server-only, never in views). A new game must do the same (`docs/GUIDE.md` → "Vào lại phòng").
 - Update `docs/games/<game>.md` (and the tables in `docs/GUIDE.md` / `README.md` when player counts or endpoints change) in the same commit.
 - After rule changes run that game's tests and its fuzz test (`npx vitest run test/<game>.test.ts test/fuzz-<game>.test.ts`).

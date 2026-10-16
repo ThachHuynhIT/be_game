@@ -7,7 +7,7 @@ Hạ tầng chung (hub, adapter, store, giao thức WS, chat, emoji, khán giả
 
 | File | Vai trò |
 |---|---|
-| `src/cangua/board.ts` | Dữ liệu bàn 15×15: `COLORS`, `COLOR_NAMES`, `TRACK` (56 ô), `HOME_CELLS`, `STABLE_ORIGIN`, `STABLE_CELLS`, hằng số (`TRACK_LEN`, `HOME_LEN`, `GATE`, `FINAL`, `STABLE`…), `COLORS_FOR_PLAYERS`, `startIndex`, `trackIndex`, `cellOf`. Chép nguyên sang portfolio (`src/lib/cangua/board.ts`) — **không import gì** |
+| `src/cangua/board.ts` | Dữ liệu bàn 15×15: `COLORS`, `COLOR_NAMES`, `TRACK` (56 ô), `HOME_CELLS`, `STABLE_ORIGIN`, `STABLE_CELLS`, hằng số (`TRACK_LEN`, `HOME_LEN`, `GATE`, `FINAL`, `STABLE`…), `COLORS_FOR_PLAYERS`, `startIndex`, `trackIndex`, `cellOf`. Chép nguyên sang zonenop-game (`src/lib/cangua/board.ts`) — **không import gì** |
 | `src/cangua/game.ts` | Máy trạng thái thuần `CNState`: `newCNGame`, `rollDie`, `moveHorse`, `targetOf`, `legalMoves`, `forfeitPlayer`, `bestMove`, `tickGame`, `nextGameTickAt`, `DEFAULT_RULES` |
 | `src/cangua/room.ts` | Vòng đời phòng `CNRoom`: `joinCN`, `leaveCN`, `cnHeartbeat`, `cnCommand`, cài đặt, kick, ghi kết quả, `tickCN`, `nextCNTickAt`, `cnView`, `cnSummary`, `isCNActive` |
 | `src/cangua/protocol.ts` | Kiểu dây: `CNSettings`, `CNPlayerView`, `CNMove`, `CNGameView`, `CNRoomView`, `CNCommand`, `CANGUA_WS_PATH` |

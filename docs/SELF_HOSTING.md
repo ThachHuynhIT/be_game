@@ -11,7 +11,7 @@ Mục lục: [Sơ đồ](#sơ-đồ) · [Máy chủ](#máy-chủ-vsmart-zangyapr
 ```mermaid
 flowchart LR
   subgraph Internet
-    B["Trình duyệt<br/>portfolio-thach.vercel.app<br/>+ preview"]
+    B["Trình duyệt<br/>play.fudio101.com (zonenop-game)<br/>+ zonenop-game.vercel.app"]
     CF["Cloudflare<br/>play-api.fudio101.com"]
     GH["GitHub Actions<br/>CI → Deploy"]
   end
@@ -30,7 +30,7 @@ flowchart LR
 
 - Traffic public đi **Cloudflare Tunnel → Traefik → be_game**. Không cổng nào của be_game hay Redis được publish ra host.
 - GitHub vào máy bằng Tailscale: runner gia nhập tailnet của chủ máy như một node tạm gắn `tag:ci`, rồi SSH vào.
-- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: portfolio tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). Trước khi chuyển sang kho chung (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)) hai máy có Redis riêng nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash và thiết kế là máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng. **Việc này chưa được chạy thử đầu-cuối** (buổi diễn tập failover thật, spec §7.3, chưa làm), nên chưa được coi là đã kiểm chứng; diễn tập là điều kiện bắt buộc trước khi chuyển (xem [Điều kiện trước khi chuyển](#điều-kiện-trước-khi-chuyển)).
+- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: frontend zonenop-game tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). **Hiện tại (16/10/2026) chưa chuyển sang kho chung** (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)): máy chính dùng Redis trong compose (`/api/health` báo `redisHost: "redis"`, `sharedStore: false`), máy dự phòng dùng Upstash, nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash và thiết kế là máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng. **Việc này chưa được chạy thử đầu-cuối** (buổi diễn tập failover thật, spec §7.3, chưa làm), nên chưa được coi là đã kiểm chứng; diễn tập là điều kiện bắt buộc trước khi chuyển (xem [Điều kiện trước khi chuyển](#điều-kiện-trước-khi-chuyển)).
 
 ## Máy chủ `vsmart-zangyapro`
 
@@ -44,27 +44,30 @@ flowchart LR
 | Nơi | Tên | Giá trị / ý nghĩa | Ai quản lý |
 |---|---|---|---|
 | Server `~/apps/be_game/.env` | `GAME_DOMAIN` | `play-api.fudio101.com` — bắt buộc, Traefik route theo tên này | zonenop |
-| Server `~/apps/be_game/.env` | `REDIS_URL` | URL Upstash chung với máy dự phòng (`rediss://default:<password>@<host>.upstash.io:6379`). **Bí mật**: chỉ nằm trong file này (quyền `600`), không commit, không in ra. Bỏ trống hoặc xoá dòng = Redis cục bộ trong compose (`redis://redis:6379`) | zonenop |
+| Server `~/apps/be_game/.env` | `REDIS_URL` | **Hiện để trống** = Redis cục bộ trong compose (`redis://redis:6379`). Chỉ sau khi chuyển sang kho chung mới là URL Upstash của máy dự phòng (`rediss://default:<password>@<host>.upstash.io:6379`); khi đó là **bí mật**: chỉ nằm trong file này (quyền `600`), không commit, không in ra, không đưa vào GitHub secret | zonenop |
 | Server `~/apps/be_game/.env` | `BE_GAME_COUNT_COMMANDS` | Tuỳ chọn: `1` = log số lệnh Redis mỗi 60 giây (xem [Đếm lệnh Redis](#đếm-lệnh-redis-upstash)) | zonenop |
-| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | `https://portfolio-thach.vercel.app,https://portfolio-*-thachs-projects-48e5eaf9.vercel.app,http://localhost:3000,https://zonenop-game.vercel.app,https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app,https://play.fudio101.com` | zonenop |
+| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`; cộng `http://localhost:3000` và hai mục của site portfolio cũ còn trong danh sách (`https://portfolio-thach.vercel.app`, `https://portfolio-*-thachs-projects-48e5eaf9.vercel.app`; game không còn chạy ở đó, bỏ được). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
 | GitHub env `self-hosted` (secret) | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_PORT`? | IP tailnet của server, `zonenop`, `/home/zonenop/apps/be_game`, mặc định 22 | zonenop |
 | GitHub env `self-hosted` (secret) | `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | Private key `be_game-deploy@github-actions`; host key đã ghim bằng `ssh-keyscan` | zonenop |
 | GitHub env `self-hosted` (variable) | `GAME_DOMAIN`, `TS_TAGS`? | `play-api.fudio101.com` (bật bước kiểm tra health public); tag mặc định `tag:ci` | zonenop |
+| GitHub repo (variable, không thuộc environment) | `VERCEL_HEALTH_URL` | `https://be-game-omega.vercel.app/api/health`: bật job `vercel` (đợi bản Vercel trả đúng `commit`). Là biến repo duy nhất. Không đặt thì job bị bỏ qua | zonenop |
+| Tiến trình deploy → compose | `BUILD_COMMIT` | Workflow export `BUILD_COMMIT=$SHA`, `compose.selfhost.yml` chuyển vào container, `/api/health` trả ở `commit`. Không đặt trong `.env` | workflow |
 | Server `~/.ssh/authorized_keys` | `be_game-deploy@github-actions`, `zonenop-game-deploy@github-actions` (mỗi repo một key) | Giới hạn `restrict,from="100.64.0.0/10,fd7a:115c:a1e0::/48"`: chỉ từ tailnet, không pty, không forward | zonenop |
 | zonenop-game tự host (`~/apps/zonenop-game`) | — | Frontend ở `https://play.fudio101.com`, gọi be_game qua `https://play-api.fudio101.com`; hai hostname cùng tunnel và Traefik của chủ máy | zonenop |
-| Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://play-api.fudio101.com` (production, preview, development). Gắn vào bundle **lúc build**: đổi thì phải redeploy | zonenop |
+| zonenop-game (`~/apps/zonenop-game/.env` và/hoặc Vercel project `zonenop-game`) | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://play-api.fudio101.com`. Gắn vào bundle **lúc build** (build arg của Docker, hoặc build Vercel): đổi thì phải build lại | zonenop |
 | Vercel project `be-game` | `ALLOWED_ORIGIN` | Giống hệt server chính (kể cả `https://play.fudio101.com`). Đọc lúc chạy nhưng Vercel chỉ áp dụng env mới cho bản deploy mới: đổi xong phải redeploy production | zonenop |
-| Vercel project `portfolio` | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | `https://be-game-omega.vercel.app`: máy dự phòng. Máy chính không trả lời thì sảnh và bàn mới dùng máy này; phòng đã có vẫn gắn với máy tạo ra nó (portfolio `docs/GAMES_GUIDE.md` §1.2) | zonenop |
+| zonenop-game (như trên) | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | `https://be-game-omega.vercel.app`: máy dự phòng. Máy chính không trả lời thì sảnh và bàn mới dùng máy này; phòng đã có vẫn gắn với máy tạo ra nó (`docs/GAMES_GUIDE.md` §1.2 của repo zonenop-game) | zonenop |
 | Tailscale admin | `tag:ci` + ACL | `tag:ci` chỉ được vào `vsmart-zangyapro:22` | chủ máy |
 | Traefik, cloudflared | `traefik_network`, entrypoint `web`, tunnel | Hạ tầng public | chủ máy |
 
 ### `ALLOWED_ORIGIN`
 
 - Danh sách cách nhau dấu phẩy; `*` khớp `[a-z0-9-.]+` (`isAllowedOrigin` trong `src/server/hub.ts`). Request không có `Origin` (client không phải trình duyệt) luôn được nhận.
-- URL preview của portfolio có hai dạng, cùng khớp `https://portfolio-*-thachs-projects-48e5eaf9.vercel.app`:
-  - từng bản deploy: `portfolio-<hash>-thachs-projects-48e5eaf9.vercel.app`
-  - link theo nhánh: `portfolio-git-<nhánh>-thachs-projects-48e5eaf9.vercel.app`
+- URL preview của zonenop-game có hai dạng, cùng khớp `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`:
+  - từng bản deploy: `zonenop-game-<hash>-thachs-projects-48e5eaf9.vercel.app`
+  - link theo nhánh: `zonenop-game-git-<nhánh>-thachs-projects-48e5eaf9.vercel.app`
+  (mẫu `portfolio-*` tương tự chỉ còn nằm trong danh sách như di sản của site portfolio cũ)
 - **Không** dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
 - Origin bị từ chối nhận HTTP **403** từ be_game, nhưng qua Traefik/Cloudflare thường hiện thành **502** (be_game cắt kết nối ngay). Thấy 502 lúc mở WebSocket thì kiểm tra origin trước.
 - Đổi xong: `docker compose -f compose.selfhost.yml up -d` (tạo lại container để đọc `.env`).
@@ -112,9 +115,9 @@ git archive HEAD | ssh vsmart-zangyapro "tar -xf - -C ~/apps/be_game && cd ~/app
 
 Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại workflow.
 
-**Quay lại bản trước**: revert commit trên `main` (deploy tự chạy), hoặc chạy Deploy bằng tay sau khi `main` đã trỏ về bản tốt. Quay hẳn về Vercel: đổi `NEXT_PUBLIC_TIENLEN_SERVER_URL` của portfolio về `https://be-game-omega.vercel.app` rồi redeploy portfolio.
+**Quay lại bản trước**: revert commit trên `main` (deploy tự chạy), hoặc chạy Deploy bằng tay sau khi `main` đã trỏ về bản tốt. Quay hẳn về Vercel: đổi `NEXT_PUBLIC_TIENLEN_SERVER_URL` của zonenop-game về `https://be-game-omega.vercel.app` rồi build lại zonenop-game.
 
-**Sao lưu**: khi `REDIS_URL` trống, phòng và bảng xếp hạng nằm trong `./data/redis` (bind mount, AOF bật); sau khi chuyển sang kho chung dữ liệu mới nằm ở Upstash, `./data/redis` chỉ còn dữ liệu lúc chuyển (giữ để quay lại). Chủ máy sao lưu `/home`, nên thư mục này được backup; Docker named volume thì không. Thư mục do uid 999 (redis) sở hữu, đọc bằng `docker exec be_game-redis-1 …`.
+**Sao lưu**: khi `REDIS_URL` trống, phòng và bảng xếp hạng nằm trong `./data/redis` (bind mount, AOF bật); sau khi chuyển sang kho chung (chưa làm) dữ liệu mới nằm ở Upstash, `./data/redis` chỉ còn dữ liệu lúc chuyển (giữ để quay lại). Chủ máy sao lưu `/home`, nên thư mục này được backup; Docker named volume thì không. Thư mục do uid 999 (redis) sở hữu, đọc bằng `docker exec be_game-redis-1 …`.
 
 ### Sau khi máy tắt cứng / bật lại
 

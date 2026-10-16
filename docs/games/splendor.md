@@ -7,7 +7,7 @@ Hạ tầng chung (hub, adapter, store, giao thức WS `join`/`ack`/`state`, cha
 
 | File | Vai trò |
 |---|---|
-| `src/splendor/cards.ts` | Dữ liệu: `GEMS`, `Token`, `GEM_NAMES`, 90 thẻ `CARDS` (sinh từ mẫu chi phí), 10 quý tộc `NOBLES`, hằng số luật và tuỳ chọn cài đặt. Chép nguyên sang portfolio (`src/lib/splendor/cards.ts`), **không được import gì** |
+| `src/splendor/cards.ts` | Dữ liệu: `GEMS`, `Token`, `GEM_NAMES`, 90 thẻ `CARDS` (sinh từ mẫu chi phí), 10 quý tộc `NOBLES`, hằng số luật và tuỳ chọn cài đặt. Chép nguyên sang zonenop-game (`src/lib/splendor/cards.ts`), **không được import gì** |
 | `src/splendor/game.ts` | Máy trạng thái thuần (`SPState`): `newSPGame`, `takeGems`, `reserveCard`, `buyCard`, `discardTokens`, `passTurn`, `forfeitPlayer`, tự chơi `tickGame` / `nextGameTickAt`, giá trị suy ra `bonuses`, `pointsOf`, `paymentFor` |
 | `src/splendor/room.ts` | Vòng đời phòng (`SPRoom`): join/leave/heartbeat, `spCommand`, cài đặt, kick, ghi kết quả (`afterChange`), `tickSP`, `nextSPTickAt`, `spView`, `spSummary`, `isSPActive` |
 | `src/splendor/protocol.ts` | Kiểu dữ liệu gửi qua dây: `SPSettings`, `SPRoomView`/`SPGameView`/`SPPlayerView`, `SPCommand`, `SPLENDOR_WS_PATH` |
@@ -123,7 +123,7 @@ Mọi lệnh đi qua `spCommand(room, token, msg, now)`. Lỗi chung: `"Bạn kh
   - pha turn: mua thẻ đắt điểm nhất mua được (trên bàn + thẻ đang giữ); không thì lấy tới 3 màu còn nhiều nhất trong ngân hàng; không thì bỏ lượt.
 - `nextGameTickAt` = min(`deadline`, `phaseAt + ABSENT_MS` nếu còn ở tương lai). Hub dùng `nextSPTickAt` (gồm cả hạn presence của ghế, khán giả, reaction).
 - `leave` giữa ván: ghế vẫn giữ (`left = true`), người đó bị chơi hộ; muốn loại hẳn thì chủ phòng `kick` (chỉ khi họ offline) → `forfeitPlayer`: trả đá về ngân hàng và thẻ đang giữ về **đáy chồng** cùng cấp, xoá khỏi `players`, thêm vào `forfeited`; còn < 2 người thì kết thúc ngay; nếu đang là lượt họ thì chuyển cho `players[idx % n]` — nếu `endTriggered` và người kế là `players[0]` thì kết thúc ván như `endTurn`.
-- Join lại bằng cùng token: lấy lại ghế (không đổi tên khi đang chơi). Người bị kick không join lại được (`"Bạn đã bị chủ phòng mời ra khỏi ván này"`).
+- Join lại bằng cùng token: lấy lại ghế (không đổi tên khi đang chơi); đổi token (tab/máy mới) mà **cùng tên** với một ghế đang offline thì nhận ghế đó. Ghế đã bị giải phóng giữa các ván được khôi phục từ `room.gone` (cùng id và điểm, GUIDE → "Vào lại phòng"). Người bị kick không join lại được (`"Bạn đã bị chủ phòng mời ra khỏi ván này"`).
 
 ## Kết thúc ván & tính điểm
 
