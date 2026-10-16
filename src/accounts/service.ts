@@ -218,9 +218,14 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
 }
 
 let singleton: Promise<AccountService> | null = null;
+/** Overall init budget: a hung connect/migration must not be cached forever. */
+const INIT_TIMEOUT_MS = 15_000;
+let testInit: { build?: () => Promise<AccountService>; timeoutMs?: number } = {};
 
-export function resetAccountServiceForTests() {
+/** Drops the process-wide service; tests may swap the builder or the init timeout. */
+export function resetAccountServiceForTests(opts: { build?: () => Promise<AccountService>; timeoutMs?: number } = {}) {
   singleton = null;
+  testInit = opts;
 }
 
 async function build(): Promise<AccountService> {
@@ -233,7 +238,12 @@ async function build(): Promise<AccountService> {
     const ssl = /sslmode=require/.test(url) || !local ? { rejectUnauthorized: true } : undefined;
     const pool = new pg.Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 5000, idleTimeoutMillis: 10000, ssl });
     pool.on("error", (e) => console.error("[be_game] pg pool:", e.message));
-    store = await createPgAccountStore(pool);
+    try {
+      store = await createPgAccountStore(pool);
+    } catch (e) {
+      pool.end().catch(() => {}); // the next call builds a fresh pool
+      throw e;
+    }
   } else {
     store = createMemoryAccountStore();
   }
@@ -245,10 +255,15 @@ async function build(): Promise<AccountService> {
   return svc;
 }
 
-/** Process-wide service: Postgres if DATABASE_URL, else memory; Redis limiter if configured, else memory. A failed init is retried next call. */
+/** Process-wide service: Postgres if DATABASE_URL, else memory; Redis limiter if configured, else memory. A failed or timed-out init is retried next call. */
 export function getAccountService(): Promise<AccountService> {
   if (!singleton) {
-    const p = build();
+    const ms = testInit.timeoutMs ?? INIT_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const p = Promise.race([
+      (testInit.build ?? build)(),
+      new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`account service init timed out after ${ms}ms`)), ms))),
+    ]).finally(() => clearTimeout(timer));
     singleton = p;
     p.catch(() => {
       if (singleton === p) singleton = null;

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import { migrate } from "./migrations";
+import { allApplied, appliedMigrations, migrate } from "./migrations";
 import type { AccountStore, NewUser } from "./store";
 import { statDays, vnDay, vnDayStart, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserRow } from "./types";
 
@@ -202,30 +202,46 @@ class PgAccountStore implements AccountStore {
   }
 }
 
+const isMissingLockFunction = (e: unknown) => {
+  const err = e as { code?: string; message?: string };
+  return err?.code === "42883" || /pg_advisory_xact_lock.*(does not exist|not implemented)|unknown function/i.test(err?.message ?? "");
+};
+
+/**
+ * Migrates (when needed) and returns the store. Safe behind a transaction-mode pooler (Neon/PgBouncer):
+ * the lock is transaction-scoped, so it is released by COMMIT/ROLLBACK on the very server connection
+ * that took it; a session-level lock could be taken and released on different backends and leak.
+ */
 export async function createPgAccountStore(pool: Pool): Promise<AccountStore> {
-  // One dedicated connection so the session-level advisory lock covers the whole migration.
+  // Fast path: an up-to-date schema needs no lock and no dedicated connection.
+  if (allApplied(await appliedMigrations((sql, params) => pool.query(sql, params as any[])))) return new PgAccountStore(pool);
+
   const client = await pool.connect();
-  let locked = false;
-  let destroy = false;
+  const q = (sql: string, params?: unknown[]) => client.query(sql, params as any[]);
+  let broken = false;
   try {
+    await q("begin");
     try {
-      await client.query("select pg_advisory_lock($1)", [MIGRATION_LOCK]);
-      locked = true;
+      // A stuck peer makes this instance fail (and retry later) instead of waiting forever.
+      await q("set local lock_timeout = '5s'");
+      await q("select pg_advisory_xact_lock($1)", [MIGRATION_LOCK]);
     } catch (e) {
-      // Only "function missing" (pg-mem has no pg_advisory_lock; migrations are idempotent) may continue unlocked.
-      const err = e as { code?: string; message?: string };
-      if (!(err?.code === "42883" || /does not exist|not implemented|unknown function/i.test(err?.message ?? ""))) throw e;
+      // Only "function missing" (pg-mem; migrations are idempotent) may continue unlocked, in a fresh transaction.
+      if (!isMissingLockFunction(e)) throw e;
+      await q("rollback");
+      await q("begin");
     }
-    await migrate((sql, params) => client.query(sql, params as any[]));
+    await migrate(q);
+    await q("commit");
+  } catch (e) {
+    try {
+      await q("rollback");
+    } catch {
+      broken = true; // never return a connection in an unknown transaction state to the pool
+    }
+    throw e;
   } finally {
-    if (locked) {
-      try {
-        await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK]);
-      } catch {
-        destroy = true; // never return a session-locked connection to the pool
-      }
-    }
-    client.release(destroy ? true : undefined);
+    client.release(broken ? true : undefined);
   }
   return new PgAccountStore(pool);
 }
