@@ -28,8 +28,8 @@ const connect = (hub: ReturnType<typeof createRoomHub>) => {
 };
 
 /** A (hub A) and B (hub B, same room store) sit down; B drops, A plays min cards until the offline seat is auto-played to the end. */
-async function playOutGame() {
-  const [lan, minh] = [await accountSession("Lan"), await accountSession("Minh")];
+async function playOutGame(names: [string, string] = ["Lan", "Minh"]) {
+  const [lan, minh] = [await accountSession(names[0]), await accountSession(names[1])];
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const store = createMemoryRoomStore<RoomState>();
   const hubA = createRoomHub(store);
@@ -115,6 +115,20 @@ describe("finished games feed the per-account leaderboard", () => {
     expect(rows.map((r) => r.name).sort()).toEqual(["Lan", "Minh"]);
     expect(rows.every((r) => r.games === 1)).toBe(true);
     expect(rows.reduce((n, r) => n + r.wins, 0)).toBe(1);
+  });
+
+  it("seats and credits usernames containing the letter s exactly", async () => {
+    const hub = createRoomHub(createMemoryRoomStore());
+    const code = await hub.createRoom();
+    const s = connect(hub);
+    expect((await s.request({ type: "join", code, token: "token-aaaaaaaa", session: await accountSession("Sang sư") })).ok).toBe(true);
+    const v = await s.view((x) => x.seats.some(Boolean));
+    expect(v.seats.find(Boolean)!.name).toBe("Sang sư");
+    const { ended } = await playOutGame(["Sang sư", "boss"]);
+    expect(ended).toBe(true);
+    const rows = await (await getAccountService()).store.leaderboard("tienlen", 50);
+    expect(rows.map((r) => r.name).sort()).toEqual(["Sang sư", "boss"]);
+    expect(rows.every((r) => r.games === 1)).toBe(true);
   });
 
   it("keeps the game going when writing results fails", async () => {
