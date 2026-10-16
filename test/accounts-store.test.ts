@@ -2,7 +2,7 @@ import { newDb } from "pg-mem";
 import { describe, expect, it } from "vitest";
 import { createMemoryAccountStore, type AccountStore } from "../src/accounts/store";
 import { createPgAccountStore } from "../src/accounts/pg";
-import { migrate } from "../src/accounts/migrations";
+import { MIGRATIONS, migrate } from "../src/accounts/migrations";
 
 async function pgStore(): Promise<AccountStore> {
   const db = newDb();
@@ -175,5 +175,41 @@ describe("account service init", () => {
     await expect(getAccountService()).rejects.toThrow("neon down");
     await expect(getAccountService()).resolves.toBeTruthy();
     resetAccountServiceForTests();
+  });
+});
+
+describe("migration 2: integrity constraints", () => {
+  const fresh = () => {
+    const db = newDb();
+    const { Pool } = db.adapters.createPg();
+    return new Pool();
+  };
+
+  it("rejects an unknown role and a result for a missing user", async () => {
+    const pool = fresh();
+    const s = await createPgAccountStore(pool);
+    const u = (await s.createUser({ ...base, usernameKey: "a", username: "a" }))!;
+    await expect(pool.query("update users set role = 'root' where id = $1", [u.id])).rejects.toThrow();
+    await expect(
+      pool.query("insert into game_results (game, record_id, user_id, points, rank, won, at, day) values ('tienlen', 'r1', '00000000-0000-4000-8000-000000000009', 1, 1, true, now(), '2026-10-16')"),
+    ).rejects.toThrow();
+    await s.recordResults("tienlen", "r2", new Date(), [{ usernameKey: "a", points: 3, rank: 1 }]);
+    expect((await s.leaderboard("tienlen", 10))[0]).toMatchObject({ name: "a", points: 3 });
+  });
+
+  it("upgrades a v1 database (dropping orphan results) and is safe to re-run", async () => {
+    const pool = fresh();
+    const q = (sql: string, params?: unknown[]) => pool.query(sql, params as any[]);
+    await q("create table schema_migrations (id int primary key)");
+    for (const stmt of MIGRATIONS[0].sql!.split(";").map((x) => x.trim()).filter(Boolean)) await q(stmt);
+    await q("insert into schema_migrations (id) values (1)");
+    await q("insert into game_results (game, record_id, user_id, points, rank, won, at, day) values ('tienlen', 'r1', '00000000-0000-4000-8000-000000000009', 1, 1, true, now(), '2026-10-16')");
+    await createPgAccountStore(pool);
+    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2]);
+    expect((await q("select * from game_results")).rows).toHaveLength(0);
+    // Lost bookkeeping (row deleted) must not break a second run over existing constraints.
+    await q("delete from schema_migrations where id = 2");
+    await createPgAccountStore(pool);
+    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2]);
   });
 });
