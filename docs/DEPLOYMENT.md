@@ -77,7 +77,8 @@ Ba thứ được deploy độc lập và không cùng lúc: máy chính, máy d
 
 ```bash
 curl -s https://play-api.fudio101.com/api/health        # "ok":true,"store":"redis","region":"local"
-curl -s https://be-game-omega.vercel.app/api/health # "ok":true,"store":"redis","region":"sin1"; thêm `now`, `redisHost`
+curl -s https://be-game-omega.vercel.app/api/health # "ok":true,"store":"redis","region":"sin1"; thêm `now`, `redisHost`, `commit`
+# `commit` = commit đang chạy (BUILD_COMMIT trên điện thoại, VERCEL_GIT_COMMIT_SHA trên Vercel); workflow Deploy đợi cả hai máy báo đúng commit vừa push.
 ssh vsmart-zangyapro cat ~/apps/be_game/REVISION    # commit đang chạy trên máy chính
 ```
 

@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGameServer, isSharedStoreHost } from "../src/server/app";
+import { createGameServer, deployedCommit, isSharedStoreHost } from "../src/server/app";
 import { GAME_KINDS, countCommands, keysFor } from "../src/server/store";
 
 describe("shared store helpers", () => {
@@ -39,6 +39,15 @@ describe("shared store helpers", () => {
   });
 });
 
+describe("deployedCommit", () => {
+  it("prefers the self-hosted BUILD_COMMIT, then Vercel's, else null", () => {
+    expect(deployedCommit({ BUILD_COMMIT: "abc", VERCEL_GIT_COMMIT_SHA: "def" })).toBe("abc");
+    expect(deployedCommit({ VERCEL_GIT_COMMIT_SHA: "def" })).toBe("def");
+    expect(deployedCommit({ BUILD_COMMIT: "" })).toBeNull();
+    expect(deployedCommit({})).toBeNull();
+  });
+});
+
 describe("GET /api/health", () => {
   it("reports the server clock (epoch ms) so two backends can be compared", async () => {
     const server = createGameServer();
@@ -46,7 +55,8 @@ describe("GET /api/health", () => {
     try {
       const before = Date.now();
       const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`);
-      const body = (await res.json()) as { now: unknown };
+      const body = (await res.json()) as { now: unknown; commit: unknown };
+      expect(body).toHaveProperty("commit");
       expect(typeof body.now).toBe("number");
       expect(body.now as number).toBeGreaterThanOrEqual(before);
       expect(Math.abs((body.now as number) - Date.now())).toBeLessThan(10_000);

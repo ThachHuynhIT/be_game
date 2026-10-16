@@ -22,6 +22,8 @@ services:
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       # Ops aid: BE_GAME_COUNT_COMMANDS=1 in .env logs the Redis command count every 60 s (docs/SELF_HOSTING.md).
       BE_GAME_COUNT_COMMANDS: ${BE_GAME_COUNT_COMMANDS:-}
+      # Commit being deployed (exported by .github/workflows/deploy.yml); /api/health reports it.
+      BUILD_COMMIT: ${BUILD_COMMIT:-}
     depends_on:
       - redis
     networks:

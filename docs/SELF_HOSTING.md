@@ -83,8 +83,9 @@ Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml). Ch�
    3. Build bằng BuildKit builder riêng `be_game` (driver `docker-container`, tự tạo ở lần đầu; `BUILDX_BUILDER=be_game`), không dùng builder `default` dùng chung với chủ máy.
    4. Ghi lại ID image `be_game:local` cũ → `docker compose up -d --build --remove-orphans` → nếu image cũ còn tồn tại và khác image mới thì `docker image rm` đúng ID đó.
    5. Dọn cache của builder `be_game` còn tối đa 1 GB (`docker buildx prune --builder be_game --max-used-space 1gb`, giữ layer mới nhất như `npm ci`) rồi `docker buildx stop be_game` để trả RAM (~65 MB khi chạy).
-   6. Chờ tối đa 60 giây cho `/api/health` trả `"ok":true`, hỏi **từ trong container** (`docker compose exec be_game node -e "fetch(...)"`). Không lên thì in 50 dòng log và fail.
-6. **Public health check** (khi có variable `GAME_DOMAIN`): `https://$GAME_DOMAIN/api/health` qua Cloudflare.
+   6. Build với `BUILD_COMMIT=$SHA` (compose chuyển vào container). Chờ tối đa 60 giây cho `/api/health` trả `"ok":true` **và** `"commit":"<SHA vừa deploy>"` (container cũ còn chạy thì không qua), hỏi **từ trong container** (`docker compose exec be_game node -e "fetch(...)"`). Không lên thì in 50 dòng log và fail.
+6. **Public health check** (khi có variable `GAME_DOMAIN`): `https://$GAME_DOMAIN/api/health` qua Cloudflare, cũng phải đúng `commit`.
+7. **Job `vercel`** (khi có repo variable `VERCEL_HEALTH_URL`, chạy song song): Vercel tự deploy `main`; job gọi URL đó mỗi 10 giây, tối đa 10 phút, tới khi `commit` = SHA. Vercel build lỗi hoặc treo thì run đỏ và GitHub gửi mail. `commit: null` nghĩa là project Vercel đang tắt "Automatically expose System Environment Variables".
 
 Thời gian: build có cache khoảng 10 giây, build lại `npm ci` khoảng 1–2 phút (CPU điện thoại chậm). Container chỉ được tạo lại khi image hoặc cấu hình thực sự đổi; lúc tạo lại có vài giây gián đoạn, client tự kết nối lại, phòng vẫn còn trong Redis.
 
