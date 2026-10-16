@@ -4,10 +4,15 @@ import {
   PRESENCE_TIMEOUT_MS,
   REACTION_TTL_MS,
   SEAT_GRACE_MS,
+  type GoneSeat,
   type Spectator,
   cleanName,
+  findReturning,
   pruneReactions,
   pruneSpectators,
+  rememberGone,
+  seatFor,
+  takeGone,
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
@@ -43,6 +48,8 @@ export interface BangRoom {
   code: string;
   hostId: string;
   seats: (BangSeat | null)[];
+  /** Seats freed while their player was away (see `rememberGone` in game/room.ts). */
+  gone?: GoneSeat[];
   current: BangState | null;
   settings?: BangSettings;
   history?: GameRecord[];
@@ -79,7 +86,7 @@ export function joinBang(
   newId: () => string,
 ): { ok: true; player: BangSeat } | { ok: false; error: string } {
   if (typeof token !== "string" || token.length < 8 || token.length > 128) return { ok: false, error: "Phiên không hợp lệ" };
-  let player = findByToken(room, token);
+  let player = findReturning(room, token, name, now);
   if (player?.kicked) return { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" };
   if (player) {
     if (!inGame(room, player.id)) player.name = cleanName(name);
@@ -87,7 +94,7 @@ export function joinBang(
     dropGoneSeats(room, now);
     const free = room.seats.findIndex((s) => s === null);
     if (free < 0) return { ok: false, error: `Phòng đã đủ ${MAX_PLAYERS} người` };
-    player = { id: newId(), token, name: cleanName(name), lastSeen: now, wins: 0, points: 0, games: 0 };
+    player = seatFor(takeGone(room, token, name, now), token, name, now, newId);
     room.seats[free] = player;
   }
   player.lastSeen = now;
@@ -119,6 +126,7 @@ export function leaveBang(room: BangRoom, token: string, now: number) {
   if (!inGame(room, p.id)) {
     const idx = room.seats.indexOf(p);
     if (idx >= 0) room.seats[idx] = null;
+    rememberGone(room, p, now);
   }
   tickBang(room, now);
 }
@@ -315,6 +323,7 @@ function dropGoneSeats(room: BangRoom, now: number): boolean {
   room.seats = room.seats.map((p) => {
     if (p && (p.left || now - p.lastSeen > SEAT_GRACE_MS) && !inGame(room, p.id)) {
       dropped = true;
+      rememberGone(room, p, now);
       return null;
     }
     return p;

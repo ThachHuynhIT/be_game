@@ -101,7 +101,7 @@ Hub sở hữu kết nối, lưu trữ, fan-out, timer; adapter sở hữu luậ
 |---|---|---|
 | `game: GameKind` | — | Định danh |
 | `newRoom(code)` | `create` (qua `createRoom`) | Trả state phòng rỗng, `hostId: ""` |
-| `join(room, token, name, now, newId)` | message `join` (trong `mutate`) | Ngồi ghế mới hoặc gắn lại ghế theo `token`. `newId()` sinh id công khai 8 ký tự base64url. Trả `Result` (có thể kèm `player`, hub không gửi ra) |
+| `join(room, token, name, now, newId)` | message `join` (trong `mutate`) | Ngồi ghế mới hoặc gắn lại ghế cũ (theo `token`, rồi theo tên — xem "Vào lại phòng"). `newId()` sinh id công khai 8 ký tự base64url. Trả `Result` (có thể kèm `player`, hub không gửi ra) |
 | `watch(room, token, name, now)` | message `watch` | Mọi game dùng chung `watchRoom` (`src/game/room.ts`) |
 | `heartbeat(room, token, now)` | mỗi `ping` khi conn đã vào phòng | Chỉ ghi `lastSeen` khi cũ hơn `HEARTBEAT_WRITE_MS` (8 s) hoặc đang `left` → phần lớn ping không gây save |
 | `leave(room, token, now)` | message `leave` | Player: `left = true`, rời ghế nếu không đang chơi; spectator: xoá khỏi danh sách |
@@ -137,7 +137,7 @@ Mọi message là JSON text, tối đa `MAX_MESSAGE_BYTES` = 16 KB (lớn hơn b
 | `chat` | `id, text` | Cooldown `CHAT_COOLDOWN_MS` = 600 ms / kết nối |
 | _khác_ | `id`, tuỳ game | Chuyển `adapter.command`. Khán giả bị chặn: `"Khán giả không thể thao tác"` |
 
-`id` = `Number(msg.id) || 0`. `token` là bí mật (8–128 ký tự, client sinh, lưu trong `sessionStorage["tienlen:token"]` dùng chung mọi game); id công khai của ghế (`SeatView.id`) mới là thứ được gửi cho người khác.
+`id` = `Number(msg.id) || 0`. `token` là bí mật (8–128 ký tự, client sinh, lưu trong `localStorage["tienlen:token"]` dùng chung mọi game và mọi tab của trình duyệt, nên đóng/mở lại tab vẫn là cùng người); id công khai của ghế (`SeatView.id`) mới là thứ được gửi cho người khác.
 
 ### Server → client
 
@@ -164,6 +164,11 @@ Làm **một lần ở hub**, áp dụng cho cả 7 game (adapter không biết 
 - Quá `MAX_MESSAGES_PER_SECOND` = 20 message/giây/kết nối → `socket.close(1008, "rate limit")`.
 - Trên Vercel, `getDeadline()` cho biết lúc function bị kill (`maxDuration` 300 s trong `vercel.json`). Hub gửi `{type:"reconnect"}` lúc `deadline − RECONNECT_LEAD_MS` (25 s), tối thiểu sau 5 s. Client (portfolio `gameClient.ts`) mở kết nối mới, `join`/`watch` lại **cùng token**, rồi mới đóng kết nối cũ.
 - **Reconnect bằng token**: `join` với token đã có ghế → gắn lại ghế đó (cập nhật `lastSeen`, xoá `left`, đổi tên nếu không đang trong ván). Đóng socket **không** gọi `leave` — presence tự hết hạn khi ping ngừng.
+- **Vào lại phòng** (helper chung trong `src/game/room.ts`, mọi game dùng trong `joinXxx`/`leaveXxx`/`dropGoneSeats`). Người rớt mạng phải quay lại **đúng là họ**, không thành người mới cùng tên mất điểm:
+  1. `findReturning`: ghế có đúng token; không có thì ghế **đang offline** (không `kicked`) trùng tên (so `cleanName`, không phân biệt hoa thường) — cùng người ở tab/máy mới, token đổi — ghế đó nhận token mới. Người trùng tên **đang online** thì không bị chiếm, người mới ngồi ghế riêng.
+  2. Ghế bị giải phóng (offline quá `SEAT_GRACE_MS` giữa các ván, hoặc `leave` giữa các ván; người bị kick thì không) được `rememberGone` ghi vào `room.gone` (`{id, token, name, wins, points, games, at}`, tối đa 16, nhớ `GONE_SEAT_TTL_MS` = 3 giờ). Chỉ server dùng, không bao giờ vào view/summary.
+  3. Không có ghế: `takeGone` lấy lại bản ghi theo token, rồi theo tên, và `seatFor` tạo ghế mới với **cùng id, wins, points, games**.
+  - Đánh đổi có chủ ý: ai gõ đúng tên của một người đang offline thì vào được ghế đó (game chơi với bạn bè, không có tài khoản).
 - `HubSocket` là interface tối giản (`send`, `close`, `on(message|close|error)`) để test dùng `FakeSocket`.
 
 ---
@@ -188,7 +193,8 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
 | Hằng số | Giá trị | Ý nghĩa |
 |---|---|---|
 | `PRESENCE_TIMEOUT_MS` | 25 000 | Không heartbeat quá lâu → `connected: false` (và bị tự đi ở lượt mình) |
-| `SEAT_GRACE_MS` | 60 000 | Ghế offline được giữ chừng này **giữa các ván** rồi bị giải phóng |
+| `SEAT_GRACE_MS` | 60 000 | Ghế offline được giữ chừng này **giữa các ván** rồi bị giải phóng (vẫn được nhớ trong `room.gone` để người đó quay lại đúng ghế/điểm) |
+| `GONE_SEAT_TTL_MS` | 10 800 000 | Ghế đã giải phóng được nhớ 3 giờ (tối đa 16 ghế mỗi phòng) |
 | `HEARTBEAT_WRITE_MS` | 8 000 | Chỉ lưu heartbeat khi lần trước cũ hơn mức này |
 | `PING_INTERVAL_MS` | 10 000 | (`src/game/protocol.ts`) chu kỳ ping của client |
 | `MAX_SPECTATORS` | 30 | Khán giả tối đa / phòng |
@@ -196,7 +202,7 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
 | `MAX_NAME_LENGTH` | 16 | `cleanName` gộp khoảng trắng, cắt 16 ký tự, rỗng → `"Người chơi"` |
 
 - `isOnline(p, now) = !p.left && now − p.lastSeen < PRESENCE_TIMEOUT_MS`.
-- `leave` khi **đang trong ván**: giữ ghế, đánh dấu `left` → offline ngay, game tự đi thay. Giữa các ván: ghế bị xoá ngay.
+- `leave` khi **đang trong ván**: giữ ghế, đánh dấu `left` → offline ngay, game tự đi thay. Giữa các ván: ghế bị xoá ngay (và được nhớ trong `room.gone`).
 - Ghế không bao giờ bị dọn khi người đó còn trong ván đang chơi (`inPlayingGame`). Cờ Tỷ Phú coi người đã phá sản là không còn trong ván.
 - **Host**: người join khi host vắng/offline thành host; `tick` chuyển host sang ghế online đầu tiên.
 - **Kick** (lệnh `kick {playerId}` của mọi game): chỉ host, không tự kick, **chỉ kick người đang offline**. Giữa ván → bỏ ghế; trong ván → forfeit (xếp cuối) + `kicked = true` (token đó không join lại được).
@@ -297,7 +303,7 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 1. **`src/xyz/`**
    - `board.ts` hoặc `cards.ts`: dữ liệu tĩnh, `MIN_PLAYERS`, `MAX_PLAYERS`/`MAX_SEATS`, các mảng `*_OPTIONS` cho settings. Không import gì ngoài file cùng thư mục nếu định chép nguyên sang portfolio.
    - `game.ts`: `XyzState` (JSON thuần), `newXyzGame(players, now, opts, random = Math.random)`, các lệnh trả `Result` (`{ok:true} | {ok:false, error}` tiếng Việt), `tickGame(s, now, names, absent, random)`, `nextGameTickAt(s, now)`, `forfeitPlayer`. Lưu `status: "playing" | "ended"`, `finished` (xếp hạng), `recorded?`.
-   - `room.ts`: copy khung từ một room có sẵn (ví dụ `src/typhu/room.ts`): `XyzRoom` (phải có `code`, `hostId`, `seats: ({id, token, name, lastSeen, left?, kicked?, wins, points, games} | null)[]`, `current`, `settings`, `history?`, `gameSeq?`, `spectators?`, `reactions?`, `chat?`), `newXyzRoom`, `joinXyz`, `xyzHeartbeat` (xử lý cả khán giả), `leaveXyz`, `xyzCommand` (`start`/`kick`/`settings` + lệnh game), `afterChange` (chấm điểm bằng `scoreByRank` + `checkRankPoints`), `tickXyz`, `nextXyzTickAt`, `xyzView`, `xyzSummary`, `isXyzActive`, `findByToken`, `xyzSettingsOf` (merge default để phòng cũ không vỡ).
+   - `room.ts`: copy khung từ một room có sẵn (ví dụ `src/typhu/room.ts`): `XyzRoom` (phải có `code`, `hostId`, `seats: ({id, token, name, lastSeen, left?, kicked?, wins, points, games} | null)[]`, `gone?: GoneSeat[]`, `current`, `settings`, `history?`, `gameSeq?`, `spectators?`, `reactions?`, `chat?`), `newXyzRoom`, `joinXyz` (dùng `findReturning` + `seatFor(takeGone(...))`, và `rememberGone` ở mọi chỗ giải phóng ghế trừ kick), `xyzHeartbeat` (xử lý cả khán giả), `leaveXyz`, `xyzCommand` (`start`/`kick`/`settings` + lệnh game), `afterChange` (chấm điểm bằng `scoreByRank` + `checkRankPoints`), `tickXyz`, `nextXyzTickAt`, `xyzView`, `xyzSummary`, `isXyzActive`, `findByToken`, `xyzSettingsOf` (merge default để phòng cũ không vỡ).
    - `protocol.ts`: `XYZ_WS_PATH = "/api/xyz/ws"`, kiểu view / summary / command, re-export các kiểu chung từ `../game/protocol`.
 2. **`src/server/store.ts`**: thêm `"xyz"` vào `GameKind`.
 3. **`src/server/adapters.ts`**: import, viết `xyzAdapter: GameAdapter<XyzRoom>` (theo mẫu các adapter khác: `watch` = `watchRoom`, `react` = `react`, `lastRecord: (room) => room.history?.[room.history.length - 1]`), thêm vào `ADAPTERS`.
