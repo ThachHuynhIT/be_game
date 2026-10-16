@@ -46,7 +46,7 @@ flowchart LR
 | Server `~/apps/be_game/.env` | `GAME_DOMAIN` | `play-api.fudio101.com` — bắt buộc, Traefik route theo tên này | zonenop |
 | Server `~/apps/be_game/.env` | `REDIS_URL` | **Hiện để trống** = Redis cục bộ trong compose (`redis://redis:6379`). Chỉ sau khi chuyển sang kho chung mới là URL Upstash của máy dự phòng (`rediss://default:<password>@<host>.upstash.io:6379`); khi đó là **bí mật**: chỉ nằm trong file này (quyền `600`), không commit, không in ra, không đưa vào GitHub secret | zonenop |
 | Server `~/apps/be_game/.env` | `BE_GAME_COUNT_COMMANDS` | Tuỳ chọn: `1` = log số lệnh Redis mỗi 60 giây (xem [Đếm lệnh Redis](#đếm-lệnh-redis-upstash)) | zonenop |
-| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`; cộng `http://localhost:3000` và hai mục của site portfolio cũ còn trong danh sách (`https://portfolio-thach.vercel.app`, `https://portfolio-*-thachs-projects-48e5eaf9.vercel.app`; game không còn chạy ở đó, bỏ được). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
+| Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`; cộng `http://localhost:3000` (các origin của site portfolio cũ đã bỏ ngày 2026-10-16). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
 | GitHub env `self-hosted` (secret) | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_PORT`? | IP tailnet của server, `zonenop`, `/home/zonenop/apps/be_game`, mặc định 22 | zonenop |
 | GitHub env `self-hosted` (secret) | `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` | Private key `be_game-deploy@github-actions`; host key đã ghim bằng `ssh-keyscan` | zonenop |
@@ -67,7 +67,6 @@ flowchart LR
 - URL preview của zonenop-game có hai dạng, cùng khớp `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`:
   - từng bản deploy: `zonenop-game-<hash>-thachs-projects-48e5eaf9.vercel.app`
   - link theo nhánh: `zonenop-game-git-<nhánh>-thachs-projects-48e5eaf9.vercel.app`
-  (mẫu `portfolio-*` tương tự chỉ còn nằm trong danh sách như di sản của site portfolio cũ)
 - **Không** dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
 - Origin bị từ chối nhận HTTP **403** từ be_game, nhưng qua Traefik/Cloudflare thường hiện thành **502** (be_game cắt kết nối ngay). Thấy 502 lúc mở WebSocket thì kiểm tra origin trước.
 - Đổi xong: `docker compose -f compose.selfhost.yml up -d` (tạo lại container để đọc `.env`).
