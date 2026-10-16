@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isAllowedOrigin } from "./hub";
+import { DEVICE_RE, isAllowedOrigin } from "./hub";
 import { type AccountService, TOO_MANY, getAccountService, publicUser, sessionSecret } from "../accounts/service";
 
 const MAX_BODY = 4096;
@@ -7,7 +7,6 @@ const STORE_TIMEOUT_MS = 5000;
 const UNAVAILABLE = "Máy chủ tài khoản đang lỗi, thử lại sau";
 const NEED_LOGIN = "Cần đăng nhập";
 const BOT_RE = /bot|crawl|spider|preview|monitor/i;
-const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
 class HttpError extends Error {
   constructor(

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ADAPTERS } from "../src/server/adapters";
 import { type HubSocket, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
+import { accountSession } from "./helpers/accounts";
 import type { TPRoom } from "../src/typhu/room";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,6 +31,7 @@ describe("Cờ Tỷ Phú: auto-play for an offline opponent (through the hub)", 
     ["drops right after the start", 0],
     ["drops 40 s into the game", 40],
   ])("keeps the game moving while the other player is offline (%s)", async (_label, dropAt) => {
+    const sessions = [await accountSession("Anh"), await accountSession("Binh")];
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       const store = createMemoryRoomStore<TPRoom>();
@@ -39,8 +41,8 @@ describe("Cờ Tỷ Phú: auto-play for an offline opponent (through the hub)", 
       attachConnection(a, { hub });
       attachConnection(b, { hub });
       const code = await hub.createRoom();
-      a.say({ type: "join", code, name: "An", token: "token-aaaaaaaa" });
-      b.say({ type: "join", code, name: "Bình", token: "token-bbbbbbbb" });
+      a.say({ type: "join", code, token: "token-aaaaaaaa", session: sessions[0] });
+      b.say({ type: "join", code, token: "token-bbbbbbbb", session: sessions[1] });
       await vi.advanceTimersByTimeAsync(200);
       a.say({ type: "start" });
       await vi.advanceTimersByTimeAsync(200);

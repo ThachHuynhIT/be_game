@@ -1,66 +1,15 @@
-import { describe, expect, it } from "vitest";
-import type { ClientMessage, RoomView, ServerMessage } from "../src/game/protocol";
-import { type HubSocket, type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
+import { beforeAll, describe, expect, it } from "vitest";
+import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
+import { FakeSocket } from "./helpers/fakeSocket";
+import { accountSession } from "./helpers/accounts";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Listener = (arg?: any) => void;
-
-/** In-process stand-in for a WebSocket, with a tiny client API for tests. */
-class FakeSocket implements HubSocket {
-  inbox: ServerMessage[] = [];
-  private listeners: Record<string, Listener[]> = {};
-  private nextId = 1;
-  private waiters: (() => void)[] = [];
-
-  send(data: string) {
-    this.inbox.push(JSON.parse(data));
-    this.waiters.splice(0).forEach((w) => w());
-  }
-  close() {
-    this.emit("close");
-  }
-  on(event: string, listener: Listener) {
-    (this.listeners[event] ??= []).push(listener);
-    return this;
-  }
-  emit(event: string, arg?: unknown) {
-    this.listeners[event]?.forEach((l) => l(arg));
-  }
-
-  /** Send a message and resolve with its ack. */
-  request(msg: Record<string, unknown>) {
-    const id = this.nextId++;
-    this.emit("message", JSON.stringify({ ...msg, id } as ClientMessage));
-    return this.waitFor((m) => m.type === "ack" && m.id === id) as Promise<Extract<ServerMessage, { type: "ack" }>>;
-  }
-
-  async waitFor(pred: (m: ServerMessage) => boolean, timeoutMs = 2000): Promise<ServerMessage> {
-    const until = Date.now() + timeoutMs;
-    for (;;) {
-      const hit = this.inbox.find(pred);
-      if (hit) return hit;
-      if (Date.now() > until) throw new Error("timed out waiting for message");
-      await new Promise<void>((r) => {
-        this.waiters.push(r);
-        setTimeout(r, 20);
-      });
-    }
-  }
-
-  /** Latest state view that satisfies `pred`. */
-  async view(pred: (v: RoomView) => boolean = () => true): Promise<RoomView> {
-    const until = Date.now() + 2000;
-    for (;;) {
-      const views = this.inbox.filter((m): m is Extract<ServerMessage, { type: "state" }> => m.type === "state");
-      const last = views[views.length - 1]?.view;
-      if (last && pred(last)) return last;
-      if (Date.now() > until) throw new Error("timed out waiting for view");
-      await new Promise((r) => setTimeout(r, 10));
-    }
-  }
-}
-
+const S: Record<string, string> = {};
+beforeAll(async () => {
+  S.An = await accountSession("An1");
+  S.Binh = await accountSession("Binh");
+  S.Fox = await accountSession("Fox", { icon: "🦊", color: "#f472b6" });
+});
 function connect(hub: RoomHub) {
   const s = new FakeSocket();
   attachConnection(s, { hub });
@@ -72,9 +21,9 @@ async function joinedPair(hubA: RoomHub, hubB: RoomHub) {
   const created = await a.request({ type: "create" });
   expect(created.ok).toBe(true);
   const code = (created as { code: string }).code;
-  expect((await a.request({ type: "join", code, name: "An", token: "token-aaaaaaaa" })).ok).toBe(true);
+  expect((await a.request({ type: "join", code, token: "token-aaaaaaaa", session: S.An })).ok).toBe(true);
   const b = connect(hubB);
-  expect((await b.request({ type: "join", code, name: "Bình", token: "token-bbbbbbbb" })).ok).toBe(true);
+  expect((await b.request({ type: "join", code, token: "token-bbbbbbbb", session: S.Binh })).ok).toBe(true);
   return { a, b, code };
 }
 
@@ -129,7 +78,7 @@ describe("RoomHub over WebSocket messages", () => {
   it("rejects illegal moves and unknown rooms", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const s = connect(hub);
-    expect(await s.request({ type: "join", code: "ZZZZZ", name: "x", token: "token-cccccccc" })).toMatchObject({
+    expect(await s.request({ type: "join", code: "ZZZZZ", token: "token-cccccccc", session: S.An })).toMatchObject({
       ok: false,
       error: "Không tìm thấy phòng",
     });
@@ -146,9 +95,10 @@ describe("RoomHub over WebSocket messages", () => {
     const hubs = [createRoomHub(store), createRoomHub(store)];
     const host = connect(hubs[0]);
     const code = ((await host.request({ type: "create" })) as { code: string }).code;
+    const ps = await Promise.all([0, 1, 2, 3].map((i) => accountSession(`Con${i}`)));
     const sockets = [0, 1, 2, 3].map((i) => connect(hubs[i % 2]));
     const acks = await Promise.all(
-      sockets.map((s, i) => s.request({ type: "join", code, name: `P${i}`, token: `token-${i}-concurrent` })),
+      sockets.map((s, i) => s.request({ type: "join", code, token: `token-${i}-concurrent`, session: ps[i] })),
     );
     expect(acks.every((r) => r.ok)).toBe(true);
     const v = await sockets[0].view((x) => x.seats.filter(Boolean).length === 4);
@@ -157,21 +107,21 @@ describe("RoomHub over WebSocket messages", () => {
 });
 
 describe("player look (icon + colour)", () => {
-  it("is relayed by name to everyone; bad looks are ignored and tokens never leak", async () => {
+  it("comes from the account, is relayed by name to everyone and tokens never leak", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const a = connect(hub);
     const code = ((await a.request({ type: "create" })) as { code: string }).code;
-    await a.request({ type: "join", code, name: "An", token: "token-aaaaaaaa", look: { icon: "🦊", color: "#F472B6" } });
+    await a.request({ type: "join", code, name: "ignored", token: "token-aaaaaaaa", session: S.Fox, look: { icon: "x", color: "red" } });
     const b = connect(hub);
-    await b.request({ type: "join", code, name: "Bình", token: "token-bbbbbbbb", look: { icon: "x", color: "javascript:1" } });
+    await b.request({ type: "join", code, token: "token-bbbbbbbb", session: S.Binh });
     const looks = (v: unknown) => (v as { looks?: Record<string, { icon: string; color: string }> }).looks;
-    const va = await a.view((v) => !!looks(v)?.An);
-    expect(looks(va)).toEqual({ An: { icon: "🦊", color: "#f472b6" } });
+    const va = await a.view((v) => !!looks(v)?.Fox && !!looks(v)?.Binh);
+    expect(looks(va)).toEqual({ Fox: { icon: "🦊", color: "#f472b6" }, Binh: { icon: "", color: "#fbbf24" } });
     expect(JSON.stringify(va)).not.toContain("token-");
     // Changing it mid-game reaches the other player too.
     expect((await a.request({ type: "look", look: { icon: "🐲", color: "#22d3ee" } })).ok).toBe(true);
-    const vb = await b.view((v) => looks(v)?.An?.icon === "🐲");
-    expect(looks(vb)?.An).toEqual({ icon: "🐲", color: "#22d3ee" });
+    const vb = await b.view((v) => looks(v)?.Fox?.icon === "🐲");
+    expect(looks(vb)?.Fox).toEqual({ icon: "🐲", color: "#22d3ee" });
     expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
   });
 });

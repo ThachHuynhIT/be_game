@@ -137,9 +137,15 @@ async function listRooms(game: GameKind, res: ServerResponse) {
 
 async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResponse) {
   try {
-    const limit = Math.min(Math.max(Number(new URL(req.url ?? "/", "http://x").searchParams.get("limit")) || 20, 1), 100);
-    const store = await getRoomStore(game);
-    json(res, 200, { ok: true, players: await store.leaderboard(limit) });
+    const q = new URL(req.url ?? "/", "http://x").searchParams;
+    const old = q.get("season") === "old";
+    const limit = Math.min(Math.max(Math.floor(Number(q.get("limit"))) || (old ? 20 : 50), 1), 100);
+    if (old) {
+      const store = await getRoomStore(game);
+      return json(res, 200, { ok: true, players: await store.leaderboard(limit) });
+    }
+    const svc = await withTimeout(getAccountService(), 5000, "accounts");
+    json(res, 200, { season: "current", rows: await withTimeout(svc.store.leaderboard(game, limit), 5000, "leaderboard") });
   } catch (err) {
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
