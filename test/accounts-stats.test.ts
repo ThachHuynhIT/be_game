@@ -83,3 +83,25 @@ describe.each([["memory", async () => createMemoryAccountStore()], ["postgres (p
     expect((await s.listUsers("", 1, 50)).rows.find((r) => r.id === u.id)?.games).toBe(1);
   });
 });
+
+describe.each([["memory", async () => createMemoryAccountStore()], ["postgres (pg-mem)", pgStore]])("%s stats hardening", (_, make) => {
+  it("counts the same record_id in two games as two games", async () => {
+    const s = await make();
+    const now = new Date("2026-10-16T10:00:00Z");
+    await s.createUser({ ...base, usernameKey: "lan", username: "Lan" });
+    await s.recordResults("tienlen", "r1", now, [{ usernameKey: "lan", points: 1, rank: 1 }]);
+    await s.recordResults("meono", "r1", now, [{ usernameKey: "lan", points: 1, rank: 1 }]);
+    const st = await s.stats(7, now);
+    expect(st.totals.games).toBe(2);
+    expect(st.daily.at(-1)?.games).toBe(2);
+  });
+  it("breaks topPlayers ties by name", async () => {
+    const s = await make();
+    const now = new Date("2026-10-16T10:00:00Z");
+    for (const n of ["Bao", "An"]) {
+      await s.createUser({ ...base, usernameKey: n.toLowerCase(), username: n });
+      await s.recordResults("tienlen", "r1", now, [{ usernameKey: n.toLowerCase(), points: 1, rank: 1 }]);
+    }
+    expect((await s.stats(7, now)).topPlayers.map((p) => p.name)).toEqual(["An", "Bao"]);
+  });
+});

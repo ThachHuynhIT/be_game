@@ -100,13 +100,12 @@ class PgAccountStore implements AccountStore {
       `select u.username as name, u.icon as icon, u.color as color, count(*) as games, sum(r.points) as points,
               sum(case when r.won then 1 else 0 end) as wins
        from game_results r join users u on u.id = r.user_id
-       where r.game = $1 group by u.id, u.username, u.icon, u.color`,
-      [game],
+       where r.game = $1 group by u.id, u.username, u.icon, u.color
+       order by points desc, wins desc, name limit $2`,
+      [game, limit],
     );
     return rows
-      .map((r) => ({ name: r.name as string, points: Number(r.points), games: Number(r.games), wins: Number(r.wins), icon: r.icon as string, color: r.color as string }))
-      .sort((a, b) => b.points - a.points || b.wins - a.wins || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-      .slice(0, limit);
+      .map((r) => ({ name: r.name as string, points: Number(r.points), games: Number(r.games), wins: Number(r.wins), icon: r.icon as string, color: r.color as string }));
   }
 
   async trackView(v: { path: string; device: string; userId: string | null; at?: Date }) {
@@ -128,7 +127,7 @@ class PgAccountStore implements AccountStore {
       const d = daily.get(r.day);
       if (d) Object.assign(d, { views: Number(r.views), devices: Number(r.devices) });
     }
-    for (const r of await q("select day, count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2 group by day", win)) {
+    for (const r of await q("select day, count(distinct game || ':' || record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2 group by day", win)) {
       const d = daily.get(r.day);
       if (d) Object.assign(d, { games: Number(r.games), players: Number(r.players) });
     }
@@ -143,27 +142,21 @@ class PgAccountStore implements AccountStore {
     }
     const [pv] = await q(`select count(*) as views, count(distinct device_id) as devices from page_views where ${pageWhere}`, win);
     const [pd] = await q("select count(distinct device_id) as devices from page_views where day >= $1 and day <= $2 and path like '/play/%'", win);
-    const [gr] = await q("select count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2", win);
+    const [gr] = await q("select count(distinct game || ':' || record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2", win);
     const [us] = await q("select count(*) as n from users", []);
     const byGame = (
       await q("select game, count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2 group by game", win)
     )
       .map((r) => ({ game: r.game as string, games: Number(r.games), players: Number(r.players) }))
       .sort((a, b) => b.games - a.games || (a.game < b.game ? -1 : 1));
-    const topPages = (await q(`select path, count(*) as views from page_views where ${pageWhere} group by path`, win))
-      .map((r) => ({ path: r.path as string, views: Number(r.views) }))
-      .sort((a, b) => b.views - a.views || (a.path < b.path ? -1 : 1))
-      .slice(0, 10);
-    const perPlayer = (await q("select user_id, count(*) as games, sum(points) as points from game_results where day >= $1 and day <= $2 group by user_id", win))
-      .map((r) => ({ id: r.user_id as string, games: Number(r.games), points: Number(r.points) }))
-      .sort((a, b) => b.games - a.games || b.points - a.points || (a.id < b.id ? -1 : 1))
-      .slice(0, 10);
-    const names = new Map<string, string>();
-    // At most 10 lookups by primary key; pg-mem mis-binds single-element IN lists of uuid parameters.
-    for (const p of perPlayer) {
-      const r = await q("select username from users where id = $1", [p.id]);
-      if (r[0]) names.set(p.id, r[0].username);
-    }
+    const topPages = (await q(`select path, count(*) as views from page_views where ${pageWhere} group by path order by views desc, path limit 10`, win)).map((r) => ({ path: r.path as string, views: Number(r.views) }));
+    const topPlayers = (
+      await q(
+        `select u.username as name, count(*) as games, sum(r.points) as points from game_results r join users u on u.id = r.user_id
+         where r.day >= $1 and r.day <= $2 group by u.id, u.username order by games desc, points desc, name limit 10`,
+        win,
+      )
+    ).map((r) => ({ name: r.name as string, games: Number(r.games), points: Number(r.points) }));
     return {
       days,
       totals: {
@@ -178,14 +171,14 @@ class PgAccountStore implements AccountStore {
       daily: list.map((d) => daily.get(d)!),
       byGame,
       topPages,
-      topPlayers: perPlayer.map((p) => ({ name: names.get(p.id) ?? "", games: p.games, points: p.points })),
+      topPlayers,
     };
   }
 
   async pruneViews(olderThanDays: number, now = new Date()) {
     const cutoff = new Date(now.getTime() - olderThanDays * 86_400_000);
-    const r = await this.pool.query("delete from page_views where at < $1 returning id", [cutoff]);
-    return r.rows.length;
+    const r = await this.pool.query("delete from page_views where at < $1", [cutoff]);
+    return r.rowCount ?? 0;
   }
 
   async listUsers(q: string, page: number, pageSize: number) {

@@ -140,9 +140,9 @@ class MemoryAccountStore implements AccountStore {
     for (const r of this.results.values()) {
       const i = idx.get(r.day);
       if (i === undefined) continue;
-      dGame[i].add(r.recordId);
+      dGame[i].add(`${r.game}:${r.recordId}`);
       dPlayer[i].add(r.userId);
-      tGame.add(r.recordId);
+      tGame.add(`${r.game}:${r.recordId}`);
       tPlayer.add(r.userId);
       const g = perGame.get(r.game) ?? { rec: set(), pl: set() };
       g.rec.add(r.recordId);
@@ -173,7 +173,7 @@ class MemoryAccountStore implements AccountStore {
       topPages: [...pages].map(([path, views]) => ({ path, views })).sort((a, b) => b.views - a.views || (a.path < b.path ? -1 : 1)).slice(0, 10),
       topPlayers: [...perPlayer]
         .map(([id, p]) => ({ name: this.users.get(id)?.username ?? "", games: p.games, points: p.points }))
-        .sort((a, b) => b.games - a.games || b.points - a.points || (a.name < b.name ? -1 : 1))
+        .sort((a, b) => b.games - a.games || b.points - a.points || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
         .slice(0, 10),
     };
   }
