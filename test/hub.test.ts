@@ -131,6 +131,29 @@ describe("player look (icon + colour)", () => {
     const vb = await b.view((v) => looks(v)?.Fox?.icon === "🐲");
     expect(looks(vb)?.Fox).toEqual({ icon: "🐲", color: "#22d3ee" });
   });
+
+  it("still applies a look change after a password change revoked the join token", async () => {
+    const hub = createRoomHub(createMemoryRoomStore());
+    const svc = await getAccountService();
+    const reg = await svc.register({ username: "Cuong", password: "matkhau123" }, "10.77.0.1");
+    if (!reg.ok) throw new Error("register");
+    const a = connect(hub);
+    const code = ((await a.request({ type: "create" })) as { code: string }).code;
+    expect((await a.request({ type: "join", code, token: "token-cccccccc", session: reg.session })).ok).toBe(true);
+    const changed = await svc.updateMe((await svc.authenticate(reg.session))!, { password: "matkhau456", oldPassword: "matkhau123" });
+    if (!changed.ok || !changed.session) throw new Error("password change");
+    expect(await svc.authenticate(reg.session)).toBeNull();
+    expect((await svc.updateMe((await svc.authenticate(changed.session))!, { icon: "🐼", color: "#60a5fa" })).ok).toBe(true);
+    expect((await a.request({ type: "look" })).ok).toBe(true);
+    const looks = (v: unknown) => (v as { looks?: Record<string, { icon: string; color: string }> }).looks;
+    const v = await a.view((x) => looks(x)?.Cuong?.icon === "🐼");
+    expect(looks(v)?.Cuong).toEqual({ icon: "🐼", color: "#60a5fa" });
+  });
+
+  it("refuses a look before joining", async () => {
+    const a = connect(createRoomHub(createMemoryRoomStore()));
+    expect((await a.request({ type: "look" })).ok).toBe(false);
+  });
 });
 
 describe("RoomHub's copy of the room", () => {

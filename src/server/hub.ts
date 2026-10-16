@@ -46,8 +46,8 @@ interface Conn {
   code: string | null;
   token: string | null;
   role: "player" | "spectator";
-  /** Session of the account that joined; the look is re-read from it. */
-  session: string | null;
+  /** Account that joined; the look is re-read from the store by this id (a later password change revokes the join token, not the seat). */
+  userId: string | null;
 }
 
 interface LocalRoom {
@@ -336,7 +336,7 @@ const cleanCode = (code: unknown) => String(code ?? "").toUpperCase().slice(0, 8
 
 /** Wire a freshly upgraded WebSocket into a game. */
 export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
-  const conn: Conn = { socket, code: null, token: null, role: "player", session: null };
+  const conn: Conn = { socket, code: null, token: null, role: "player", userId: null };
   const hubPromise: Promise<RoomHub> = opts.hub ? Promise.resolve(opts.hub) : getHub(opts.game ?? "tienlen");
   let closed = false;
   let windowStart = Date.now();
@@ -403,7 +403,7 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       if (conn.code && conn.code !== code) hub.remove(conn);
       conn.code = code;
       conn.token = token;
-      conn.session = String(msg.session);
+      conn.userId = user.id;
       conn.role = msg.type === "join" ? "player" : "spectator";
       hub.add(conn, code);
       ack(id, { ok: true });
@@ -428,14 +428,17 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
 
     if (msg.type === "look") {
       // The payload is ignored: the look always comes from the account's current profile.
-      let user: Awaited<ReturnType<AccountService["authenticate"]>>;
+      if (accountsConfigError()) return ack(id, { ok: false, error: ACCOUNTS_UNCONFIGURED });
+      if (!conn.userId) return ack(id, { ok: false, error: NEED_LOGIN });
+      const userId = conn.userId;
+      let user: Awaited<ReturnType<AccountService["store"]["userById"]>>;
       try {
-        user = await withTimeout((await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS)).authenticate(conn.session), ACCOUNT_TIMEOUT_MS);
+        user = await withTimeout((await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS)).store.userById(userId), ACCOUNT_TIMEOUT_MS);
       } catch (err) {
         console.error("[be_game] account auth:", err instanceof Error ? err.message : "error");
         return ack(id, { ok: false, error: ACCOUNT_DOWN });
       }
-      if (!user) return ack(id, { ok: false, error: NEED_LOGIN });
+      if (!user || user.disabled) return ack(id, { ok: false, error: NEED_LOGIN });
       const look: PlayerLook = { icon: user.icon, color: user.color };
       const res = await hub.mutate(code, (room) => setLook(room as unknown as LookRoom, token, look));
       return ack(id, res.found ? { ok: true } : { ok: false, error: "Không tìm thấy phòng" });
