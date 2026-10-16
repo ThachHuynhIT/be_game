@@ -287,6 +287,16 @@ describe("account routes", () => {
     expect((await call("PATCH", "/api/admin/users/%E0%A4%A", { disabled: true }, { token: boss.session })).status).toBe(404);
   });
 
+  it("refuses tracked paths under /play/ (reserved for WebSocket joins)", async () => {
+    const boss = (await register("boss")).json;
+    const r = await call("POST", "/api/track", { path: "/play/tienlen", device: "abcdefghijklmnop" });
+    expect(r.status).toBe(400);
+    expect((await call("POST", "/api/track", { path: "/play/x?y=1", device: "abcdefghijklmnop" })).status).toBe(400);
+    expect((await call("POST", "/api/track", { path: "/player", device: "abcdefghijklmnop" })).status).toBe(204);
+    const stats = await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session });
+    expect(stats.json.totals.playDevices).toBe(0);
+  });
+
   it("strips control characters from tracked paths", async () => {
     const boss = (await register("boss")).json;
     expect((await call("POST", "/api/track", { path: "/a\u0000b\n", device: "abcdefghijklmnop" })).status).toBe(204);

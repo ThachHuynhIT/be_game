@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEVICE_RE, isAllowedOrigin } from "./hub";
+import { isPlayPath } from "../accounts/types";
 import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret } from "../accounts/service";
 
 const MAX_BODY = 4096;
@@ -180,7 +181,8 @@ async function track(req: IncomingMessage, res: ServerResponse, svc: AccountServ
   if (!(await svc.limiter.hit(`track:ip:${ip}`, 60, 60))) return err(res, 429, TOO_MANY);
   const b = await readJson(req, true);
   const path = normalizeTrackPath(b.path);
-  if (!path) return err(res, 400, "path không hợp lệ");
+  // /play/* rows are written only by WebSocket joins (play devices); a beacon must not forge them.
+  if (!path || isPlayPath(path)) return err(res, 400, "path không hợp lệ");
   if (typeof b.device !== "string" || !DEVICE_RE.test(b.device)) return err(res, 400, "device không hợp lệ");
   const user = await svc.authenticate(bearer(req)).catch(() => null);
   await svc.store.trackView({ path, device: b.device, userId: user?.id ?? null });
