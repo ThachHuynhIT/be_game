@@ -56,6 +56,9 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | Biến | Local | Tự host (`~/apps/be_game/.env` + compose) | Vercel `be-game` |
 |---|---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | trống → compose dùng `redis://redis:6379`; đặt URL Upstash (bí mật, quyền `600`) để dùng chung kho với máy dự phòng | Upstash (integration), production **và** preview |
+| `DATABASE_URL` | trống → tài khoản trong RAM (chỉ dev) | Chuỗi Neon **pooled** trong `.env` (quyền `600`). **Bí mật** | Neon (cùng chuỗi với máy chính), đặt bằng dashboard hoặc API env, production **và** preview |
+| `SESSION_SECRET` | trống → secret dev cố định | `openssl rand -base64 32`, trong `.env` (quyền `600`). **Bí mật** | **Giống hệt máy chính**, nếu không token ký ở máy này bị máy kia từ chối |
+| `ADMIN_USERNAMES` | trống | Username admin, cách nhau dấu phẩy | giống máy chính |
 | `ALLOWED_ORIGIN` | trống → mọi origin | Frontend chính: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`, và `http://localhost:3000`. Giá trị đầy đủ: [`SELF_HOSTING.md`](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu) | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
 | `GAME_DOMAIN` | — | `play-api.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |
@@ -64,6 +67,21 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | `VERCEL`, `VERCEL_REGION`, `VERCEL_GIT_COMMIT_SHA` | — | — | Vercel tự đặt (commit cần bật "Automatically expose System Environment Variables"); `/api/health` trả `region: "sin1"` và `commit` |
 
 Secret và variable của workflow Deploy (environment `self-hosted` trên GitHub, cùng repo variable `VERCEL_HEALTH_URL`) và biến bên zonenop-game: bảng đầy đủ ở [`SELF_HOSTING.md` → Cấu hình](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu). Mẫu cho local: `.env.example`.
+
+## Triển khai tài khoản (đăng nhập, admin)
+
+Thứ tự (spec §11): **bí mật trước, rồi merge be_game và release zonenop-game cùng nhau**. Từ khi be_game mới chạy, `join`/`watch` đòi `session`, nên frontend cũ không vào được bàn cho đến khi zonenop-game mới được release.
+
+1. Tạo/đổi mật khẩu Neon, lấy chuỗi **pooled**. Đặt `DATABASE_URL`, `SESSION_SECRET` (cùng giá trị cho cả hai backend) và `ADMIN_USERNAMES` ở **cả hai nơi**: máy chính (`~/apps/be_game/.env`, cách đặt an toàn ở [`SELF_HOSTING.md`](SELF_HOSTING.md#đặt-bí-mật-an-toàn)) và Vercel `be-game` (dashboard hoặc API env; Vercel cần redeploy mới áp dụng). Không in giá trị ra terminal, log, PR hay chat.
+2. Merge be_game: migration tự chạy ở lần dùng đầu; cả hai máy tự deploy.
+3. Release zonenop-game. Người đang ở trong bàn bị yêu cầu đăng nhập ở lần kết nối kế tiếp.
+4. Kiểm tra: **đăng ký tài khoản admin của mình trước** (ai đăng ký tên có trong `ADMIN_USERNAMES` đầu tiên thành admin), chơi một ván, bảng điểm, `/admin`, và `/api/health` của cả hai máy có `accounts: "postgres"`.
+
+Lưu ý vận hành:
+- **Cache phiên theo instance**: đăng xuất / khoá / đổi mật khẩu có hiệu lực ngay trên instance xử lý, và trong ≤ 60 giây ở nơi khác (instance Vercel khác, máy backend còn lại).
+- **IP client cho rate limit**: điện thoại lấy `cf-connecting-ip` (Cloudflare Tunnel), Vercel lấy `x-real-ip`. Bucket: đăng ký 5/giờ/IP, đăng nhập 10/15 phút/IP + 5/15 phút/username, track 60/phút/IP. Limiter dùng Redis nếu có và **fail open** khi Redis lỗi.
+- Hai máy dùng chung một Neon và một `SESSION_SECRET` nên tài khoản và phiên đi theo người chơi qua cả hai backend. Thiếu `DATABASE_URL` thì mỗi máy có danh sách tài khoản RAM riêng và mất khi restart.
+- Neon lỗi/chậm: route auth trả 503 trong ≤ 5 s; ván đang chơi không hỏng (ghi `game_results` lỗi chỉ log).
 
 ## Giữ tương thích khi đổi code
 
@@ -118,6 +136,7 @@ Hai cột trạng thái: **trước khi chuyển** là hiện tại (máy chính
 - Gói Hobby giới hạn WebSocket 300 giây/kết nối; server gửi `reconnect` trước khi hết hạn (README → "Giới hạn của Vercel"). Máy tự host không có giới hạn này.
 
 **Máy tự host**
+- `DATABASE_URL` và `SESSION_SECRET` là bí mật: không bao giờ echo/log/commit chúng. Đặt vào `.env` bằng `read -rs` + `printf >> .env` + `chmod 600`, và lên Vercel bằng dashboard hoặc API env (không để trên argv hay trong lịch sử shell).
 - Firewall của host chặn traffic tailnet tới cổng Docker publish kiểu bridge → đi qua Traefik (`traefik_network`), không publish cổng.
 - Host dùng containerd image store: build lại cùng tag thì image cũ tự biến mất; image không có `curl` → health check bằng `node -e "fetch(...)"` trong container.
 - Build cache: mỗi app build bằng BuildKit builder riêng (`be_game`, `zonenop-game`), deploy tự dọn còn tối đa 1 GB / 2 GB rồi tắt builder. Không prune builder `default` (dùng chung với chủ máy); xem [`SELF_HOSTING.md`](SELF_HOSTING.md).

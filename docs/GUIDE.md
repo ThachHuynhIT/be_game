@@ -129,8 +129,8 @@ Mọi message là JSON text, tối đa `MAX_MESSAGE_BYTES` = 16 KB (lớn hơn b
 |---|---|---|
 | `ping` | (không có `id`) | Server trả `{type:"pong"}` và gọi `adapter.heartbeat` nếu đã vào phòng. Client gửi mỗi `PING_INTERVAL_MS` = 10 s |
 | `create` | `id` | Tạo phòng mới (chưa vào). Ack `{ok:true, code}` |
-| `join` | `id, code, name, token` | Vào ghế / gắn lại ghế. `code` được `toUpperCase().slice(0, 8)`. Đổi phòng thì rời phòng cũ trên hub |
-| `watch` | `id, code, name, token` | Vào làm khán giả (`role = "spectator"`) |
+| `join` | `id, code, name, token, session, device` | Vào ghế / gắn lại ghế. `code` được `toUpperCase().slice(0, 8)`. Đổi phòng thì rời phòng cũ trên hub. **Bắt buộc đăng nhập**: `session` thiếu / sai / hết hạn / bị khoá → ack `{ok:false, error:"Cần đăng nhập"}`; store tài khoản lỗi hoặc quá 5 s → `{ok:false, error:"Máy chủ tài khoản đang lỗi, thử lại sau"}`. Tên ghế = `username` của tài khoản (3–20 ký tự), `name` client gửi bị bỏ qua; `look` lấy từ `icon`/`color` của tài khoản. Ghế giữ theo `token` giữa ván mà thuộc tên khác → `"Ghế này thuộc tài khoản khác"` |
+| `watch` | `id, code, name, token, session, device` | Vào làm khán giả (`role = "spectator"`); cùng luật đăng nhập và tên như `join` |
 | `join` / `watch` kèm `look` | `look: {icon, color}` (tuỳ chọn) | Icon + màu người chơi chọn ở thanh games (xem "Icon và màu người chơi" bên dưới) |
 | `look` | `id, look` | Đổi icon / màu **ngay tại bàn** (kể cả khán giả); không qua cooldown. Ack `{ok:false, error:"Biểu tượng/màu không hợp lệ"}` nếu `look` sai |
 | `leave` | `id` | Rời phòng; conn quay về trạng thái chưa vào |
@@ -231,18 +231,47 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
   - `DEFAULT_RANK_POINTS = {first: 2, second: 1}`, `MAX_RANK_POINTS = 20`. `checkRankPoints(first, second)`: `first` nguyên 1–20 (`"Điểm Nhất từ 1 đến 20"`), `second` nguyên 0–`first` (`"Điểm Nhì từ 0 đến điểm Nhất"`).
   - Tiến Lên dùng `scoreTienLen` (tới trắng, chết cháy, chặt heo) — xem [tienlen.md](games/tienlen.md).
   - `scoreGame` / `RANK_POINTS` / `INSTANT_WIN_POINTS` trong `scoring.ts` (comment ghi "Mèo Nổ, Cờ Tỷ Phú") **không còn được game nào dùng** — chỉ test còn gọi.
-- `GET /leaderboard?limit=` (mặc định 20, kẹp 1–100) → `{ok:true, players: LeaderboardEntry[]}` với `{name, points, games, wins, lastPlayed}`.
+- `GET /leaderboard?limit=` (mặc định 20, kẹp 1–100) → `{ok:true, players: LeaderboardEntry[]}` với `{name, points, games, wins, lastPlayed}`: đây là **bảng cũ (mùa trước, theo tên)**, nay chỉ còn đọc được qua `?season=old` (xem [Tài khoản](#tài-khoản-và-theo-dõi-srcaccounts)); bảng mùa này lấy từ Postgres.
+- Từ khi có tài khoản, hub (`src/server/hub.ts`) còn ghi mỗi kết quả vào `game_results` (khoá chính `game, record_id, user_id` + `ON CONFLICT DO NOTHING`, nên hai máy ghi cùng một ván chỉ ra một dòng). Ghi lỗi chỉ log, **không làm hỏng ván**.
 
 ## HTTP endpoints
 
 | Path | Trả về |
 |---|---|
 | `GET /api/<game>/rooms` (Tiến Lên: `/api/rooms`) | `{ok, rooms}`: lấy `recentRooms(60)` → lọc `isActive` → tối đa 30 → `summary`. Summary chung: `{code, status: "waiting"|"playing", players: [{name, connected, points}], spectators: number, games: gameSeq}` (Mèo Nổ thêm `expansions`) |
-| `GET /api/<game>/leaderboard?limit=20` | Như trên |
-| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games}` (lỗi ở bất kỳ bước nào → HTTP 500 `{ok:false, error, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games}`; `commit` = `BUILD_COMMIT` (máy tự host) hoặc `VERCEL_GIT_COMMIT_SHA` (Vercel), `null` khi không biết, ví dụ chạy local: workflow Deploy dựa vào nó để biết máy đang chạy đúng commit vừa push; `now` = `Date.now()` của máy trả lời, để so lệch đồng hồ giữa hai máy dùng chung kho; `sharedStore` = host Redis của **chính máy đó** không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức "máy này dùng Redis ở xa", không có nghĩa hai máy cùng kho: muốn biết thì so `redisHost` của cả hai). Mỗi bước timeout 5 s |
+| `GET /api/<game>/leaderboard?limit=50` | Mùa này (mặc định): `{season:"current", rows: LeaderRow[]}` với `LeaderRow = {name, points, games, wins, icon, color}`, lấy từ `game_results` (`limit` 1–100, mặc định 50). Lỗi store tài khoản → 503 `"Máy chủ tài khoản đang lỗi, thử lại sau"`. `?season=old` (mặc định `limit` 20): định dạng cũ `{ok:true, players}` từ Redis |
+| `POST /api/auth/register` | Body JSON `{username, password, icon?, color?}` → 200 `{ok:true, session, user}`; 400 (tên/mật khẩu không hợp lệ), 409 (trùng tên, so theo `nameKey`), 429. Người đăng ký tên có trong `ADMIN_USERNAMES` **đầu tiên** thành admin |
+| `POST /api/auth/login` | `{username, password}` → 200 `{ok:true, session, user}`; 401 luôn là `"Sai tên đăng nhập hoặc mật khẩu"` (không lộ tên có tồn tại không); 429 |
+| `POST /api/auth/logout` | `Authorization: Bearer <session>` → 200 `{ok:true}` (mọi token cũ của tài khoản hết hiệu lực) |
+| `GET /api/auth/me` | Bearer → 200 `{ok:true, user}`; 401 `{ok:false, error:"Cần đăng nhập"}` |
+| `PATCH /api/auth/me` | Bearer, `{icon?, color?, password?, oldPassword?}` → 200 `{ok:true, user, session?}`; đổi mật khẩu cần `oldPassword` và trả `session` mới (token cũ hết hiệu lực) |
+| `POST /api/track` | `{path, device}` (+ Bearer tuỳ chọn; không đòi `Content-Type` JSON để `sendBeacon` dùng được) → 204. `path` bỏ query/hash, phải bắt đầu bằng `/` và ≤ 200 ký tự; User-Agent giống bot (`bot\|crawl\|spider\|preview\|monitor`) bị bỏ qua (vẫn 204) |
+| `GET /api/admin/stats?days=7\|30\|90` | Bearer admin → `AdminStats` (`totals`, `daily` đủ `days` ngày cũ → mới, `byGame`, `topPages` 10, `topPlayers` 10); `days` khác → 400 |
+| `GET /api/admin/users?q=&page=1` | Bearer admin → `{users: AdminUser[], total, page, pageSize: 50}`; `q` ≤ 50 ký tự. Không phải admin → 403, chưa đăng nhập → 401 |
+| `PATCH /api/admin/users/<id>` | Bearer admin, `{role?, disabled?, password?}` → `{ok:true, user}`; 400/403/404; admin không tự hạ quyền hay tự khoá mình (400) |
+| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, accounts, games}` (`accounts` = `"postgres"` khi có `DATABASE_URL`, `"memory"` khi không: kiểm tra nó sau khi đặt biến; lỗi ở bất kỳ bước nào → HTTP 500 `{ok:false, error, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, accounts, games}`; `commit` = `BUILD_COMMIT` (máy tự host) hoặc `VERCEL_GIT_COMMIT_SHA` (Vercel), `null` khi không biết, ví dụ chạy local: workflow Deploy dựa vào nó để biết máy đang chạy đúng commit vừa push; `now` = `Date.now()` của máy trả lời, để so lệch đồng hồ giữa hai máy dùng chung kho; `sharedStore` = host Redis của **chính máy đó** không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức "máy này dùng Redis ở xa", không có nghĩa hai máy cùng kho: muốn biết thì so `redisHost` của cả hai). Mỗi bước timeout 5 s |
 | `GET /` hoặc `/api` | `{ok:true, service:"be_game", routes}` |
 
+CORS: cho phép header `Authorization, Content-Type` và method `GET, POST, PATCH, OPTIONS`; preflight `OPTIONS` trả 204. Route auth/admin kiểm tra `Origin` theo `ALLOWED_ORIGIN` (không khớp → 403), riêng `/api/track` không chặn theo origin. Mọi response auth có `cache-control: no-store`.
+
 Lưu ý: health tạo một phòng rác `HC…` trong namespace `tienlen` mỗi lần gọi (hết hạn sau 12 h, không có người nên không hiện ở lobby).
+
+---
+
+## Tài khoản và theo dõi (`src/accounts/`)
+
+Thiết kế: [`docs/superpowers/specs/2026-10-16-accounts-admin-design.md`](superpowers/specs/2026-10-16-accounts-admin-design.md). Route HTTP ở `src/server/authRoutes.ts`, nghiệp vụ ở `src/accounts/service.ts`, kho ở `store.ts` (RAM) và `pg.ts` (Postgres, migration trong `migrations.ts`).
+
+- **Kho**: có `DATABASE_URL` → Postgres (Neon; pool tối đa 5, kết nối timeout 5 s, TLS xác thực chứng chỉ trừ khi host là localhost). **Không có thì tài khoản nằm trong RAM: mất khi restart và mỗi máy một danh sách riêng. Chỉ dùng để dev**; `/api/health` báo `accounts: "memory"`. Migration chạy tự động lần đầu dùng; `page_views` cũ hơn 180 ngày bị dọn khi khởi tạo.
+- **Mật khẩu**: 8–72 ký tự, scrypt (N=32768, r=8, p=1), chuỗi lưu `scrypt$N$r$p$salt$hash`; hash không bao giờ rời store. **Username**: 3–20 ký tự (theo code point), chữ/số/`_`/`.` và dấu cách đơn, chuẩn hoá NFC + trim + gộp khoảng trắng; so trùng không phân biệt hoa thường (`nameKey`). Tên ghế trong bàn = username.
+- **Phiên**: token `<b64url(JSON {uid, ver, exp})>.<b64url(HMAC-SHA256)>` ký bằng `SESSION_SECRET`, hạn 30 ngày, gửi qua `Authorization: Bearer` (HTTP) hoặc field `session` (WS join/watch). `ver` phải khớp `session_version` của user: đăng xuất, đổi mật khẩu, admin đổi mật khẩu hay khoá tài khoản đều làm token cũ vô hiệu.
+- **Cache phiên theo từng instance** (60 s): đăng xuất / khoá / đổi mật khẩu có hiệu lực **ngay** trên instance xử lý thao tác đó (cache của user bị xoá), và **trong tối đa 60 giây** ở nơi khác (instance Vercel khác, máy backend còn lại).
+- **Thiếu `SESSION_SECRET`**: production (`NODE_ENV=production` hoặc `VERCEL`) → mọi route auth/admin/track trả 503 `"Máy chủ chưa cấu hình đăng nhập"`; dev/test dùng secret cố định `dev-insecure-secret`. Secret ngắn hơn 32 byte chỉ bị cảnh báo trong log.
+- **Admin**: tên trong `ADMIN_USERNAMES` (cách nhau dấu phẩy) **thành admin lúc đăng ký**: ai đăng ký tên đó trước được quyền, nên đăng ký tài khoản của mình trước rồi mới đặt biến (hoặc đặt biến trước khi mở đăng ký và đăng ký ngay).
+- **Rate limit** (`rateLimit.ts`; Redis nếu có `REDIS_URL`, không thì RAM; key `be_game:rl:<bucket>`): đăng ký 5/giờ/IP, đăng nhập 10/15 phút/IP và 5/15 phút/username, `/api/track` 60/phút/IP. Vượt → 429 `"Thử quá nhiều lần, đợi một lát rồi thử lại"`. **Limiter fail open**: Redis lỗi thì cho qua (log tối đa 1 lần/phút) để không khoá mọi người.
+- **IP client** (`clientIp` trong `authRoutes.ts`): trên Vercel lấy `x-real-ip` (rồi phần tử đầu của `x-forwarded-for`); ở nơi khác (điện thoại sau Cloudflare Tunnel) lấy `cf-connecting-ip`, không có thì phần tử cuối của `x-forwarded-for`, cuối cùng là địa chỉ socket.
+- **Lỗi và timeout**: mỗi request auth/admin/track giới hạn 5 s; store lỗi hoặc chậm → 503 `"Máy chủ tài khoản đang lỗi, thử lại sau"` (log chỉ ghi thông điệp lỗi, không ghi chuỗi kết nối).
+- **Bảng điểm cũ**: Redis vẫn giữ bảng theo tên của mùa trước, đọc bằng `?season=old`; bảng mới tính từ `game_results` (xem [Lịch sử ván](#lịch-sử-ván-điểm-xếp-hạng-và-leaderboard)).
 
 ---
 
@@ -256,7 +285,7 @@ npm test           # vitest run
 npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 ```
 
-`src/local.ts` dùng đúng `createGameServer()`, listen `PORT` (mặc định 4000) / `HOST` (mặc định `0.0.0.0`), log loại store. Không có `REDIS_URL` → store RAM (mất khi tắt process). Frontend (zonenop-game): đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (cũng là mặc định).
+`src/local.ts` dùng đúng `createGameServer()`, listen `PORT` (mặc định 4000) / `HOST` (mặc định `0.0.0.0`), log loại store. Không có `REDIS_URL` → store RAM (mất khi tắt process); không có `DATABASE_URL` → tài khoản trong RAM (mất khi tắt, chỉ để dev). Frontend (zonenop-game): đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (cũng là mặc định).
 
 `tsconfig.json` dùng `module: "CommonJS"` để Vercel biên dịch được import tương đối không đuôi — đừng đổi sang ESM.
 
@@ -266,6 +295,9 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 |---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | Lấy biến đầu tiên có giá trị (`redisUrl()`). Bắt buộc trên Vercel |
 | `ALLOWED_ORIGIN` | trống → cho phép mọi origin | Danh sách cách nhau dấu phẩy, `*` khớp `[a-z0-9-.]+`, có `*` đơn lẻ = cho tất cả. Request không có `Origin` (client không phải trình duyệt) và trang cùng host luôn được phép. Dùng cho cả upgrade WS (403; qua Cloudflare/Traefik thường hiện thành 502) lẫn CORS HTTP. Không dùng `https://*.vercel.app` |
+| `DATABASE_URL` | trống → tài khoản trong RAM | Chuỗi kết nối Postgres (Neon, bản pooled). **Bí mật**: không commit, log, in ra. Trống thì tài khoản mất khi restart và mỗi máy một danh sách: chỉ để dev |
+| `SESSION_SECRET` | trống | Khoá ký token phiên, 32+ byte ngẫu nhiên (`openssl rand -base64 32`). **Bí mật.** Production thiếu thì route auth trả 503; dev dùng secret cố định |
+| `ADMIN_USERNAMES` | trống | Username (cách nhau dấu phẩy) thành admin khi đăng ký; ai đăng ký trước được quyền |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Chỉ cho `src/local.ts` |
 | `BE_GAME_COUNT_COMMANDS` | trống | `1` = log `[be_game] redis commands last 60s: <n>` mỗi 60 giây (chỉ có nghĩa khi dùng Redis; đo lệnh trước khi chuyển sang Upstash) |
 | `BUILD_COMMIT` | trống | Commit đang chạy trên máy tự host: workflow Deploy export, `compose.selfhost.yml` chuyển vào container |
