@@ -180,7 +180,8 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       const t = now();
       let user: UserRow | null;
       const hit = cache.get(s.uid);
-      if (hit && hit.until > t) user = hit.user;
+      // A token newer than the cached row was issued by another instance after a bump: re-read instead of rejecting it.
+      if (hit && hit.until > t && hit.user.sessionVersion >= s.ver) user = hit.user;
       else {
         user = await store.userById(s.uid);
         if (user) cache.set(s.uid, { user, until: t + CACHE_MS });

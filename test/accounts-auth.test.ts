@@ -117,3 +117,20 @@ describe("admin lock revokes sessions", () => {
     expect(again.ok && (await svc.authenticate(again.session))).toBeTruthy();
   });
 });
+
+describe("auth cache across instances", () => {
+  it("re-reads the user when a token is newer than the cached session version", async () => {
+    const { createAccountService } = await import("../src/accounts/service");
+    const { createMemoryAccountStore } = await import("../src/accounts/store");
+    const store = createMemoryAccountStore();
+    const a = createAccountService(store, memoryRateLimiter());
+    const b = createAccountService(store, memoryRateLimiter());
+    const reg = await a.register({ username: "Lan", password: "matkhau123" }, "1.1.1.1");
+    if (!reg.ok) throw new Error("register");
+    expect(await a.authenticate(reg.session)).not.toBeNull(); // instance A caches ver 0
+    const changed = await b.updateMe((await b.authenticate(reg.session))!, { password: "matkhau456", oldPassword: "matkhau123" });
+    if (!changed.ok || !changed.session) throw new Error("password change");
+    expect((await a.authenticate(changed.session))?.username).toBe("Lan"); // ver 1 > cached 0: re-read, not a sign-out
+    expect(await a.authenticate(reg.session)).toBeNull(); // the old token is dead everywhere
+  });
+});
