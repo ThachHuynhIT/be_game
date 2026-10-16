@@ -127,6 +127,8 @@ jobs:
           # remove exactly that image afterwards. The host is shared: never a prune. With the containerd
           # image store the untagged old image is already gone, hence the existence check.
           old=$(docker image inspect --format '{{.Id}}' be_game:local 2>/dev/null || true)
+          # compose passes it to the container: /api/health reports the commit, checked below.
+          export BUILD_COMMIT="$SHA"
           docker compose -f compose.selfhost.yml up -d --build --remove-orphans
           new=$(docker image inspect --format '{{.Id}}' be_game:local)
           if [ -n "$old" ] && [ "$old" != "$new" ] && docker image inspect "$old" >/dev/null 2>&1; then
@@ -145,7 +147,8 @@ jobs:
             health=$(docker compose -f compose.selfhost.yml exec -T be_game \
               node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>r.text()).then(t=>console.log(t),()=>{})" \
               2>/dev/null || true)
-            if [[ $health == *'"ok":true'* ]]; then
+            # Healthy AND running this commit (not the previous container still answering).
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
               echo "healthy at $SHA"
               exit 0
             fi
@@ -161,10 +164,38 @@ jobs:
         if: steps.cfg.outputs.ready == 'true' && vars.GAME_DOMAIN != ''
         run: |
           for i in $(seq 1 20); do
-            if curl -fsS "https://${{ vars.GAME_DOMAIN }}/api/health" | grep -q '"ok":true'; then
-              echo "healthy"; exit 0
+            health=$(curl -fsS "https://${{ vars.GAME_DOMAIN }}/api/health" || true)
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
+              echo "healthy at $SHA"; exit 0
             fi
             sleep 3
           done
           echo "health check failed" >&2
+          exit 1
+
+  # The Vercel backup deploys main on its own (Vercel Git integration): wait until it serves this commit too, so a
+  # failed or stuck Vercel build turns this run red. Set the repo variable VERCEL_HEALTH_URL to enable it.
+  vercel:
+    if: >-
+      vars.VERCEL_HEALTH_URL != '' && (
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      URL: ${{ vars.VERCEL_HEALTH_URL }}
+    steps:
+      - name: Vercel serves this commit
+        run: |
+          for i in $(seq 1 60); do
+            health=$(curl -fsS "$URL" || true)
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
+              echo "Vercel healthy at $SHA"; exit 0
+            fi
+            sleep 10
+          done
+          echo "Vercel does not serve $SHA after 10 minutes. Last /api/health: $health" >&2
+          [[ $health == *'"commit":null'* ]] && echo "commit is null: turn on Automatically expose System Environment Variables in the Vercel project." >&2
           exit 1

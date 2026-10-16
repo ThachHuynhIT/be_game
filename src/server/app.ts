@@ -139,6 +139,9 @@ async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResp
   }
 }
 
+/** Commit this process runs: set by the self-hosted deploy (BUILD_COMMIT) or by Vercel; null when unknown (local dev). */
+export const deployedCommit = (env: NodeJS.ProcessEnv = process.env): string | null => env.BUILD_COMMIT || env.VERCEL_GIT_COMMIT_SHA || null;
+
 /** create → load → subscribe → save → pub/sub round trip, with timings. `now` (epoch ms) lets an operator compare the clocks of two backends sharing a store. Never returns secrets. */
 async function health(res: ServerResponse) {
   const stepsMs: Record<string, number> = {};
@@ -153,6 +156,8 @@ async function health(res: ServerResponse) {
     redisConfigured: !!url,
     redisHost: url ? new URL(url).hostname : null,
     sharedStore: isSharedStoreHost(url ? new URL(url).hostname : null),
+    // The deploy workflow waits for this to equal the commit it shipped (old container / old Vercel build = mismatch).
+    commit: deployedCommit(),
     games: Object.keys(ADAPTERS),
   };
   try {
