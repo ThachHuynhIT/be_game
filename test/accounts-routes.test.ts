@@ -193,6 +193,7 @@ describe("account routes", () => {
   it("uses x-real-ip on Vercel and ignores cf-connecting-ip", async () => {
     process.env.VERCEL = "1";
     process.env.SESSION_SECRET = "x".repeat(40);
+    process.env.ACCOUNTS_MEMORY = "1";
     try {
       const out: number[] = [];
       for (let i = 0; i < 6; i++) out.push(await regAs({ "x-real-ip": "6.6.6.6", "cf-connecting-ip": `2.2.2.${i}` }, i));
@@ -200,7 +201,73 @@ describe("account routes", () => {
     } finally {
       delete process.env.VERCEL;
       delete process.env.SESSION_SECRET;
+      delete process.env.ACCOUNTS_MEMORY;
     }
+  });
+
+  describe("production without DATABASE_URL", () => {
+    const prod = (memory: boolean) => {
+      process.env.NODE_ENV = "production";
+      process.env.SESSION_SECRET = "x".repeat(40);
+      if (memory) process.env.ACCOUNTS_MEMORY = "1";
+    };
+    const savedNodeEnv = process.env.NODE_ENV;
+    afterEach(() => {
+      restore("NODE_ENV", savedNodeEnv);
+      delete process.env.SESSION_SECRET;
+      delete process.env.ACCOUNTS_MEMORY;
+      delete process.env.VERCEL;
+    });
+
+    it("is unconfigured: auth, admin and track 503, health says so, joins are refused", async () => {
+      prod(false);
+      for (const [m, p, b] of [
+        ["POST", "/api/auth/register", { username: "Lan", password: "matkhau123" }],
+        ["POST", "/api/auth/login", { username: "Lan", password: "matkhau123" }],
+        ["GET", "/api/auth/me", undefined],
+        ["GET", "/api/admin/stats?days=7", undefined],
+        ["POST", "/api/track", { path: "/games", device: "abcdefghijklmnop" }],
+      ] as const) {
+        const r = await call(m, p, b);
+        expect([p, r.status, r.json?.error]).toEqual([p, 503, "Máy chủ chưa cấu hình đăng nhập"]);
+      }
+      expect((await call("GET", "/api/health")).json.accounts).toBe("unconfigured");
+      await expect(getAccountService()).rejects.toThrow(/unconfigured/);
+      const { createRoomHub, attachConnection } = await import("../src/server/hub");
+      const { createMemoryRoomStore } = await import("../src/server/store");
+      const { FakeSocket } = await import("./helpers/fakeSocket");
+      const hub = createRoomHub(createMemoryRoomStore());
+      const code = await hub.createRoom();
+      const s = new FakeSocket();
+      attachConnection(s, { hub });
+      expect(await s.request({ type: "join", code, token: "token-aaaaaaaa", session: "a.b" })).toMatchObject({ ok: false, error: "Máy chủ chưa cấu hình đăng nhập" });
+    });
+
+    it("VERCEL alone also counts as production", async () => {
+      process.env.VERCEL = "1";
+      process.env.SESSION_SECRET = "x".repeat(40);
+      expect((await call("POST", "/api/auth/login", { username: "Lan", password: "matkhau123" })).status).toBe(503);
+    });
+
+    it("ACCOUNTS_MEMORY=1 opts in to the memory store", async () => {
+      prod(true);
+      expect((await register("Lan")).status).toBe(200);
+      expect((await call("GET", "/api/health")).json.accounts).toBe("memory");
+    });
+
+    it("logs loudly once, naming only the missing variables", async () => {
+      const { vi } = await import("vitest");
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      prod(false);
+      const { warnIfAccountsUnconfigured } = await import("../src/accounts/service");
+      warnIfAccountsUnconfigured();
+      warnIfAccountsUnconfigured();
+      const lines = spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("ACCOUNTS UNCONFIGURED"));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("DATABASE_URL");
+      expect(lines[0]).not.toContain("x".repeat(40));
+      spy.mockRestore();
+    });
   });
 
   it("requires JSON content type, rejects foreign origins, and 404s a malformed admin id", async () => {

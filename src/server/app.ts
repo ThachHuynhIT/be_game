@@ -1,7 +1,7 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
-import { getAccountService } from "../accounts/service";
+import { accountsConfigError, getAccountService, warnIfAccountsUnconfigured } from "../accounts/service";
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
 import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
@@ -44,6 +44,7 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
 const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
 
 export function createGameServer(): Server {
+  warnIfAccountsUnconfigured();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
   const server = createServer(async (req, res) => {
@@ -209,6 +210,7 @@ async function health(res: ServerResponse) {
 
 /** Which account store is live; never throws (health must not depend on it). */
 async function accountsKind(): Promise<string> {
+  if (accountsConfigError()) return "unconfigured";
   try {
     return (await withTimeout(getAccountService(), 5000, "accounts")).store.kind;
   } catch {

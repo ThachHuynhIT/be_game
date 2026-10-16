@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEVICE_RE, isAllowedOrigin } from "./hub";
-import { type AccountService, TOO_MANY, getAccountService, publicUser, sessionSecret } from "../accounts/service";
+import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret } from "../accounts/service";
 
 const MAX_BODY = 4096;
 const STORE_TIMEOUT_MS = 5000;
@@ -82,8 +82,8 @@ export async function handleAccountRoute(req: IncomingMessage, res: ServerRespon
   const isAdmin = path.startsWith("/api/admin/");
   if (!isAuth && !isAdmin && path !== "/api/track") return false;
   try {
-    if (!sessionSecret()) {
-      err(res, 503, "Máy chủ chưa cấu hình đăng nhập");
+    if (accountsConfigError() || !sessionSecret()) {
+      err(res, 503, ACCOUNTS_UNCONFIGURED);
       return true;
     }
     await withTimeout(dispatch(req, res, path));

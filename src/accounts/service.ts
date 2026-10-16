@@ -50,8 +50,35 @@ export function sessionSecret(env: NodeJS.ProcessEnv = process.env): string | nu
     }
     return env.SESSION_SECRET;
   }
-  if (env.NODE_ENV === "production" || env.VERCEL) return null;
+  if (isProduction(env)) return null;
   return "dev-insecure-secret";
+}
+
+const isProduction = (env: NodeJS.ProcessEnv) => env.NODE_ENV === "production" || !!env.VERCEL;
+
+export const ACCOUNTS_UNCONFIGURED = "Máy chủ chưa cấu hình đăng nhập";
+
+/**
+ * Names of the env vars that keep accounts from running, or null when they can run. In production a missing
+ * DATABASE_URL would silently give a per-instance memory store (accounts lost on restart), so it is refused
+ * unless ACCOUNTS_MEMORY=1 opts in. Only variable names are returned, never values.
+ */
+export function accountsConfigError(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!isProduction(env)) return null;
+  const missing: string[] = [];
+  if (!env.SESSION_SECRET) missing.push("SESSION_SECRET");
+  if (!env.DATABASE_URL && env.ACCOUNTS_MEMORY !== "1") missing.push("DATABASE_URL (or ACCOUNTS_MEMORY=1)");
+  return missing.length ? `missing ${missing.join(", ")}` : null;
+}
+
+let warnedUnconfigured = false;
+
+/** Loud, once per process: called when the server is created. */
+export function warnIfAccountsUnconfigured(env: NodeJS.ProcessEnv = process.env): void {
+  const why = accountsConfigError(env);
+  if (!why || warnedUnconfigured) return;
+  warnedUnconfigured = true;
+  console.error(`[be_game] ACCOUNTS UNCONFIGURED (${why}): sign-in, admin, tracking and joining games are refused until it is set.`);
 }
 
 const adminKeys = () =>
@@ -257,6 +284,8 @@ async function build(): Promise<AccountService> {
 
 /** Process-wide service: Postgres if DATABASE_URL, else memory; Redis limiter if configured, else memory. A failed or timed-out init is retried next call. */
 export function getAccountService(): Promise<AccountService> {
+  // Never cached: setting the env (and restarting) is the fix, but a misconfigured process must not build a memory store.
+  if (accountsConfigError()) return Promise.reject(new Error("accounts unconfigured"));
   if (!singleton) {
     const ms = testInit.timeoutMs ?? INIT_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;

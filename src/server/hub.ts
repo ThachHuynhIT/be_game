@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { CHAT_COOLDOWN_MS, EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
 import { type SocialRoom, cleanName, randomCode, sendChat } from "../game/room";
 import { ADAPTERS, type GameAdapter, type Result, tienlenAdapter } from "./adapters";
-import { type AccountService, getAccountService } from "../accounts/service";
+import { ACCOUNTS_UNCONFIGURED, type AccountService, accountsConfigError, getAccountService } from "../accounts/service";
 import { type CodedRoom, type GameKind, type RoomStore, getRoomStore, nameKey } from "./store";
 
 /**
@@ -369,6 +369,7 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     if (msg.type === "join" || msg.type === "watch") {
       const code = cleanCode(msg.code);
       const token = String(msg.token ?? "");
+      if (accountsConfigError()) return ack(id, { ok: false, error: ACCOUNTS_UNCONFIGURED });
       let svc: AccountService;
       let user: Awaited<ReturnType<AccountService["authenticate"]>>;
       try {
