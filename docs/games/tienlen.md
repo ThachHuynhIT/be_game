@@ -7,13 +7,13 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 
 | File | Vai trò |
 |---|---|
-| `src/game/cards.ts` | Mã hoá lá bài (`Card = rank*4 + suit`), `newDeck`, `shuffle(items, random)`, `sortCards`, `parseCard`/`parseCards` (cho test). Chép nguyên sang portfolio `src/lib/tienlen/cards.ts` |
-| `src/game/combos.ts` | `detectCombo`, `canBeat` (gồm luật chặt), `isChop`, `comboName`, `COMBO_NAMES`. Chép nguyên sang portfolio |
-| `src/game/rules.ts` | Tới trắng: `detectInstantWin`, `INSTANT_WIN_NAMES`. Chép nguyên sang portfolio |
+| `src/game/cards.ts` | Mã hoá lá bài (`Card = rank*4 + suit`), `newDeck`, `shuffle(items, random)`, `sortCards`, `parseCard`/`parseCards` (cho test). Chép nguyên sang zonenop-game `src/lib/tienlen/cards.ts` |
+| `src/game/combos.ts` | `detectCombo`, `canBeat` (gồm luật chặt), `isChop`, `comboName`, `COMBO_NAMES`. Chép nguyên sang zonenop-game |
+| `src/game/rules.ts` | Tới trắng: `detectInstantWin`, `INSTANT_WIN_NAMES`. Chép nguyên sang zonenop-game |
 | `src/game/game.ts` | Máy trạng thái một ván: `newGame`, `play`, `pass`, `autoAction`, `forfeit`, `hasBeatingPlay`, `isAnytimeChop`, `activePlayers` |
 | `src/game/scoring.ts` | `scoreTienLen`, `chopPoints`, `tienlenRankPoints`, cùng các hàm điểm dùng chung mọi game (`mirroredRankPoints`, `scoreByRank`, `checkRankPoints`) |
 | `src/game/room.ts` | Vòng đời phòng Tiến Lên **và** các helper xã hội dùng chung mọi game (`watchRoom`, `react`, `sendChat`, `pruneSpectators`, `pruneReactions`, `cleanName`, `randomCode`, hằng presence) |
-| `src/game/protocol.ts` | `RoomView`, `SeatView`, `GameView`, `GameRecord`, `ChatMessage`, `Reaction`, `RoomSummary`, `LeaderboardEntry`, `ClientMessage`, `ServerMessage`, hằng `TURN_SECONDS`, `EMOJIS`, cooldown… Bản chỉnh tay ở portfolio `src/lib/tienlen/protocol.ts` |
+| `src/game/protocol.ts` | `RoomView`, `SeatView`, `GameView`, `GameRecord`, `ChatMessage`, `Reaction`, `RoomSummary`, `LeaderboardEntry`, `ClientMessage`, `ServerMessage`, hằng `TURN_SECONDS`, `EMOJIS`, cooldown… Bản chỉnh tay ở zonenop-game `src/lib/tienlen/protocol.ts` |
 | `src/server/adapters.ts` | `tienlenAdapter` |
 
 ## Luật chơi (như code đang chạy)
@@ -163,9 +163,10 @@ Summary lobby (`roomSummary`): `{code, status, players: [{name, connected, point
 
 - `TURN_SECONDS = 30`: `room.turnDeadline` được đặt lại sau mỗi nước, khi lượt đổi do kick, và khi người tới lượt **quay lại online** (join/heartbeat lúc đang offline mà đang là lượt họ → timer mới).
 - `tick(room, now)` lặp tối đa 16 lần: nếu lượt hết giờ **hoặc** người tới lượt offline / không còn ghế → `autoAction`: trên bàn có bài thì **bỏ lượt**, đang mở vòng thì đánh **lá lẻ nhỏ nhất** (hoặc lá `mustInclude`). Nhiều người vắng liên tiếp được tự đi trong một tick.
-- Sau đó: chuyển host nếu host offline, dọn ghế quá `SEAT_GRACE_MS` khi không có ván đang chạy, dọn khán giả và emoji.
+- Sau đó: chuyển host nếu host offline, giải phóng ghế quá `SEAT_GRACE_MS` khi không có ván đang chạy (ghế được nhớ trong `room.gone`; người đó vào lại thì lấy lại id, thắng và điểm — GUIDE → "Vào lại phòng"), dọn khán giả và emoji.
 - `nextTickAt`: `turnDeadline` (khi đang chơi), thời điểm từng ghế online sẽ thành offline, thời điểm ghế offline hết hạn ân hạn (`lastSeen + SEAT_GRACE_MS + 1`), hạn của khán giả và emoji.
-- `leave` giữa ván: giữ ghế, `left = true` → bị tự đi ngay ở tick (`leaveRoom` gọi `tick`).
+- `leave` giữa ván: giữ ghế, `left = true` → bị tự đi ngay ở tick (`leaveRoom` gọi `tick`). `leave` giữa các ván: ghế bị giải phóng ngay và được nhớ trong `room.gone`.
+- `joinRoom` dùng `findReturning` (ghế cùng token, hoặc ghế offline cùng tên → nhận token mới); không có thì `takeGone` + `seatFor` dựng ghế mới với id/điểm cũ nếu ghế từng bị giải phóng (tối đa 3 giờ).
 
 ## Kết thúc ván & tính điểm
 
@@ -207,4 +208,4 @@ expect(play(g, "a", c("3♠")).ok).toBe(true);           // a giữ lá nhỏ nh
 - `isOut` = đã về **hoặc** forfeited **hoặc** burned; người cháy vẫn có bài trên tay (`cardCount` 13) nhưng không còn lượt.
 - Hằng `TURN_SECONDS` không chỉnh được qua settings (khác các game khác).
 - Lịch sử ván: `GameState.moves` (`TLMove[]`, tối đa `MOVES_LIMIT = 400`) do `record()` trong `game.ts` ghi ở mỗi `play` (kèm `chop`/`chopPoints`), `pass` (`auto: true` khi server bỏ hộ: hết giờ, vắng, hoặc `autoPassHopeless`), vòng mới (`round`, người mở vòng), về đích (`out` + `rank`), chết cháy (`burned`), bị kích (`forfeit`). View gửi `game.moves`; ván lưu trước đó không có field → `[]`.
-- Portfolio `src/lib/tienlen/` có `cards.ts`, `combos.ts`, `rules.ts` (nguyên văn) + `protocol.ts` (bản chỉnh, tự khai báo `LastPlay`, `TienLenSettings`, `mirroredRankPoints`) + `index.ts`; không có `game.ts`/`scoring.ts`.
+- zonenop-game `src/lib/tienlen/` có `cards.ts`, `combos.ts`, `rules.ts` (nguyên văn) + `protocol.ts` (bản chỉnh, tự khai báo `LastPlay`, `TienLenSettings`, `mirroredRankPoints`) + `index.ts`; không có `game.ts`/`scoring.ts`.

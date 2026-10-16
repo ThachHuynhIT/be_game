@@ -10,10 +10,10 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 | `src/meono/cards.ts` | `CardType`, `Expansion`, `EXPANSIONS`, `SELECTABLE_PACKS`, `MCard`, nhóm lá (`CAT_TYPES`, `WILD_CAT`, `KITTENS`, `ACTION_TYPES`, `NOW_TYPES`, `CLAIRVOYANCE`), số lượng (`BASE_COUNTS`, `PACK_COUNTS`, `ALL_TYPES`), `MIN_PLAYERS`, `MAX_SEATS`, `maxPlayers()`, `HAND_SIZE`, `cleanExpansions`, `shuffle`, `deal`, `PRESETS`, `PRESET_BY_ID` |
 | `src/meono/game.ts` | Máy trạng thái ván: `newMeoGame`, `playCards`, `playNope`, `drawCard`, `insertKitten`, `giveCard`, `alterFuture`, `digDeeper`, `playClairvoyance`, `forfeitPlayer`, `tickGame`, `nextGameTickAt`, `insertRange`, `syncCurse`/`unblind`, `implodingAt`, `digCard`, `CARD_NAMES` |
 | `src/meono/room.ts` | Phòng: `newMeoRoom`, `joinMeo`, `meoHeartbeat`, `leaveMeo`, `meoCommand` (gồm start/settings/kick), `tickMeo`, `nextMeoTickAt`, `meoView`, `meoSummary`, `isMeoActive`, `packsInPlay`, `playerRange`, `meoSettingsOf`, `TURN_SECONDS_OPTIONS`, `NOPE_SECONDS_OPTIONS`, `DEFAULT_MEO_SETTINGS` |
-| `src/meono/protocol.ts` | `MEONO_WS_PATH`, `MeoRoomView`, `MeoGameView`, `MeoSeatView`, `MeoRoomSummary`, `MeoCommand`. Bản chỉnh tay ở portfolio `src/lib/meono/protocol.ts` (field optional cho server cũ, thêm `insertRange`, `MeoSettings`, options) |
+| `src/meono/protocol.ts` | `MEONO_WS_PATH`, `MeoRoomView`, `MeoGameView`, `MeoSeatView`, `MeoRoomSummary`, `MeoCommand`. Bản chỉnh tay ở zonenop-game `src/lib/meono/protocol.ts` (field optional cho server cũ, thêm `insertRange`, `MeoSettings`, options) |
 | `src/server/adapters.ts` | `meonoAdapter` |
 
-Portfolio `src/lib/meono/cards.ts` **không phải bản sao**: đó là catalogue UI (tên, hình, mô tả) chỉ dùng chung `CardType`.
+zonenop-game `src/lib/meono/cards.ts` **không phải bản sao**: đó là catalogue UI (tên, hình, mô tả) chỉ dùng chung `CardType`.
 
 ## Luật chơi (như code đang chạy)
 

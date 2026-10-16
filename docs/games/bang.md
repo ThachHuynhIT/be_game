@@ -7,11 +7,11 @@ Hạ tầng chung (hub, adapter, store, giao thức WS, chat, emoji, khán giả
 
 | File | Vai trò |
 |---|---|
-| `src/bang/cards.ts` | Dữ liệu thuần: `PACKS`, `EXPANSIONS`, `CARD_TYPES` (71 loại lá), `DECK_SPEC` → `CARDS` (167 lá vật lý, id = vị trí), `CARD_PACK`, `deckFor`, `ROLES_FOR`, `THREE_PLAYER_TARGET`, `CHARACTERS` (63), `EVENTS` (38), `GEAR` (12) + `GEAR_DECK`, tuỳ chọn cài đặt. Chép nguyên sang portfolio (`src/lib/bang/cards.ts`), **không import gì** |
+| `src/bang/cards.ts` | Dữ liệu thuần: `PACKS`, `EXPANSIONS`, `CARD_TYPES` (71 loại lá), `DECK_SPEC` → `CARDS` (167 lá vật lý, id = vị trí), `CARD_PACK`, `deckFor`, `ROLES_FOR`, `THREE_PLAYER_TARGET`, `CHARACTERS` (63), `EVENTS` (38), `GEAR` (12) + `GEAR_DECK`, tuỳ chọn cài đặt. Chép nguyên sang zonenop-game (`src/lib/bang/cards.ts`), **không import gì** |
 | `src/bang/game.ts` | Lõi máy trạng thái `BangState`: chọn nhân vật (`pickCharacter`/`begin`), lượt (`startTurn`, `startOfTurn`, `drawPrompt`, `drawPhase`, `passTurn`), hàng chờ `queue` và vòng xử lý `run()`, phản ứng (`prepareReact`, `canAnswer`, `avoided`, `took`), sát thương / chết / thắng (`processHurt`, `applyDamage`, `dying`, `kill`, `checkWin`, `finish`), rút! (`flip`, `effSuit`), khoảng cách (`distance`, `weaponRange`, `handLimit`), sự kiện (`revealEvent`), `tickGame`, `forfeitPlayer` |
 | `src/bang/actions.ts` | Mọi thứ người chơi làm: `playCard` (+ `validate`, `resolve`), `applyEffect`, `useCard`, `useAbility`, `buyGear` (+ `checkGear`, `gainGear`), `drawCommand`, `respond` (+ `answerReact`), `endTurn`, tự chơi `autoAnswer`/`autoDiscard`, `bangsLeft`, `abilityList` |
 | `src/bang/room.ts` | Vòng đời phòng `BangRoom` (8 ghế), `bangCommand` (lọc kiểu tham số), cài đặt, kick, ghi kết quả, `tickBang`, `nextBangTickAt`, view riêng từng người (`gameView`, `promptView`, `bangView`), `bangSummary` |
-| `src/bang/protocol.ts` | Kiểu dây (chép sang portfolio): `BangSettings`, `BangPlayerView`, `PromptView`, `DrawMode`, `BangGameView`, `BangRoomView`, `PickSpec`, `BangCommand`, `BANG_WS_PATH` |
+| `src/bang/protocol.ts` | Kiểu dây (chép sang zonenop-game): `BangSettings`, `BangPlayerView`, `PromptView`, `DrawMode`, `BangGameView`, `BangRoomView`, `PickSpec`, `BangCommand`, `BANG_WS_PATH` |
 | `src/server/adapters.ts` | `bangAdapter` |
 | `test/bang.test.ts` | Test |
 

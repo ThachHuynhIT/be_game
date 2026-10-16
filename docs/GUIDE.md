@@ -8,7 +8,7 @@ Mục lục: [Tổng quan](#tổng-quan) · [Kiến trúc](#kiến-trúc) · [Gi
 
 ## Tổng quan
 
-be_game là backend realtime (Node `http.Server` + `ws`) cho các game online trên site portfolio. Cùng một code chạy ở ba kiểu: **tiến trình Node** (`src/local.ts`, Docker) với Redis — đây là máy chính `play-api.fudio101.com`; **Vercel Functions** (WebSocket, Fluid compute) với Upstash Redis — máy dự phòng `be-game-omega.vercel.app`; và local với store trong RAM. Frontend nằm ở repo `portfolio` (Next.js), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`) và tự chuyển sang `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` khi máy chính không trả lời. Môi trường và luồng phát hành: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+be_game là backend realtime (Node `http.Server` + `ws`) cho các game online của site game (repo zonenop-game). Cùng một code chạy ở ba kiểu: **tiến trình Node** (`src/local.ts`, Docker) với Redis — đây là máy chính `play-api.fudio101.com` (hiện dùng Redis cục bộ trong compose, chưa chuyển sang kho Upstash chung); **Vercel Functions** (WebSocket, Fluid compute) với Upstash Redis — máy dự phòng `be-game-omega.vercel.app`; và local với store trong RAM. Frontend nằm ở repo `zonenop-game` (Next.js, `https://play.fudio101.com`; repo `portfolio` không còn chứa game), kết nối qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (mặc định `http://localhost:4000`) và tự chuyển sang `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` khi máy chính không trả lời. Môi trường và luồng phát hành: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 | Game | `GameKind` | Thư mục | Số người | Route frontend | WebSocket | Tài liệu |
 |---|---|---|---|---|---|---|
@@ -26,10 +26,10 @@ Cấu trúc thư mục của một game (trừ Tiến Lên và Đấu Súng có 
 
 | File | Vai trò |
 |---|---|
-| `cards.ts` hoặc `board.ts` | Dữ liệu tĩnh (bộ bài, bàn cờ, hằng số, option settings). Thường được chép sang portfolio. |
+| `cards.ts` hoặc `board.ts` | Dữ liệu tĩnh (bộ bài, bàn cờ, hằng số, option settings). Thường được chép sang zonenop-game. |
 | `game.ts` | Máy trạng thái thuần của **một ván**: tạo ván, lệnh, `tickGame`, `nextGameTickAt`. |
 | `room.ts` | Vòng đời **phòng**: ghế, host, presence, settings, kick, chấm điểm khi ván kết thúc, view/summary. |
-| `protocol.ts` | Kiểu dữ liệu view gửi client, kiểu lệnh, đường dẫn WS. Được chép (có chỉnh) sang portfolio. |
+| `protocol.ts` | Kiểu dữ liệu view gửi client, kiểu lệnh, đường dẫn WS. Được chép (có chỉnh) sang zonenop-game. |
 
 ---
 
@@ -55,7 +55,8 @@ flowchart LR
   - Upgrade: path không phải `ws` → `404`; origin không hợp lệ → `403`; đọc `getDeadline()` của `@vercel/functions` (bắt lỗi khi chạy local → `undefined`), rồi `wss.handleUpgrade(...)` → `attachConnection(ws, { deadline, game })`.
   - `WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES })` (16 KB).
 - **`src/server/hub.ts`** — `RoomHub<S>` và `attachConnection()` (chi tiết bên dưới).
-- **`src/server/store.ts`** — `RoomStore`, `GameKind`, `getRoomStore(game)`, `createMemoryRoomStore()`, `nameKey`, `redisUrl()`.
+- **`src/server/store.ts`** — `RoomStore`, `GameKind` + `GAME_KINDS` (danh sách game, cũng dùng cho `migrate-store`), `keysFor(game)` (bố cục key Redis), `getRoomStore(game)`, `createMemoryRoomStore()`, `createRedisRoomStore(redis, game)` (cho test), `nameKey`, `redisUrl()`, `countCommands` (đếm lệnh Redis, bật bằng `BE_GAME_COUNT_COMMANDS=1`).
+- **`src/tools/migrate-store.ts`** — công cụ vận hành, không nằm trên đường chạy của server: chép phòng và bảng xếp hạng giữa hai Redis khi chuyển máy chính sang kho chung (cách dùng và bẫy: [`SELF_HOSTING.md`](SELF_HOSTING.md#chuyển-sang--quay-lại-kho-chung)).
 - **`src/server/adapters.ts`** — `GameAdapter` + 7 adapter + `ADAPTERS: Record<GameKind, GameAdapter>`.
 
 ### `RoomStore` (`src/server/store.ts`)
@@ -80,16 +81,16 @@ interface RoomStore<S extends CodedRoom> {
 | `ROOM_INDEX_WINDOW_MS` | 1 giờ | Chỉ phòng chạm vào trong 1 giờ mới hiện ở index lobby |
 | `RECORD_DEDUPE_SECONDS` | 30 ngày | Nhớ `record.id` đã ghi leaderboard (chống ghi trùng) |
 
-- **Redis** (`RedisRoomStore`): key theo game — `${game}:room:${code}` (hash `state`,`version`), kênh pub/sub `${game}:room:${code}:changed`, index `${game}:rooms` (zset score = `Date.now()`), `${game}:lb:points` (zset), `${game}:lb:p:${nameKey}` (hash `name,points,games,wins,last`), `${game}:lb:done:${record.id}`. `create`/`save`/`recordGame` là script Lua (`CREATE_SCRIPT`, `SAVE_SCRIPT`, `RECORD_SCRIPT`) nên atomic. Subscriber dùng connection riêng (`redis.duplicate()`). Tiến Lên dùng prefix `tienlen:`.
+- **Redis** (`RedisRoomStore`): key theo game (`keysFor`) — `${game}:room:${code}` (hash `state`,`version`), kênh pub/sub `${game}:room:${code}:changed`, index `${game}:rooms` (zset score = `Date.now()`), `${game}:lb:points` (zset), `${game}:lb:p:${nameKey}` (hash `name,points,games,wins,last`), `${game}:lb:done:${record.id}`. `create`/`save`/`recordGame` là script Lua (`CREATE_SCRIPT`, `SAVE_SCRIPT`, `RECORD_SCRIPT`) nên atomic. Subscriber dùng connection riêng (`redis.duplicate()`). Tiến Lên dùng prefix `tienlen:`.
 - **Memory** (`MemoryRoomStore`): `Map` JSON + version; `save` bắn sự kiện qua `setImmediate` (bất đồng bộ như Redis). Leaderboard sort theo `points` rồi `wins`.
 - Một kết nối Redis cho cả process (`globalThis.__gameRedis`), một store cho mỗi game (`globalThis.__gameStores`). Không có Redis trên Vercel (`process.env.VERCEL`) → log lỗi và fallback RAM (phòng **không** chia sẻ giữa instance).
 
 ### `RoomHub` (`src/server/hub.ts`)
 
-- `mutate(code, fn)`: load → `JSON.parse` thành draft → `fn(draft, Date.now())` sửa **tại chỗ** → nếu JSON không đổi thì **không save** (không publish) → ngược lại `store.save(draft, version)`. Xung đột CAS → retry tối đa **12 lần** (chờ `5 + random·20·(attempt+1)` ms), hết lượt thì throw `"Phòng đang bận, thử lại"`. Sau save thành công: nếu `adapter.lastRecord(draft)` có `id` khác bản trước → `store.recordGame(rec)` (lỗi chỉ log).
+- `mutate(code, fn)`: load → `JSON.parse` thành draft → `fn(draft, Date.now())` sửa **tại chỗ** → nếu JSON không đổi thì **không save** (không publish) → ngược lại `store.save(draft, version)`. Xung đột CAS → retry tối đa **12 lần**, hết lượt thì throw `"Phòng đang bận, thử lại"`. Lần thử đầu bắt đầu từ bản mới nhất mà instance này đang giữ (chỉ với phòng có socket cục bộ) để bỏ một lần đọc store; bản đó cũ thì CAS từ chối và thử lại ngay từ store, còn lệnh bị từ chối / không đổi gì thì cũng được xác nhận lại trên dữ liệu đọc từ store. Chỉ khi thua trên dữ liệu mới đọc mới chờ `5 + random·20·(attempt+1)` ms. Sau save thành công: nếu `adapter.lastRecord(draft)` có `id` khác bản trước → `store.recordGame(rec)` (lỗi chỉ log).
 - `createRoom()`: thử `randomCode()` tối đa 20 lần (`store.create(adapter.newRoom(code))`), hết thì throw `"Không tạo được phòng"`.
 - Mỗi hub giữ `rooms: Map<code, LocalRoom>` = các socket **trên instance này** + unsubscribe + timer. Socket đầu tiên vào phòng → `store.subscribe(code, () => refresh(code))`; socket cuối rời → unsubscribe, clear timer.
-- `refresh(code)`: load state, với mỗi conn có token gọi `adapter.view(state, token, role, now)` → gửi `{type:"state", view}` (null thì không gửi), rồi `arm()` timer. Gộp burst bằng cờ `dirty`.
+- `refresh(code, version?)`: lấy state (thông báo pub/sub mang theo `version` vừa lưu; chỉ đọc store khi bản instance đang giữ cũ hơn), với mỗi conn có token gọi `adapter.view(state, token, role, now)` → gửi `{type:"state", view}` (null thì không gửi), rồi `arm()` timer. Gộp burst bằng cờ `dirty`.
 - `arm()`: `at = adapter.nextTickAt(state, now)`; `null` → không hẹn. Ngược lại hẹn `delay = clamp(at − now + 50, 100, 30_000)` ms → `mutate(code, adapter.tick)` → `refresh`. **Mọi instance** giữ socket của phòng đều hẹn; CAS + "JSON không đổi thì không save" giúp chống làm trùng.
 - `getHub(game)`: hub singleton theo game trong process (`globalThis.__gameHubs`). `createRoomHub(store, adapter?)` cho test (mặc định adapter Tiến Lên).
 
@@ -162,12 +163,13 @@ Làm **một lần ở hub**, áp dụng cho cả 7 game (adapter không biết 
 ### Rate limit, deadline, reconnect
 
 - Quá `MAX_MESSAGES_PER_SECOND` = 20 message/giây/kết nối → `socket.close(1008, "rate limit")`.
-- Trên Vercel, `getDeadline()` cho biết lúc function bị kill (`maxDuration` 300 s trong `vercel.json`). Hub gửi `{type:"reconnect"}` lúc `deadline − RECONNECT_LEAD_MS` (25 s), tối thiểu sau 5 s. Client (portfolio `gameClient.ts`) mở kết nối mới, `join`/`watch` lại **cùng token**, rồi mới đóng kết nối cũ.
+- Trên Vercel, `getDeadline()` cho biết lúc function bị kill (`maxDuration` 300 s trong `vercel.json`). Hub gửi `{type:"reconnect"}` lúc `deadline − RECONNECT_LEAD_MS` (25 s), tối thiểu sau 5 s. Client (zonenop-game `src/components/games/gameClient.ts`) mở kết nối mới, `join`/`watch` lại **cùng token**, rồi mới đóng kết nối cũ.
 - **Reconnect bằng token**: `join` với token đã có ghế → gắn lại ghế đó (cập nhật `lastSeen`, xoá `left`, đổi tên nếu không đang trong ván). Đóng socket **không** gọi `leave` — presence tự hết hạn khi ping ngừng.
 - **Vào lại phòng** (helper chung trong `src/game/room.ts`, mọi game dùng trong `joinXxx`/`leaveXxx`/`dropGoneSeats`). Người rớt mạng phải quay lại **đúng là họ**, không thành người mới cùng tên mất điểm:
   1. `findReturning`: ghế có đúng token; không có thì ghế **đang offline** (không `kicked`) trùng tên (so `cleanName`, không phân biệt hoa thường) — cùng người ở tab/máy mới, token đổi — ghế đó nhận token mới. Người trùng tên **đang online** thì không bị chiếm, người mới ngồi ghế riêng.
   2. Ghế bị giải phóng (offline quá `SEAT_GRACE_MS` giữa các ván, hoặc `leave` giữa các ván; người bị kick thì không) được `rememberGone` ghi vào `room.gone` (`{id, token, name, wins, points, games, at}`, tối đa 16, nhớ `GONE_SEAT_TTL_MS` = 3 giờ). Chỉ server dùng, không bao giờ vào view/summary.
   3. Không có ghế: `takeGone` lấy lại bản ghi theo token, rồi theo tên, và `seatFor` tạo ghế mới với **cùng id, wins, points, games**.
+  - Ghế **chưa bao giờ bị giải phóng** khi người đó còn trong ván đang chạy (`inPlayingGame`): họ giữ ghế dù offline (bị chơi hộ) nên quay lại chỉ là bước 1. Hết `SEAT_GRACE_MS` mà ván đã xong, hoặc `leave` giữa các ván, thì ghế mới được giải phóng và đi theo bước 2–3. Người quay lại giữa lúc ván khác đang chạy nhận ghế mới với `inGame: false` (chờ ván sau), vẫn cùng id và điểm.
   - Đánh đổi có chủ ý: ai gõ đúng tên của một người đang offline thì vào được ghế đó (game chơi với bạn bè, không có tài khoản).
 - `HubSocket` là interface tối giản (`send`, `close`, `on(message|close|error)`) để test dùng `FakeSocket`.
 
@@ -237,7 +239,7 @@ Hằng số chung ở `src/game/room.ts` (các game khác import lại):
 |---|---|
 | `GET /api/<game>/rooms` (Tiến Lên: `/api/rooms`) | `{ok, rooms}`: lấy `recentRooms(60)` → lọc `isActive` → tối đa 30 → `summary`. Summary chung: `{code, status: "waiting"|"playing", players: [{name, connected, points}], spectators: number, games: gameSeq}` (Mèo Nổ thêm `expansions`) |
 | `GET /api/<game>/leaderboard?limit=20` | Như trên |
-| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, games}` (`now` = `Date.now()` của máy trả lời, để so lệch đồng hồ giữa hai máy dùng chung kho; `sharedStore` = host Redis của **chính máy đó** không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức "máy này dùng Redis ở xa", không có nghĩa hai máy cùng kho: muốn biết thì so `redisHost` của cả hai). Mỗi bước timeout 5 s |
+| `GET /api/health` | create → load → subscribe → save → pub/sub round-trip trên store `tienlen` với phòng `"HC" + randomCode(6)`; trả `{ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games}` (lỗi ở bất kỳ bước nào → HTTP 500 `{ok:false, error, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games}`; `commit` = `BUILD_COMMIT` (máy tự host) hoặc `VERCEL_GIT_COMMIT_SHA` (Vercel), `null` khi không biết, ví dụ chạy local: workflow Deploy dựa vào nó để biết máy đang chạy đúng commit vừa push; `now` = `Date.now()` của máy trả lời, để so lệch đồng hồ giữa hai máy dùng chung kho; `sharedStore` = host Redis của **chính máy đó** không phải `redis`/`localhost`/`127.0.0.1`/`[::1]`, tức "máy này dùng Redis ở xa", không có nghĩa hai máy cùng kho: muốn biết thì so `redisHost` của cả hai). Mỗi bước timeout 5 s |
 | `GET /` hoặc `/api` | `{ok:true, service:"be_game", routes}` |
 
 Lưu ý: health tạo một phòng rác `HC…` trong namespace `tienlen` mỗi lần gọi (hết hạn sau 12 h, không có người nên không hiện ở lobby).
@@ -254,7 +256,7 @@ npm test           # vitest run
 npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 ```
 
-`src/local.ts` dùng đúng `createGameServer()`, listen `PORT` (mặc định 4000) / `HOST` (mặc định `0.0.0.0`), log loại store. Không có `REDIS_URL` → store RAM (mất khi tắt process). Portfolio: đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (cũng là mặc định).
+`src/local.ts` dùng đúng `createGameServer()`, listen `PORT` (mặc định 4000) / `HOST` (mặc định `0.0.0.0`), log loại store. Không có `REDIS_URL` → store RAM (mất khi tắt process). Frontend (zonenop-game): đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (cũng là mặc định).
 
 `tsconfig.json` dùng `module: "CommonJS"` để Vercel biên dịch được import tương đối không đuôi — đừng đổi sang ESM.
 
@@ -265,15 +267,17 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | Lấy biến đầu tiên có giá trị (`redisUrl()`). Bắt buộc trên Vercel |
 | `ALLOWED_ORIGIN` | trống → cho phép mọi origin | Danh sách cách nhau dấu phẩy, `*` khớp `[a-z0-9-.]+`, có `*` đơn lẻ = cho tất cả. Request không có `Origin` (client không phải trình duyệt) và trang cùng host luôn được phép. Dùng cho cả upgrade WS (403; qua Cloudflare/Traefik thường hiện thành 502) lẫn CORS HTTP. Không dùng `https://*.vercel.app` |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Chỉ cho `src/local.ts` |
+| `BE_GAME_COUNT_COMMANDS` | trống | `1` = log `[be_game] redis commands last 60s: <n>` mỗi 60 giây (chỉ có nghĩa khi dùng Redis; đo lệnh trước khi chuyển sang Upstash) |
+| `BUILD_COMMIT` | trống | Commit đang chạy trên máy tự host: workflow Deploy export, `compose.selfhost.yml` chuyển vào container |
 | `GAME_DOMAIN` | — | Chỉ cho file compose: tên miền public (Caddy trong `docker-compose.yml`, label Traefik trong `compose.selfhost.yml` — bắt buộc) |
-| `VERCEL`, `VERCEL_REGION` | Vercel tự đặt | Cảnh báo thiếu Redis; trường `region` của health |
+| `VERCEL`, `VERCEL_REGION`, `VERCEL_GIT_COMMIT_SHA` | Vercel tự đặt | Cảnh báo thiếu Redis; trường `region` và `commit` của health (commit cần bật "Automatically expose System Environment Variables" của project Vercel) |
 
 Giá trị thật ở từng môi trường: [`DEPLOYMENT.md` → Biến môi trường](DEPLOYMENT.md#biến-môi-trường-theo-nơi-chạy).
 
 ## Test
 
-- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 25 file / khoảng 360 test, chạy dưới một phút. CI chạy toàn bộ trên mỗi PR và mỗi push vào `main`; **CI đỏ trên `main` chặn deploy máy chính**, nên test phải tất định (không phụ thuộc `Math.random()`/`Date.now()` chưa inject).
-- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`).
+- `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 29 file / khoảng 430 test, chạy chừng 35 giây. CI chạy toàn bộ trên mỗi PR và mỗi push vào `main`; **CI đỏ trên `main` chặn deploy máy chính**, nên test phải tất định (không phụ thuộc `Math.random()`/`Date.now()` chưa inject).
+- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), vào lại ghế (`rejoin`: token cũ, tên trùng, ghế đã giải phóng — cho cả 7 game), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`; `store-cache` — cache sảnh / bảng điểm của store Redis; `shared-store` — `GAME_KINDS`, `keysFor`, bộ đếm lệnh, `deployedCommit` và `/api/health`; `migrate-store` — công cụ chép giữa hai Redis, dùng `ioredis-mock`; `tick-spin` — hub không quay vòng tick khi đối thủ offline).
 - **Fuzz test** (`test/fuzz-<game>.test.ts`, mỗi game một file; Bang và Ô Ăn Quan còn có thêm test ngẫu nhiên riêng): chơi ngẫu nhiên có seed với 2…N người, gồm cả **lệnh rác** và lệnh bất hợp lệ lấy từ view hiện tại, hết giờ (`tick`), người vắng mặt, kick, rời bàn. Kiểm tra bất biến: không exception, ván luôn kết thúc, bảo toàn bài / quân / tiền, state JSON round-trip bằng nhau, lệnh bị từ chối **không** làm đổi state, view không lộ token hay bài ẩn của người khác. Chạy mặc định vài seed (dưới ~5 s mỗi file); tăng bằng biến môi trường `FUZZ_SEEDS` (Mèo Nổ, Tiến Lên) khi cần soi kỹ. Khi thêm luật mới nên chạy lại fuzz của game đó.
 - **Quy ước**:
   - Thời gian là tham số: dùng hằng `T = 1_000_000` (hoặc `T0`) và truyền `T + n` — không dùng fake timer.
@@ -285,12 +289,12 @@ Giá trị thật ở từng môi trường: [`DEPLOYMENT.md` → Biến môi tr
 
 ## Deploy
 
-Merge vào `main` deploy **hai backend độc lập**: Vercel (máy dự phòng, qua Vercel Git) và máy tự host (máy chính, qua workflow Deploy sau khi CI xanh). Môi trường, luồng phát hành, giữ tương thích giữa hai máy và portfolio, kiểm tra sau deploy, quay lại: [`DEPLOYMENT.md`](DEPLOYMENT.md). Thao tác trên server: [`SELF_HOSTING.md`](SELF_HOSTING.md).
+Merge vào `main` deploy **hai backend độc lập**: Vercel (máy dự phòng, qua Vercel Git) và máy tự host (máy chính, qua workflow Deploy sau khi CI xanh). Môi trường, luồng phát hành, giữ tương thích giữa hai máy và zonenop-game, kiểm tra sau deploy, quay lại: [`DEPLOYMENT.md`](DEPLOYMENT.md). Thao tác trên server: [`SELF_HOSTING.md`](SELF_HOSTING.md).
 
 Riêng Vercel:
 - `vercel.json`: `regions: ["sin1"]`, `maxDuration: 300` cho `api/ws.ts` và `api/[game]/[kind].ts`. Cần **Fluid compute** và Redis (Upstash, region Singapore). Preview của mọi nhánh dùng **chung** store Upstash với production.
 - Gói **Hobby giới hạn 12 function**. Hiện có **5**: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts`, `api/[game]/[kind].ts`. Game mới **không** thêm file vào `api/` — chỉ thêm route trong `app.ts` (file động đã bắt mọi `/api/<game>/<kind>`). `/api` trần không phải function nên trả 404 trên Vercel (local/tự host thì trả danh sách route).
-- Kiểm tra sau deploy: `GET /api/health` → `"ok": true, "store": "redis", "region": "sin1"` (tự host: `"region": "local"`).
+- Kiểm tra sau deploy: `GET /api/health` → `"ok": true, "store": "redis", "region": "sin1"` và `"commit"` đúng SHA vừa push (tự host: `"region": "local"`). Workflow Deploy tự chờ `commit` này trên cả hai máy.
 
 ---
 
@@ -301,27 +305,27 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 ### Phía be_game
 
 1. **`src/xyz/`**
-   - `board.ts` hoặc `cards.ts`: dữ liệu tĩnh, `MIN_PLAYERS`, `MAX_PLAYERS`/`MAX_SEATS`, các mảng `*_OPTIONS` cho settings. Không import gì ngoài file cùng thư mục nếu định chép nguyên sang portfolio.
+   - `board.ts` hoặc `cards.ts`: dữ liệu tĩnh, `MIN_PLAYERS`, `MAX_PLAYERS`/`MAX_SEATS`, các mảng `*_OPTIONS` cho settings. Không import gì ngoài file cùng thư mục nếu định chép nguyên sang zonenop-game.
    - `game.ts`: `XyzState` (JSON thuần), `newXyzGame(players, now, opts, random = Math.random)`, các lệnh trả `Result` (`{ok:true} | {ok:false, error}` tiếng Việt), `tickGame(s, now, names, absent, random)`, `nextGameTickAt(s, now)`, `forfeitPlayer`. Lưu `status: "playing" | "ended"`, `finished` (xếp hạng), `recorded?`.
    - `room.ts`: copy khung từ một room có sẵn (ví dụ `src/typhu/room.ts`): `XyzRoom` (phải có `code`, `hostId`, `seats: ({id, token, name, lastSeen, left?, kicked?, wins, points, games} | null)[]`, `gone?: GoneSeat[]`, `current`, `settings`, `history?`, `gameSeq?`, `spectators?`, `reactions?`, `chat?`), `newXyzRoom`, `joinXyz` (dùng `findReturning` + `seatFor(takeGone(...))`, và `rememberGone` ở mọi chỗ giải phóng ghế trừ kick), `xyzHeartbeat` (xử lý cả khán giả), `leaveXyz`, `xyzCommand` (`start`/`kick`/`settings` + lệnh game), `afterChange` (chấm điểm bằng `scoreByRank` + `checkRankPoints`), `tickXyz`, `nextXyzTickAt`, `xyzView`, `xyzSummary`, `isXyzActive`, `findByToken`, `xyzSettingsOf` (merge default để phòng cũ không vỡ).
    - `protocol.ts`: `XYZ_WS_PATH = "/api/xyz/ws"`, kiểu view / summary / command, re-export các kiểu chung từ `../game/protocol`.
-2. **`src/server/store.ts`**: thêm `"xyz"` vào `GameKind`.
+2. **`src/server/store.ts`**: thêm `"xyz"` vào `GameKind` **và** `GAME_KINDS` (`migrate-store` chỉ chép các game trong danh sách này; cập nhật cả danh sách cố định trong `test/shared-store.test.ts`).
 3. **`src/server/adapters.ts`**: import, viết `xyzAdapter: GameAdapter<XyzRoom>` (theo mẫu các adapter khác: `watch` = `watchRoom`, `react` = `react`, `lastRecord: (room) => room.history?.[room.history.length - 1]`), thêm vào `ADAPTERS`.
 4. **`src/server/app.ts`**: thêm 3 route `/api/xyz/ws|rooms|leaderboard` vào `ROUTES`.
 5. Không cần đụng `api/` (cập nhật comment trong `api/[game]/[kind].ts` cho đúng danh sách game nếu muốn).
 6. **`test/xyz.test.ts`**: luật thuần + ít nhất một test phòng (join → settings → start → lệnh → kết thúc ván có điểm) và một test tick (hết giờ / người vắng).
-7. Tài liệu: `docs/games/xyz.md` (theo template của các game khác), thêm dòng vào bảng [Tổng quan](#tổng-quan) của file này, bảng game trong `README.md`, `description` trong `package.json`.
+7. Tài liệu: `docs/games/xyz.md` (theo template của các game khác), thêm dòng vào bảng [Tổng quan](#tổng-quan) của file này, bảng game trong `README.md` và `CLAUDE.md`, `description` trong `package.json`.
 
-### Phía portfolio (theo `portfolio/CLAUDE.md`)
+### Phía zonenop-game (theo `zonenop-game/docs/GAMES_GUIDE.md` §8)
 
-1. **`src/lib/xyz/`**: bản client của `board.ts`/`cards.ts` (chép nguyên nếu không phụ thuộc gì) và `protocol.ts` (bản chỉnh: import kiểu chung từ `@/lib/tienlen`, khai báo lại các kiểu nằm trong `game.ts` của server). Giữ đồng bộ với be_game.
-2. **`src/app/xyz-route/`**: `layout.tsx` (metadata + `<div className="game-shell …"><GamesShell>{children}</GamesShell></div>`), `page.tsx` (lobby: `<GameLobby title tagline icons basePath="/xyz-route" wsPath={XYZ_WS_PATH} apiPrefix="/xyz" maxPlayers={N} rules={…} />`), `[room]/page.tsx` (bàn chơi, `dynamic(..., { ssr: false })`, tên chốt khi mount bằng `useState(getSavedName)`, `?watch=1` = khán giả).
-3. **`src/components/xyz/`**: component bàn chơi (dùng hook WebSocket / `GameHeader` / `ChatBox` / `RankPointsPicker` / `TurnIndicator` từ `src/components/games/`).
-4. **`src/components/games/gamesRegistry.ts`**: thêm `"xyz"` vào union `OnlineGame["id"]` và một entry `ONLINE_GAMES` (`title, short, emoji, href, roomsPath: "/api/xyz/rooms", maxPlayers`) — dùng cho tab top bar, `AllRoomsPanel`, `isGamesRoute`.
-5. **`src/app/games/page.tsx`**: thêm thẻ vào mảng `GAMES` (href, title, emoji, tagline, tags số người, gradient) và cập nhật `metadata.description`.
-6. **`src/lib/constants.ts`**: thêm route vào `EXCLUDED_ROUTE_PREFIXES` (games luôn dark).
-7. **`src/app/layout.tsx`**: thêm route vào mảng `excluded` trong `THEME_INIT_SCRIPT` (phải khớp `EXCLUDED_ROUTE_PREFIXES`).
-8. (Tuỳ chọn) comment `.game-shell` trong `src/app/globals.css`; mục route trong `portfolio/CLAUDE.md`.
+Repo frontend: `zonenop-game` (không còn là `portfolio`). Danh sách đầy đủ và cập nhật nhất nằm ở §8 của `docs/GAMES_GUIDE.md` trong repo đó; tóm tắt:
+
+1. **`src/lib/xyz/`**: bản client của `board.ts`/`cards.ts` (chép nguyên nếu không phụ thuộc gì) và `protocol.ts` (bản chỉnh: import kiểu chung từ `@/lib/tienlen`, khai báo lại các kiểu nằm trong `game.ts` của server), export `XYZ_WS_PATH`. Giữ đồng bộ với be_game.
+2. **`src/components/games/gamesRegistry.ts`**: thêm `"xyz"` vào union `OnlineGame["id"]` và một entry `ONLINE_GAMES` (`id, title, short, emoji, href, roomsPath: "/api/xyz/rooms", maxPlayers`): tab, `AllRoomsPanel` và `isGamesRoute` tự cập nhật theo đó.
+3. **`src/app/<route>/`**: `layout.tsx` (metadata + `<div className="game-shell …"><GamesShell>{children}</GamesShell></div>`, nền tối), `page.tsx` (lobby `<GameLobby … />`), `[room]/page.tsx` (bàn chơi, `dynamic(..., { ssr: false })`, tên chốt khi mount bằng `useState(getSavedName)`, `?watch=1` = khán giả).
+4. **`src/components/xyz/`**: component bàn chơi (hook `useGameRoom`, `GameHeader`, `ChatBox`, `RankPointsPicker`, `TurnIndicator`… từ `src/components/games/`).
+5. **Hub**: thêm thẻ game vào `GAMES` trong `src/app/page.tsx`.
+6. Tài liệu bên đó: `CLAUDE.md`, `docs/GAMES_GUIDE.md` (§1.1, §3, §4).
 
 ---
 
@@ -331,14 +335,14 @@ Giả sử id `xyz`, route frontend `/xyz-route`.
 - **Lệnh bị từ chối không được lưu**: với lệnh game, hub gọi `mutate(code, fn, (r) => !r.ok)` — kết quả `ok: false` thì bỏ cả draft, mọi thay đổi lệnh kịp làm trước khi fail đều mất. Muốn một thay đổi được giữ (ví dụ huỷ lời mời không còn hợp lệ) thì trả `ok: true` kèm dòng log (như typhu `answerTrade`).
 - **Result**: `{ ok: true } | { ok: false; error: string }`, thông điệp lỗi **tiếng Việt** hiển thị thẳng cho người chơi. Mỗi game khai báo lại kiểu `Result` riêng (cùng hình dạng với `Result` trong `adapters.ts`).
 - **Phòng cũ trong Redis** (TTL 12 h) có thể thiếu field mới: luôn đọc settings qua `xxxSettingsOf(room)` (`{...DEFAULT, ...room.settings}`), field mới trong state để optional (`?`) và có default khi đọc. Ví dụ: typhu `rulesOf(s)` — ván lưu trước khi có house rules (`s.rules` không có) dùng `LEGACY_RULES` (`sellLand:false, bankruptTo:"creditor", risingCost:false, landSalePct:50`), còn `s.rules` thiếu field thì lấy `DEFAULT_TP_RULES`. Tiến Lên `settingsOf(room)`, `p.points ?? 0`.
-- **Đồng bộ với portfolio**: client giữ bản sao để validate/hiển thị. Chép **nguyên văn**: `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts` (hai file sau chỉ khác comment đầu file), `src/game/{cards,combos,rules}.ts` (→ `src/lib/tienlen/`). Bản **chỉnh tay** (khác import, khai báo lại kiểu nằm trong `game.ts`, field optional cho server cũ): mọi `protocol.ts`; `src/lib/meono/cards.ts` là catalogue UI riêng (tên, hình, mô tả lá), chỉ trùng `CardType` với server. Đổi luật/kiểu ở be_game → sửa bản bên portfolio trong cùng đợt.
+- **Đồng bộ với zonenop-game**: client giữ bản sao để validate/hiển thị. Chép **nguyên văn**: `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts` (hai file sau chỉ khác comment đầu file), `src/game/{cards,combos,rules}.ts` (→ `zonenop-game/src/lib/tienlen/`; các file còn lại vào `zonenop-game/src/lib/<game>/`). Bản **chỉnh tay** (khác import, khai báo lại kiểu nằm trong `game.ts`, field optional cho server cũ): mọi `protocol.ts`; `src/lib/meono/cards.ts` là catalogue UI riêng (tên, hình, mô tả lá), chỉ trùng `CardType` với server. Đổi luật/kiểu ở be_game → sửa bản bên zonenop-game trong cùng đợt.
 - **Bảo mật view**: view là nơi duy nhất quyết định ai thấy gì. Không bao giờ đưa `token` vào view/summary; dữ liệu riêng (bài trên tay, vai trò, lá đang xem) chỉ thêm khi `player` (không phải khán giả) là chủ.
 - **Đổi luật giữa ván**: mọi game chặn `settings` khi ván đang chạy (`"Đổi luật khi ván đã kết thúc"`; Đấu Súng kiểm tra `status !== "ended"`); settings được chép vào state ván lúc `start`.
 - **Mã phòng**: `randomCode()` 5 ký tự từ `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (không I, O, 0, 1); server nhận tối đa 8 ký tự, viết hoa.
 - **Dedupe leaderboard theo `record.id = code-gameSeq-at`** trong 30 ngày (`at` = lúc ván kết thúc), nên mã phòng được tạo lại sau khi hết hạn vẫn ghi đủ ván. Memory store giữ `recorded` mãi trong process.
 - **Ngẫu nhiên phải đi hết đường xuống**: test có seed chỉ tất định khi mọi lần bốc ngẫu nhiên đều đi qua `random` được truyền vào. Ở mức phòng, Cờ Cá Ngựa (`cnCommand`, `tickCN`), Ô Ăn Quan (`oqCommand`, `tickOQ`), Mèo Nổ (`meoCommand`, `tickMeo`, `leaveMeo`) và Cờ Tỷ Phú (`joinTP`, `tpCommand`, `tickTP`, `leaveTP`) đều nhận `random = Math.random` ở tham số cuối; adapter không truyền nên server vẫn dùng `Math.random`. Fuzz mức phòng của Mèo Nổ và Cờ Tỷ Phú truyền RNG có seed và cho `Math.random` **ném lỗi**, nên lỡ còn chỗ gọi thẳng thì test đỏ ngay chứ không chập chờn. Các id tin nhắn/emoji (`src/game/room.ts`) và độ trễ thử lại CAS (`hub.ts`) dùng `Math.random` cũng được, vì không ảnh hưởng luật chơi. Test chập chờn nguy hiểm vì CI đỏ trên `main` chặn deploy máy chính.
-- **Hai chỗ portfolio dựa vào**: `GET /api/rooms` (portfolio dùng để thử máy chủ còn sống — phải luôn có trên mọi môi trường và rẻ) và chuỗi lỗi `"Không tìm thấy phòng"` của hub (portfolio dựa vào nó để thử máy còn lại khi mở link mời). Đổi một trong hai thì đổi portfolio cùng đợt.
-- **Hai backend chạy cùng lúc** (tự host + Vercel) và deploy không cùng thời điểm với portfolio: thay đổi giao thức chỉ thêm field optional, không đổi tên/bỏ trong một bước ([`DEPLOYMENT.md` → Giữ tương thích](DEPLOYMENT.md#giữ-tương-thích-khi-đổi-code)).
+- **Hai chỗ frontend dựa vào**: `GET /api/rooms` (zonenop-game dùng để thử máy chủ còn sống — phải luôn có trên mọi môi trường và rẻ) và chuỗi lỗi `"Không tìm thấy phòng"` của hub (frontend dựa vào nó để thử máy còn lại khi mở link mời). Đổi một trong hai thì đổi zonenop-game cùng đợt.
+- **Hai backend chạy cùng lúc** (tự host + Vercel) và deploy không cùng thời điểm với zonenop-game: thay đổi giao thức chỉ thêm field optional, không đổi tên/bỏ trong một bước ([`DEPLOYMENT.md` → Giữ tương thích](DEPLOYMENT.md#giữ-tương-thích-khi-đổi-code)).
 - `MAX_RANK_POINTS` được khai báo hai lần (`src/game/scoring.ts` và `src/game/room.ts`, cùng 20); `updateSettings` của Tiến Lên tự kiểm tra thay vì gọi `checkRankPoints`.
 
 ### Lỗi đã bắt bằng fuzz (để biết loại bẫy cần tránh)
