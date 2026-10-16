@@ -56,7 +56,7 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | Biến | Local | Tự host (`~/apps/be_game/.env` + compose) | Vercel `be-game` |
 |---|---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | trống → RAM | trống → compose dùng `redis://redis:6379`; đặt URL Upstash (bí mật, quyền `600`) để dùng chung kho với máy dự phòng | Upstash (integration), production **và** preview |
-| `ALLOWED_ORIGIN` | trống → mọi origin | Frontend chính: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`, và `http://localhost:3000`. Danh sách trên server còn các mục `https://portfolio-thach.vercel.app` và `https://portfolio-*-thachs-projects-48e5eaf9.vercel.app` của site portfolio cũ (game không còn chạy ở đó; bỏ được). Giá trị đầy đủ: [`SELF_HOSTING.md`](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu) | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
+| `ALLOWED_ORIGIN` | trống → mọi origin | Frontend chính: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`, và `http://localhost:3000`. Giá trị đầy đủ: [`SELF_HOSTING.md`](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu) | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
 | `GAME_DOMAIN` | — | `play-api.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |
 | `BE_GAME_COUNT_COMMANDS` | — | tuỳ chọn (`1` = log số lệnh Redis mỗi 60 giây) | — |
