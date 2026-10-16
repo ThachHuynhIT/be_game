@@ -378,7 +378,7 @@ type StoreGlobal = typeof globalThis & {
 };
 
 /** One Redis connection per process, shared by every game (null = no Redis configured). */
-function getRedis(): Promise<Redis | null> {
+export function getRedis(): Promise<Redis | null> {
   const g = globalThis as StoreGlobal;
   g.__gameRedis ??= (async () => {
     const url = redisUrl();

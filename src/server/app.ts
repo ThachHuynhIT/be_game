@@ -1,9 +1,11 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
+import { getAccountService } from "../accounts/service";
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
 import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
+import { handleAccountRoute } from "./authRoutes";
 import { type GameKind, getRoomStore, redisUrl } from "./store";
 
 /**
@@ -44,11 +46,12 @@ const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
 export function createGameServer(): Server {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const path = pathOf(req);
     cors(req, res);
     if (req.method === "OPTIONS") return void res.writeHead(204).end();
     if (path === "/api/health") return void health(res);
+    if (await handleAccountRoute(req, res, path)) return;
     const route = ROUTES[path];
     if (route?.kind === "rooms") return void listRooms(route.game, res);
     if (route?.kind === "leaderboard") return void leaderboard(route.game, req, res);
@@ -107,6 +110,9 @@ function cors(req: IncomingMessage, res: ServerResponse) {
   if (origin && isAllowedOrigin(origin, req.headers.host)) {
     res.setHeader("access-control-allow-origin", origin);
     res.setHeader("vary", "origin");
+    res.setHeader("access-control-allow-headers", "Authorization, Content-Type");
+    res.setHeader("access-control-allow-methods", "GET, POST, PATCH, OPTIONS");
+    res.setHeader("access-control-max-age", "600");
   }
 }
 
@@ -159,6 +165,7 @@ async function health(res: ServerResponse) {
     // The deploy workflow waits for this to equal the commit it shipped (old container / old Vercel build = mismatch).
     commit: deployedCommit(),
     games: Object.keys(ADAPTERS),
+    accounts: await accountsKind(),
   };
   try {
     const store = await withTimeout(getRoomStore("tienlen"), 5000, "connect");
@@ -187,5 +194,14 @@ async function health(res: ServerResponse) {
     json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, now: Date.now(), ...info });
   } catch (err) {
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, now: Date.now(), ...info });
+  }
+}
+
+/** Which account store is live; never throws (health must not depend on it). */
+async function accountsKind(): Promise<string> {
+  try {
+    return (await withTimeout(getAccountService(), 5000, "accounts")).store.kind;
+  } catch {
+    return "unavailable";
   }
 }

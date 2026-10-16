@@ -206,17 +206,26 @@ export async function createPgAccountStore(pool: Pool): Promise<AccountStore> {
   // One dedicated connection so the session-level advisory lock covers the whole migration.
   const client = await pool.connect();
   let locked = false;
+  let destroy = false;
   try {
     try {
       await client.query("select pg_advisory_lock($1)", [MIGRATION_LOCK]);
       locked = true;
-    } catch {
-      // pg-mem has no pg_advisory_lock; migrations are idempotent so continuing unlocked is safe.
+    } catch (e) {
+      // Only "function missing" (pg-mem has no pg_advisory_lock; migrations are idempotent) may continue unlocked.
+      const err = e as { code?: string; message?: string };
+      if (!(err?.code === "42883" || /does not exist|not implemented|unknown function/i.test(err?.message ?? ""))) throw e;
     }
     await migrate((sql, params) => client.query(sql, params as any[]));
   } finally {
-    if (locked) await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK]).catch(() => {});
-    client.release();
+    if (locked) {
+      try {
+        await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK]);
+      } catch {
+        destroy = true; // never return a session-locked connection to the pool
+      }
+    }
+    client.release(destroy ? true : undefined);
   }
   return new PgAccountStore(pool);
 }
