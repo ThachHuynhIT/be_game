@@ -95,6 +95,9 @@ export function shutdownGameServer(server: Server): Promise<void> {
 
 const pathOf = (req: IncomingMessage) => new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/$/, "") || "/";
 
+/** A Redis outside this machine (Upstash…) means both backends share rooms; the compose `redis` service does not. */
+export const isSharedStoreHost = (host: string | null) => !!host && !["redis", "localhost", "127.0.0.1", "[::1]"].includes(host);
+
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(body));
 }
@@ -136,7 +139,7 @@ async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResp
   }
 }
 
-/** create → load → subscribe → save → pub/sub round trip, with timings. Never returns secrets. */
+/** create → load → subscribe → save → pub/sub round trip, with timings. `now` (epoch ms) lets an operator compare the clocks of two backends sharing a store. Never returns secrets. */
 async function health(res: ServerResponse) {
   const stepsMs: Record<string, number> = {};
   let start = Date.now();
@@ -149,6 +152,7 @@ async function health(res: ServerResponse) {
     region: process.env.VERCEL_REGION ?? "local",
     redisConfigured: !!url,
     redisHost: url ? new URL(url).hostname : null,
+    sharedStore: isSharedStoreHost(url ? new URL(url).hostname : null),
     games: Object.keys(ADAPTERS),
   };
   try {
@@ -175,8 +179,8 @@ async function health(res: ServerResponse) {
     mark("save");
     await withTimeout(got, 3000, "pubsub").catch(() => {});
     mark("pubsub");
-    json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, ...info });
+    json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, now: Date.now(), ...info });
   } catch (err) {
-    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, ...info });
+    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, now: Date.now(), ...info });
   }
 }

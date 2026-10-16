@@ -18,6 +18,8 @@ export interface CodedRoom {
 
 export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang" | "cangua" | "oanquan";
 
+export const GAME_KINDS = ["tienlen", "meono", "typhu", "splendor", "bang", "cangua", "oanquan"] as const satisfies readonly GameKind[];
+
 export interface StoredRoom<S extends CodedRoom = CodedRoom> {
   state: S;
   version: number;
@@ -81,7 +83,7 @@ class ShortCache<T> {
 }
 
 /** Redis key layout per game; Tiến Lên keeps its original `tienlen:` keys. */
-function keysFor(game: GameKind) {
+export function keysFor(game: GameKind) {
   return {
     room: (code: string) => `${game}:room:${code}`,
     channel: (code: string) => `${game}:room:${code}:changed`,
@@ -351,6 +353,25 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
 /** Redis URL from the usual Vercel Marketplace / Upstash variable names. */
 export const redisUrl = () => process.env.REDIS_URL || process.env.KV_URL || process.env.UPSTASH_REDIS_URL || "";
 
+/** Ops aid (BE_GAME_COUNT_COMMANDS=1): count Redis commands sent by this process and report them every interval. */
+export function countCommands(redis: { sendCommand: (...a: any[]) => any }, onTick: (n: number) => void, everyMs = 60_000): () => void {
+  const original = redis.sendCommand.bind(redis);
+  let n = 0;
+  redis.sendCommand = (...a: any[]) => {
+    n++;
+    return original(...a);
+  };
+  const timer = setInterval(() => {
+    onTick(n);
+    n = 0;
+  }, everyMs);
+  timer.unref?.();
+  return () => {
+    clearInterval(timer);
+    redis.sendCommand = original;
+  };
+}
+
 type StoreGlobal = typeof globalThis & {
   __gameRedis?: Promise<Redis | null>;
   __gameStores?: Map<GameKind, Promise<RoomStore>>;
@@ -370,6 +391,7 @@ function getRedis(): Promise<Redis | null> {
     const { default: IORedis } = await import("ioredis");
     const redis = new IORedis(url, { maxRetriesPerRequest: 3, enableAutoPipelining: true });
     redis.on("error", (err) => console.error("[be_game] redis:", err.message));
+    if (process.env.BE_GAME_COUNT_COMMANDS === "1") countCommands(redis, (n) => console.log(`[be_game] redis commands last 60s: ${n}`));
     return redis;
   })();
   return g.__gameRedis;
