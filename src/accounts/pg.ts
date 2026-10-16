@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { migrate } from "./migrations";
 import type { AccountStore, NewUser } from "./store";
-import type { Role, UserPatch, UserRow } from "./types";
+import { statDays, vnDay, vnDayStart, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserRow } from "./types";
 
 const toUser = (r: any): UserRow => ({
   id: r.id,
@@ -73,6 +73,119 @@ class PgAccountStore implements AccountStore {
     if (!sets.length) return this.userById(id);
     const { rows } = await this.pool.query(`update users set ${sets.join(", ")} where id = $1 returning *`, params);
     return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  async recordResults(game: string, recordId: string, at: Date, rows: ResultRow[]) {
+    if (!rows.length) return;
+    // One lookup per row (a handful of players): avoids multi-parameter IN lists, which pg-mem mis-binds for text.
+    const ids = new Map<string, string>();
+    for (const r of rows) {
+      const found = await this.pool.query("select id from users where username_key = $1", [r.usernameKey]);
+      if (found.rows[0]) ids.set(r.usernameKey, found.rows[0].id);
+    }
+    const day = vnDay(at);
+    for (const r of rows) {
+      const uid = ids.get(r.usernameKey);
+      if (!uid) continue;
+      await this.pool.query(
+        `insert into game_results (game, record_id, user_id, points, rank, won, at, day)
+         values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict do nothing`,
+        [game, recordId, uid, r.points, r.rank, r.rank === 1, at, day],
+      );
+    }
+  }
+
+  async leaderboard(game: string, limit: number): Promise<LeaderRow[]> {
+    const { rows } = await this.pool.query(
+      `select u.username as name, u.icon as icon, u.color as color, count(*) as games, sum(r.points) as points,
+              sum(case when r.won then 1 else 0 end) as wins
+       from game_results r join users u on u.id = r.user_id
+       where r.game = $1 group by u.id, u.username, u.icon, u.color`,
+      [game],
+    );
+    return rows
+      .map((r) => ({ name: r.name as string, points: Number(r.points), games: Number(r.games), wins: Number(r.wins), icon: r.icon as string, color: r.color as string }))
+      .sort((a, b) => b.points - a.points || b.wins - a.wins || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .slice(0, limit);
+  }
+
+  async trackView(v: { path: string; device: string; userId: string | null; at?: Date }) {
+    const at = v.at ?? new Date();
+    await this.pool.query("insert into page_views (at, day, path, device_id, user_id) values ($1, $2, $3, $4, $5)", [at, vnDay(at), v.path, v.device, v.userId]);
+  }
+
+  async stats(days: number, now = new Date()): Promise<AdminStats> {
+    const list = statDays(days, now);
+    const first = list[0];
+    const last = list[list.length - 1];
+    const daily = new Map(list.map((day) => [day, { day, views: 0, devices: 0, games: 0, players: 0, newUsers: 0 }]));
+    const q = async (sql: string, params: unknown[]) => (await this.pool.query(sql, params)).rows;
+    const win = [first, last];
+    // Pages only: /play/* rows are WebSocket-join beacons counted separately as playDevices.
+    const pageWhere = "day >= $1 and day <= $2 and path not like '/play/%'";
+
+    for (const r of await q(`select day, count(*) as views, count(distinct device_id) as devices from page_views where ${pageWhere} group by day`, win)) {
+      const d = daily.get(r.day);
+      if (d) Object.assign(d, { views: Number(r.views), devices: Number(r.devices) });
+    }
+    for (const r of await q("select day, count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2 group by day", win)) {
+      const d = daily.get(r.day);
+      if (d) Object.assign(d, { games: Number(r.games), players: Number(r.players) });
+    }
+    // Day buckets for sign-ups are computed in JS (vnDay), so fetch a slightly wider UTC range and bucket exactly.
+    let newUsers = 0;
+    for (const r of await q("select created_at from users where created_at >= $1", [vnDayStart(first)])) {
+      const d = daily.get(vnDay(new Date(r.created_at)));
+      if (d) {
+        d.newUsers++;
+        newUsers++;
+      }
+    }
+    const [pv] = await q(`select count(*) as views, count(distinct device_id) as devices from page_views where ${pageWhere}`, win);
+    const [pd] = await q("select count(distinct device_id) as devices from page_views where day >= $1 and day <= $2 and path like '/play/%'", win);
+    const [gr] = await q("select count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2", win);
+    const [us] = await q("select count(*) as n from users", []);
+    const byGame = (
+      await q("select game, count(distinct record_id) as games, count(distinct user_id) as players from game_results where day >= $1 and day <= $2 group by game", win)
+    )
+      .map((r) => ({ game: r.game as string, games: Number(r.games), players: Number(r.players) }))
+      .sort((a, b) => b.games - a.games || (a.game < b.game ? -1 : 1));
+    const topPages = (await q(`select path, count(*) as views from page_views where ${pageWhere} group by path`, win))
+      .map((r) => ({ path: r.path as string, views: Number(r.views) }))
+      .sort((a, b) => b.views - a.views || (a.path < b.path ? -1 : 1))
+      .slice(0, 10);
+    const perPlayer = (await q("select user_id, count(*) as games, sum(points) as points from game_results where day >= $1 and day <= $2 group by user_id", win))
+      .map((r) => ({ id: r.user_id as string, games: Number(r.games), points: Number(r.points) }))
+      .sort((a, b) => b.games - a.games || b.points - a.points || (a.id < b.id ? -1 : 1))
+      .slice(0, 10);
+    const names = new Map<string, string>();
+    // At most 10 lookups by primary key; pg-mem mis-binds single-element IN lists of uuid parameters.
+    for (const p of perPlayer) {
+      const r = await q("select username from users where id = $1", [p.id]);
+      if (r[0]) names.set(p.id, r[0].username);
+    }
+    return {
+      days,
+      totals: {
+        users: Number(us.n),
+        newUsers,
+        views: Number(pv.views),
+        devices: Number(pv.devices),
+        games: Number(gr.games),
+        players: Number(gr.players),
+        playDevices: Number(pd.devices),
+      },
+      daily: list.map((d) => daily.get(d)!),
+      byGame,
+      topPages,
+      topPlayers: perPlayer.map((p) => ({ name: names.get(p.id) ?? "", games: p.games, points: p.points })),
+    };
+  }
+
+  async pruneViews(olderThanDays: number, now = new Date()) {
+    const cutoff = new Date(now.getTime() - olderThanDays * 86_400_000);
+    const r = await this.pool.query("delete from page_views where at < $1 returning id", [cutoff]);
+    return r.rows.length;
   }
 
   async listUsers(q: string, page: number, pageSize: number) {
