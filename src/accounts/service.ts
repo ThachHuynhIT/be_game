@@ -229,6 +229,8 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       const upd: Parameters<AccountStore["updateUser"]>[1] = {};
       if (patch.role !== undefined) upd.role = patch.role;
       if (patch.disabled !== undefined) upd.disabled = patch.disabled;
+      // Locking revokes every issued token (spec §7): unlocking later must not revive them.
+      if (patch.disabled === true) upd.bumpSession = true;
       if (patch.password !== undefined) {
         const err = validatePassword(patch.password);
         if (err) return fail(400, err);

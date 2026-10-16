@@ -121,6 +121,9 @@ describe("account routes", () => {
     expect(r.status).toBe(200);
     expect(r.json.user.disabled).toBe(true);
     expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).status).toBe(401);
+    // Unlocking does not revive the token issued before the lock.
+    expect((await call("PATCH", `/api/admin/users/${lan.user.id}`, { disabled: false }, { token: boss.session })).status).toBe(200);
+    expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).status).toBe(401);
     expect((await call("PATCH", `/api/admin/users/${boss.user.id}`, { role: "user" }, { token: boss.session })).status).toBe(400);
     expect((await call("PATCH", `/api/admin/users/${boss.user.id}`, { disabled: true }, { token: boss.session })).status).toBe(400);
     expect((await call("PATCH", "/api/admin/users/00000000-0000-4000-8000-000000000000", { disabled: true }, { token: boss.session })).status).toBe(404);

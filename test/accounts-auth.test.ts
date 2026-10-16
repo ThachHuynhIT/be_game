@@ -99,3 +99,21 @@ describe("review fixes", () => {
     expect(await rl.hit("b", 1, 10)).toBe(true);
   });
 });
+
+describe("admin lock revokes sessions", () => {
+  it("lock then unlock: the token issued before the lock stays rejected", async () => {
+    const { createAccountService } = await import("../src/accounts/service");
+    const { createMemoryAccountStore } = await import("../src/accounts/store");
+    const svc = createAccountService(createMemoryAccountStore(), memoryRateLimiter());
+    const boss = await svc.register({ username: "Admin", password: "matkhau123" }, "1.1.1.1");
+    const lan = await svc.register({ username: "Lan", password: "matkhau123" }, "1.1.1.2");
+    if (!boss.ok || !lan.ok) throw new Error("register");
+    const admin = await svc.store.updateUser(boss.user.id, { role: "admin" });
+    expect(await svc.authenticate(lan.session)).not.toBeNull();
+    expect((await svc.adminUpdate(admin!, lan.user.id, { disabled: true })).ok).toBe(true);
+    expect((await svc.adminUpdate(admin!, lan.user.id, { disabled: false })).ok).toBe(true);
+    expect(await svc.authenticate(lan.session)).toBeNull();
+    const again = await svc.login({ username: "Lan", password: "matkhau123" }, "1.1.1.3");
+    expect(again.ok && (await svc.authenticate(again.session))).toBeTruthy();
+  });
+});
