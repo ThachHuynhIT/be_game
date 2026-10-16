@@ -225,6 +225,7 @@ export async function createPgAccountStore(pool: Pool): Promise<AccountStore> {
     try {
       // A stuck peer makes this instance fail (and retry later) instead of waiting forever.
       await q("set local lock_timeout = '5s'");
+      await q("set local statement_timeout = '10s'");
       await q("select pg_advisory_xact_lock($1)", [MIGRATION_LOCK]);
     } catch (e) {
       // Only "function missing" (pg-mem; migrations are idempotent) may continue unlocked, in a fresh transaction.
