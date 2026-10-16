@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
+import { getAccountService } from "../src/accounts/service";
 import { FakeSocket } from "./helpers/fakeSocket";
 import { accountSession } from "./helpers/accounts";
 
@@ -118,11 +119,17 @@ describe("player look (icon + colour)", () => {
     const va = await a.view((v) => !!looks(v)?.Fox && !!looks(v)?.Binh);
     expect(looks(va)).toEqual({ Fox: { icon: "🦊", color: "#f472b6" }, Binh: { icon: "", color: "#fbbf24" } });
     expect(JSON.stringify(va)).not.toContain("token-");
-    // Changing it mid-game reaches the other player too.
+    // A "look" message ignores its payload and applies the account's current look.
     expect((await a.request({ type: "look", look: { icon: "🐲", color: "#22d3ee" } })).ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(looks(await b.view())?.Fox).toEqual({ icon: "🦊", color: "#f472b6" });
+    // After the profile changes (PATCH /api/auth/me), the next "look" message shows the new look to everyone.
+    const svc = await getAccountService();
+    const me = (await svc.authenticate(S.Fox))!;
+    expect((await svc.updateMe(me, { icon: "🐲", color: "#22d3ee" })).ok).toBe(true);
+    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(true);
     const vb = await b.view((v) => looks(v)?.Fox?.icon === "🐲");
     expect(looks(vb)?.Fox).toEqual({ icon: "🐲", color: "#22d3ee" });
-    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
   });
 });
 

@@ -128,6 +128,35 @@ describe("finished games feed the per-account leaderboard", () => {
   });
 });
 
+describe("long names and seat ownership", () => {
+  const LONG = "Nguyễn Văn Ánh Đặngx";
+  it("seats a 20-character username unchanged and ranks it", async () => {
+    const name = LONG;
+    expect([...name]).toHaveLength(20);
+    const hub = createRoomHub(createMemoryRoomStore());
+    const code = await hub.createRoom();
+    const s = connect(hub);
+    expect((await s.request({ type: "join", code, token: "token-aaaaaaaa", session: await accountSession(name) })).ok).toBe(true);
+    const v = await s.view((x) => x.seats.some(Boolean));
+    expect(v.seats.find(Boolean)!.name).toBe(name);
+  });
+
+  it("refuses to take over a seat kept by token for another account mid-game", async () => {
+    const [lan, minh, other] = [await accountSession("Lan"), await accountSession("Minh"), await accountSession("Khac")];
+    const store = createMemoryRoomStore<RoomState>();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    const a = connect(hub);
+    const b = connect(hub);
+    expect((await a.request({ type: "join", code, token: "token-aaaaaaaa", session: lan })).ok).toBe(true);
+    expect((await b.request({ type: "join", code, token: "token-bbbbbbbb", session: minh })).ok).toBe(true);
+    await a.request({ type: "start" });
+    expect(await connect(hub).request({ type: "join", code, token: "token-aaaaaaaa", session: other })).toMatchObject({ ok: false, error: "Ghế này thuộc tài khoản khác" });
+    const seat = (await store.load(code))!.state.seats.find((p) => p?.token === "token-aaaaaaaa");
+    expect(seat?.name).toBe("Lan");
+  });
+});
+
 describe("GET /api/leaderboard", () => {
   it("serves the current season, and the old format with season=old", async () => {
     const svc = await getAccountService();
@@ -141,6 +170,11 @@ describe("GET /api/leaderboard", () => {
       expect(cur).toEqual({ season: "current", rows: [{ name: "Lan", points: 5, games: 1, wins: 1, icon: "", color: "#fbbf24" }] });
       const old = await (await fetch(`${base}/api/leaderboard?season=old&limit=20`)).json();
       expect(old).toMatchObject({ ok: true, players: expect.any(Array) });
+      vi.spyOn(svc.store, "leaderboard").mockRejectedValue(new Error("secret pg detail"));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const bad = await fetch(`${base}/api/leaderboard`);
+      expect(bad.status).toBe(503);
+      expect(await bad.json()).toEqual({ ok: false, error: "Máy chủ tài khoản đang lỗi, thử lại sau" });
     } finally {
       server.closeAllConnections();
       await new Promise((r) => server.close(r));

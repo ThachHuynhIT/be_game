@@ -136,9 +136,9 @@ async function listRooms(game: GameKind, res: ServerResponse) {
 }
 
 async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResponse) {
+  const q = new URL(req.url ?? "/", "http://x").searchParams;
+  const old = q.get("season") === "old";
   try {
-    const q = new URL(req.url ?? "/", "http://x").searchParams;
-    const old = q.get("season") === "old";
     const limit = Math.min(Math.max(Math.floor(Number(q.get("limit"))) || (old ? 20 : 50), 1), 100);
     if (old) {
       const store = await getRoomStore(game);
@@ -147,6 +147,10 @@ async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResp
     const svc = await withTimeout(getAccountService(), 5000, "accounts");
     json(res, 200, { season: "current", rows: await withTimeout(svc.store.leaderboard(game, limit), 5000, "leaderboard") });
   } catch (err) {
+    if (!old) {
+      console.error("[be_game] leaderboard:", err instanceof Error ? err.message : "error");
+      return json(res, 503, { ok: false, error: "Máy chủ tài khoản đang lỗi, thử lại sau" });
+    }
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 }

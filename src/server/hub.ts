@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { CHAT_COOLDOWN_MS, EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
-import { type SocialRoom, randomCode, sendChat } from "../game/room";
+import { type SocialRoom, cleanName, randomCode, sendChat } from "../game/room";
 import { ADAPTERS, type GameAdapter, type Result, tienlenAdapter } from "./adapters";
 import { type AccountService, getAccountService } from "../accounts/service";
 import { type CodedRoom, type GameKind, type RoomStore, getRoomStore, nameKey } from "./store";
@@ -46,6 +46,8 @@ interface Conn {
   code: string | null;
   token: string | null;
   role: "player" | "spectator";
+  /** Session of the account that joined; the look is re-read from it. */
+  session: string | null;
 }
 
 interface LocalRoom {
@@ -166,7 +168,8 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
 
   /** Feed the per-account leaderboard after the save; never awaited so Postgres cannot hold the room loop. */
   private recordAccountResults(rec: GameRecord) {
-    const rows = rec.results.map((r) => ({ usernameKey: nameKey(r.name), points: r.delta, rank: r.rank + 1 })); // GameRecord ranks start at 0 (Nhất); the account store counts from 1
+    const firsts = rec.results.filter((r) => r.rank === 0).length;
+    const rows = rec.results.map((r) => ({ usernameKey: nameKey(r.name), points: r.delta, rank: r.rank === 0 && firsts > 1 ? 2 : r.rank + 1 })); // ranks start at 0 here, at 1 in the account store; shared firsts do not count as wins
     void (async () => {
       try {
         const svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
@@ -333,7 +336,7 @@ const cleanCode = (code: unknown) => String(code ?? "").toUpperCase().slice(0, 8
 
 /** Wire a freshly upgraded WebSocket into a game. */
 export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
-  const conn: Conn = { socket, code: null, token: null, role: "player" };
+  const conn: Conn = { socket, code: null, token: null, role: "player", session: null };
   const hubPromise: Promise<RoomHub> = opts.hub ? Promise.resolve(opts.hub) : getHub(opts.game ?? "tienlen");
   let closed = false;
   let windowStart = Date.now();
@@ -379,16 +382,27 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       // The account decides name and look; whatever the client sent is ignored.
       const name = user.username;
       const look: PlayerLook = { icon: user.icon, color: user.color };
-      const res = await hub.mutate(code, (room, now) => {
-        const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
-        if (r.ok) setLook(room as unknown as LookRoom, token, look);
-        return r;
-      });
+      const res = await hub.mutate(
+        code,
+        (room, now): Result => {
+          const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
+          if (!r.ok) return r;
+          if (msg.type === "join") {
+            // A seat kept by token mid-game keeps its old name: never take over another account's seat.
+            const seat = (room as unknown as LookRoom).seats.find((p) => p?.token === token);
+            if (seat && seat.name !== cleanName(name)) return { ok: false, error: "Ghế này thuộc tài khoản khác" };
+          }
+          setLook(room as unknown as LookRoom, token, look);
+          return r;
+        },
+        (r) => !r.ok,
+      );
       if (!res.found) return ack(id, { ok: false, error: "Không tìm thấy phòng" });
       if (!res.result.ok) return ack(id, res.result);
       if (conn.code && conn.code !== code) hub.remove(conn);
       conn.code = code;
       conn.token = token;
+      conn.session = String(msg.session);
       conn.role = msg.type === "join" ? "player" : "spectator";
       hub.add(conn, code);
       ack(id, { ok: true });
@@ -412,8 +426,16 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     }
 
     if (msg.type === "look") {
-      const look = cleanLook(msg.look);
-      if (!look) return ack(id, { ok: false, error: "Biểu tượng/màu không hợp lệ" });
+      // The payload is ignored: the look always comes from the account's current profile.
+      let user: Awaited<ReturnType<AccountService["authenticate"]>>;
+      try {
+        user = await withTimeout((await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS)).authenticate(conn.session), ACCOUNT_TIMEOUT_MS);
+      } catch (err) {
+        console.error("[be_game] account auth:", err instanceof Error ? err.message : "error");
+        return ack(id, { ok: false, error: ACCOUNT_DOWN });
+      }
+      if (!user) return ack(id, { ok: false, error: NEED_LOGIN });
+      const look: PlayerLook = { icon: user.icon, color: user.color };
       const res = await hub.mutate(code, (room) => setLook(room as unknown as LookRoom, token, look));
       return ack(id, res.found ? { ok: true } : { ok: false, error: "Không tìm thấy phòng" });
     }
