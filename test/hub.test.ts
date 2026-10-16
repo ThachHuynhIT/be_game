@@ -1,16 +1,66 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
+import { describe, expect, it } from "vitest";
+import type { ClientMessage, RoomView, ServerMessage } from "../src/game/protocol";
+import { type HubSocket, type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
-import { getAccountService } from "../src/accounts/service";
-import { FakeSocket } from "./helpers/fakeSocket";
-import { accountSession } from "./helpers/accounts";
 
-const S: Record<string, string> = {};
-beforeAll(async () => {
-  S.An = await accountSession("An1");
-  S.Binh = await accountSession("Binh");
-  S.Fox = await accountSession("Fox", { icon: "🦊", color: "#f472b6" });
-});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Listener = (arg?: any) => void;
+
+/** In-process stand-in for a WebSocket, with a tiny client API for tests. */
+class FakeSocket implements HubSocket {
+  inbox: ServerMessage[] = [];
+  private listeners: Record<string, Listener[]> = {};
+  private nextId = 1;
+  private waiters: (() => void)[] = [];
+
+  send(data: string) {
+    this.inbox.push(JSON.parse(data));
+    this.waiters.splice(0).forEach((w) => w());
+  }
+  close() {
+    this.emit("close");
+  }
+  on(event: string, listener: Listener) {
+    (this.listeners[event] ??= []).push(listener);
+    return this;
+  }
+  emit(event: string, arg?: unknown) {
+    this.listeners[event]?.forEach((l) => l(arg));
+  }
+
+  /** Send a message and resolve with its ack. */
+  request(msg: Record<string, unknown>) {
+    const id = this.nextId++;
+    this.emit("message", JSON.stringify({ ...msg, id } as ClientMessage));
+    return this.waitFor((m) => m.type === "ack" && m.id === id) as Promise<Extract<ServerMessage, { type: "ack" }>>;
+  }
+
+  async waitFor(pred: (m: ServerMessage) => boolean, timeoutMs = 2000): Promise<ServerMessage> {
+    const until = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = this.inbox.find(pred);
+      if (hit) return hit;
+      if (Date.now() > until) throw new Error("timed out waiting for message");
+      await new Promise<void>((r) => {
+        this.waiters.push(r);
+        setTimeout(r, 20);
+      });
+    }
+  }
+
+  /** Latest state view that satisfies `pred`. */
+  async view(pred: (v: RoomView) => boolean = () => true): Promise<RoomView> {
+    const until = Date.now() + 2000;
+    for (;;) {
+      const views = this.inbox.filter((m): m is Extract<ServerMessage, { type: "state" }> => m.type === "state");
+      const last = views[views.length - 1]?.view;
+      if (last && pred(last)) return last;
+      if (Date.now() > until) throw new Error("timed out waiting for view");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+}
+
 function connect(hub: RoomHub) {
   const s = new FakeSocket();
   attachConnection(s, { hub });
@@ -22,9 +72,9 @@ async function joinedPair(hubA: RoomHub, hubB: RoomHub) {
   const created = await a.request({ type: "create" });
   expect(created.ok).toBe(true);
   const code = (created as { code: string }).code;
-  expect((await a.request({ type: "join", code, token: "token-aaaaaaaa", session: S.An })).ok).toBe(true);
+  expect((await a.request({ type: "join", code, name: "An", token: "token-aaaaaaaa" })).ok).toBe(true);
   const b = connect(hubB);
-  expect((await b.request({ type: "join", code, token: "token-bbbbbbbb", session: S.Binh })).ok).toBe(true);
+  expect((await b.request({ type: "join", code, name: "Bình", token: "token-bbbbbbbb" })).ok).toBe(true);
   return { a, b, code };
 }
 
@@ -79,7 +129,7 @@ describe("RoomHub over WebSocket messages", () => {
   it("rejects illegal moves and unknown rooms", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const s = connect(hub);
-    expect(await s.request({ type: "join", code: "ZZZZZ", token: "token-cccccccc", session: S.An })).toMatchObject({
+    expect(await s.request({ type: "join", code: "ZZZZZ", name: "x", token: "token-cccccccc" })).toMatchObject({
       ok: false,
       error: "Không tìm thấy phòng",
     });
@@ -96,10 +146,9 @@ describe("RoomHub over WebSocket messages", () => {
     const hubs = [createRoomHub(store), createRoomHub(store)];
     const host = connect(hubs[0]);
     const code = ((await host.request({ type: "create" })) as { code: string }).code;
-    const ps = await Promise.all([0, 1, 2, 3].map((i) => accountSession(`Con${i}`)));
     const sockets = [0, 1, 2, 3].map((i) => connect(hubs[i % 2]));
     const acks = await Promise.all(
-      sockets.map((s, i) => s.request({ type: "join", code, token: `token-${i}-concurrent`, session: ps[i] })),
+      sockets.map((s, i) => s.request({ type: "join", code, name: `P${i}`, token: `token-${i}-concurrent` })),
     );
     expect(acks.every((r) => r.ok)).toBe(true);
     const v = await sockets[0].view((x) => x.seats.filter(Boolean).length === 4);
@@ -108,51 +157,22 @@ describe("RoomHub over WebSocket messages", () => {
 });
 
 describe("player look (icon + colour)", () => {
-  it("comes from the account, is relayed by name to everyone and tokens never leak", async () => {
+  it("is relayed by name to everyone; bad looks are ignored and tokens never leak", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const a = connect(hub);
     const code = ((await a.request({ type: "create" })) as { code: string }).code;
-    await a.request({ type: "join", code, name: "ignored", token: "token-aaaaaaaa", session: S.Fox, look: { icon: "x", color: "red" } });
+    await a.request({ type: "join", code, name: "An", token: "token-aaaaaaaa", look: { icon: "🦊", color: "#F472B6" } });
     const b = connect(hub);
-    await b.request({ type: "join", code, token: "token-bbbbbbbb", session: S.Binh });
+    await b.request({ type: "join", code, name: "Bình", token: "token-bbbbbbbb", look: { icon: "x", color: "javascript:1" } });
     const looks = (v: unknown) => (v as { looks?: Record<string, { icon: string; color: string }> }).looks;
-    const va = await a.view((v) => !!looks(v)?.Fox && !!looks(v)?.Binh);
-    expect(looks(va)).toEqual({ Fox: { icon: "🦊", color: "#f472b6" }, Binh: { icon: "", color: "#fbbf24" } });
+    const va = await a.view((v) => !!looks(v)?.An);
+    expect(looks(va)).toEqual({ An: { icon: "🦊", color: "#f472b6" } });
     expect(JSON.stringify(va)).not.toContain("token-");
-    // A "look" message ignores its payload and applies the account's current look.
+    // Changing it mid-game reaches the other player too.
     expect((await a.request({ type: "look", look: { icon: "🐲", color: "#22d3ee" } })).ok).toBe(true);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(looks(await b.view())?.Fox).toEqual({ icon: "🦊", color: "#f472b6" });
-    // After the profile changes (PATCH /api/auth/me), the next "look" message shows the new look to everyone.
-    const svc = await getAccountService();
-    const me = (await svc.authenticate(S.Fox))!;
-    expect((await svc.updateMe(me, { icon: "🐲", color: "#22d3ee" })).ok).toBe(true);
-    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(true);
-    const vb = await b.view((v) => looks(v)?.Fox?.icon === "🐲");
-    expect(looks(vb)?.Fox).toEqual({ icon: "🐲", color: "#22d3ee" });
-  });
-
-  it("still applies a look change after a password change revoked the join token", async () => {
-    const hub = createRoomHub(createMemoryRoomStore());
-    const svc = await getAccountService();
-    const reg = await svc.register({ username: "Cuong", password: "matkhau123" }, "10.77.0.1");
-    if (!reg.ok) throw new Error("register");
-    const a = connect(hub);
-    const code = ((await a.request({ type: "create" })) as { code: string }).code;
-    expect((await a.request({ type: "join", code, token: "token-cccccccc", session: reg.session })).ok).toBe(true);
-    const changed = await svc.updateMe((await svc.authenticate(reg.session))!, { password: "matkhau456", oldPassword: "matkhau123" });
-    if (!changed.ok || !changed.session) throw new Error("password change");
-    expect(await svc.authenticate(reg.session)).toBeNull();
-    expect((await svc.updateMe((await svc.authenticate(changed.session))!, { icon: "🐼", color: "#60a5fa" })).ok).toBe(true);
-    expect((await a.request({ type: "look" })).ok).toBe(true);
-    const looks = (v: unknown) => (v as { looks?: Record<string, { icon: string; color: string }> }).looks;
-    const v = await a.view((x) => looks(x)?.Cuong?.icon === "🐼");
-    expect(looks(v)?.Cuong).toEqual({ icon: "🐼", color: "#60a5fa" });
-  });
-
-  it("refuses a look before joining", async () => {
-    const a = connect(createRoomHub(createMemoryRoomStore()));
-    expect((await a.request({ type: "look" })).ok).toBe(false);
+    const vb = await b.view((v) => looks(v)?.An?.icon === "🐲");
+    expect(looks(vb)?.An).toEqual({ icon: "🐲", color: "#22d3ee" });
+    expect((await a.request({ type: "look", look: { icon: "x", color: "red" } })).ok).toBe(false);
   });
 });
 
