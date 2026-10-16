@@ -132,6 +132,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
     if (method === "GET") return send(res, 200, { ok: true, user: publicUser(user) });
     const b = await readJson(req);
     const r = await svc.updateMe(user, {
+      username: b.username as string | undefined,
       icon: b.icon as string | undefined,
       color: b.color as string | undefined,
       password: b.password as string | undefined,

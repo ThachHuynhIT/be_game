@@ -59,7 +59,8 @@ describe("account routes", () => {
     expect(dup.status).toBe(409);
     expect(dup.json.error).toBe("Tên đăng nhập đã có người dùng");
     expect((await register("ab")).status).toBe(400);
-    expect((await register("Minh", "1234567")).status).toBe(400);
+    expect((await register("Minh", "")).status).toBe(400);
+    expect((await register("Minh2", "1")).status).toBe(200);
   });
 
   it("login errors are indistinguishable", async () => {
@@ -95,6 +96,38 @@ describe("account routes", () => {
     expect(ok.json.session).toContain(".");
     expect((await call("GET", "/api/auth/me", undefined, { token: t })).status).toBe(401);
     expect((await call("GET", "/api/auth/me", undefined, { token: ok.json.session })).status).toBe(200);
+  });
+
+  it("renames the account", async () => {
+    const lan = (await register("Lan")).json.session;
+    const minh = (await register("Minh")).json.session;
+    const svc = await getAccountService();
+    const id = (await svc.store.userByKey("lan"))!.id;
+    await svc.store.recordResults("tienlen", "r1", new Date(), [{ usernameKey: "lan", points: 5, rank: 1 }]);
+    const ok = await call("PATCH", "/api/auth/me", { username: "  Lan   Anh ", color: "#f87171" }, { token: lan });
+    expect(ok.status).toBe(200);
+    expect(ok.json.user.username).toBe("Lan Anh");
+    expect(ok.json.user.color).toBe("#f87171");
+    expect((await call("GET", "/api/auth/me", undefined, { token: lan })).json.user.username).toBe("Lan Anh");
+    expect((await svc.store.leaderboard("tienlen", 10)).map((r) => r.name)).toEqual(["Lan Anh"]);
+    expect((await svc.store.userById(id))!.usernameKey).toBe("lan anh");
+    // case/spacing-only change of own key is allowed
+    expect((await call("PATCH", "/api/auth/me", { username: "lan anh" }, { token: lan })).status).toBe(200);
+    const taken = await call("PATCH", "/api/auth/me", { username: "LAN ANH" }, { token: minh });
+    expect(taken.status).toBe(409);
+    expect(taken.json.error).toBe("Tên đăng nhập đã có người dùng");
+    // the old name is free for others
+    expect((await register("Lan")).status).toBe(200);
+    const res = await call("PATCH", "/api/auth/me", { username: "Boss" }, { token: minh });
+    expect(res.status).toBe(400);
+    expect(res.json.error).toBe("Tên này đã được giữ");
+    expect((await call("PATCH", "/api/auth/me", { username: "a!" }, { token: minh })).status).toBe(400);
+    expect((await call("GET", "/api/auth/me", undefined, { token: minh })).json.user.username).toBe("Minh");
+  });
+
+  it("an admin may rename to an admin-reserved name", async () => {
+    const boss = (await register("boss")).json.session;
+    expect((await call("PATCH", "/api/auth/me", { username: "BOSS" }, { token: boss })).status).toBe(200);
   });
 
   it("admin gate and stats", async () => {

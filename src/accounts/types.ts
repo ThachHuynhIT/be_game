@@ -14,7 +14,7 @@ export interface UserRow {
   lastLoginAt: Date | null;
 }
 
-export type UserPatch = Partial<Pick<UserRow, "role" | "disabled" | "icon" | "color" | "passwordHash" | "lastLoginAt">> & { bumpSession?: boolean };
+export type UserPatch = Partial<Pick<UserRow, "role" | "disabled" | "username" | "usernameKey" | "icon" | "color" | "passwordHash" | "lastLoginAt">> & { bumpSession?: boolean };
 
 /** Calendar day (YYYY-MM-DD) in Vietnam time (UTC+7); computed in JS so Postgres and pg-mem agree. */
 export function vnDay(date: Date): string {

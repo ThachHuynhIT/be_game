@@ -20,6 +20,8 @@ const toUser = (r: any): UserRow => ({
 
 const COLUMNS: Record<string, string> = {
   role: "role",
+  username: "username",
+  usernameKey: "username_key",
   disabled: "disabled",
   icon: "icon",
   color: "color",
@@ -71,6 +73,7 @@ class PgAccountStore implements AccountStore {
     }
     if (patch.bumpSession) sets.push("session_version = session_version + 1");
     if (!sets.length) return this.userById(id);
+    // A unique violation on username_key (code 23505) propagates; the service reports it as "taken".
     const { rows } = await this.pool.query(`update users set ${sets.join(", ")} where id = $1 returning *`, params);
     return rows[0] ? toUser(rows[0]) : null;
   }

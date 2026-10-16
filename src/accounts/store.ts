@@ -72,6 +72,9 @@ class MemoryAccountStore implements AccountStore {
     const r = this.users.get(id);
     if (!r) return null;
     const { bumpSession, ...fields } = patch;
+    if (fields.usernameKey !== undefined) {
+      for (const o of this.users.values()) if (o.id !== id && o.usernameKey === fields.usernameKey) throw Object.assign(new Error("duplicate username_key"), { code: "23505" });
+    }
     for (const [k, v] of Object.entries(fields)) if (v !== undefined) (r as any)[k] = v instanceof Date ? new Date(v) : v;
     if (bumpSession) r.sessionVersion += 1;
     return copy(r);

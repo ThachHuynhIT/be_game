@@ -35,7 +35,7 @@ export interface AccountService {
   /** Drops the cache entry (logout, password change, disable, role change). */
   forget(uid: string): void;
   logout(user: UserRow): Promise<void>;
-  updateMe(user: UserRow, patch: { icon?: string; color?: string; password?: string; oldPassword?: string }): Promise<Result<{ user: PublicUser; session?: string }>>;
+  updateMe(user: UserRow, patch: { username?: string; icon?: string; color?: string; password?: string; oldPassword?: string }): Promise<Result<{ user: PublicUser; session?: string }>>;
   adminUpdate(admin: UserRow, id: string, patch: { role?: Role; disabled?: boolean; password?: string }): Promise<Result<{ user: AdminUser }>>;
 }
 
@@ -202,6 +202,15 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
 
     async updateMe(user, patch) {
       const upd: Parameters<AccountStore["updateUser"]>[1] = {};
+      if (patch.username !== undefined) {
+        const n = normalizeUsername(patch.username as string);
+        if (!n.ok) return fail(400, n.error);
+        if (user.role !== "admin" && adminKeys().has(n.key)) return fail(400, "Tên này đã được giữ");
+        const other = await store.userByKey(n.key);
+        if (other && other.id !== user.id) return fail(409, "Tên đăng nhập đã có người dùng");
+        upd.username = n.username;
+        upd.usernameKey = n.key;
+      }
       if (patch.icon !== undefined) {
         if (typeof patch.icon !== "string" || (patch.icon !== "" && !PROFILE_ICONS.includes(patch.icon))) return fail(400, "Biểu tượng không hợp lệ");
         upd.icon = patch.icon;
@@ -218,7 +227,14 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
         upd.passwordHash = await hashPassword(patch.password as string);
         upd.bumpSession = true;
       }
-      const next = (await store.updateUser(user.id, upd)) ?? user;
+      let next: UserRow;
+      try {
+        next = (await store.updateUser(user.id, upd)) ?? user;
+      } catch (e) {
+        cache.delete(user.id);
+        if ((e as { code?: string })?.code === "23505") return fail(409, "Tên đăng nhập đã có người dùng");
+        throw e;
+      }
       cache.delete(user.id);
       return { ok: true, user: publicUser(next), ...(changingPassword ? { session: issue(next) } : {}) };
     },

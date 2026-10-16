@@ -12,7 +12,7 @@ export function normalizeUsername(raw: string): { ok: true; username: string; ke
 
 export function validatePassword(pw: string): string | null {
   const len = typeof pw === "string" ? [...pw.normalize("NFC")].length : 0;
-  if (len < 8) return "Mật khẩu tối thiểu 8 ký tự";
+  if (len < 1) return "Mật khẩu không được để trống";
   if (len > 72) return "Mật khẩu tối đa 72 ký tự";
   return null;
 }

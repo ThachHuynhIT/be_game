@@ -36,7 +36,8 @@ describe("usernames", () => {
   });
   it("rejects bad lengths and characters", () => {
     for (const bad of ["ab", "x".repeat(21), "a<b>", "lan!", ""]) expect(normalizeUsername(bad).ok).toBe(false);
-    expect(validatePassword("1234567")).not.toBeNull();
+    expect(validatePassword("")).not.toBeNull();
+    expect(validatePassword("1")).toBeNull();
     expect(validatePassword("12345678")).toBeNull();
     expect(validatePassword("x".repeat(73))).not.toBeNull();
   });
