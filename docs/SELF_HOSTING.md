@@ -45,9 +45,9 @@ flowchart LR
 |---|---|---|---|
 | Server `~/apps/be_game/.env` | `GAME_DOMAIN` | `play-api.fudio101.com` — bắt buộc, Traefik route theo tên này | zonenop |
 | Server `~/apps/be_game/.env` | `REDIS_URL` | **Hiện để trống** = Redis cục bộ trong compose (`redis://redis:6379`). Chỉ sau khi chuyển sang kho chung mới là URL Upstash của máy dự phòng (`rediss://default:<password>@<host>.upstash.io:6379`); khi đó là **bí mật**: chỉ nằm trong file này (quyền `600`), không commit, không in ra, không đưa vào GitHub secret | zonenop |
-| Server `~/apps/be_game/.env` | `DATABASE_URL` | Chuỗi Neon **pooled** (`postgres://<user>:<password>@<host>/<db>?sslmode=require`). **Bí mật** (quyền `600`, không commit/in/GitHub secret). **Để trống = tài khoản trong RAM**: mất khi restart, mỗi máy một danh sách, chỉ dùng để dev ([đặt an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
-| Server `~/apps/be_game/.env` | `SESSION_SECRET` | Khoá ký phiên, `openssl rand -base64 32`. **Bí mật**; production thiếu thì `/api/auth/*`, `/api/admin/*`, `/api/track` trả 503. Dùng giá trị giống Vercel `be-game` | zonenop |
-| Server `~/apps/be_game/.env` | `ADMIN_USERNAMES` | Username admin, cách nhau dấu phẩy. Ai đăng ký tên đó trước thành admin: đăng ký tài khoản của mình trước | zonenop |
+| Server `~/apps/be_game/.env` | `DATABASE_URL` | Chuỗi Neon **pooled** (`postgres://<user>:<password>@<host>/<db>?sslmode=require`). **Bí mật** (quyền `600`, không commit/in/GitHub secret). **Để trống** thì (image chạy `NODE_ENV=production`) tài khoản **chưa cấu hình**: đăng nhập và vào bàn bị từ chối, `/api/health` báo `accounts: "unconfigured"`, log có dòng `ACCOUNTS UNCONFIGURED`. Chỉ khi đặt thêm `ACCOUNTS_MEMORY=1` mới chạy tài khoản trong RAM (mất khi restart, mỗi máy một danh sách) ([đặt an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
+| Server `~/apps/be_game/.env` | `SESSION_SECRET` | Khoá ký phiên, `openssl rand -base64 32`. **Bí mật**; production thiếu thì `/api/auth/*`, `/api/admin/*`, `/api/track` trả 503. Dùng giá trị **giống hệt** Vercel `be-game` (cách chép an toàn: [Đặt bí mật an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
+| Server `~/apps/be_game/.env` | `ADMIN_USERNAMES` | Username admin, cách nhau dấu phẩy. Thành admin khi đăng ký **hoặc đăng nhập** (user đã có thành admin ở lần đăng nhập kế tiếp); tên chưa có thì ai đăng ký trước được quyền: đăng ký tài khoản của mình trước | zonenop |
 | Server `~/apps/be_game/.env` | `BE_GAME_COUNT_COMMANDS` | Tuỳ chọn: `1` = log số lệnh Redis mỗi 60 giây (xem [Đếm lệnh Redis](#đếm-lệnh-redis-upstash)) | zonenop |
 | Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`; cộng `http://localhost:3000` (các origin của site portfolio cũ đã bỏ ngày 2026-10-16). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
@@ -77,7 +77,23 @@ chmod 600 .env
 
 - Dùng `read -rs` (không hiện ký tự) rồi `printf`, không dùng `echo` hay dán vào trình soạn thảo; không đặt giá trị trên dòng lệnh. Nếu `.env` đã có dòng cùng tên thì sửa dòng đó thay vì thêm dòng thứ hai.
 - Áp dụng: `dc up -d be_game` (compose chuyển các biến vào container). Kiểm tra bằng `/api/health` trong container: `accounts` phải là `"postgres"`. Không `cat .env` hay `docker compose config` ra màn hình (nó in giá trị đã thay).
-- Vercel: đặt cùng giá trị bằng dashboard (Settings → Environment Variables) hoặc API env, rồi redeploy.
+- **Cùng một `SESSION_SECRET` cho cả hai backend, không in ra**: tạo **một lần** trên điện thoại vào `.env` (lệnh trên), rồi chép sang Vercel theo một trong hai cách:
+  - CLI, giá trị đi qua pipe, không lên màn hình hay argv (chạy trên máy đã `vercel link` project `be-game`):
+    ```bash
+    ssh vsmart-zangyapro "sed -n 's/^SESSION_SECRET=//p' ~/apps/be_game/.env" | tr -d '\n' | vercel env add SESSION_SECRET production
+    ssh vsmart-zangyapro "sed -n 's/^SESSION_SECRET=//p' ~/apps/be_game/.env" | tr -d '\n' | vercel env add SESSION_SECRET preview
+    ```
+  - Dashboard (Settings → Environment Variables): chỉ chép giá trị từ một terminal **không** ghi log / không bị ghi hình hay chia sẻ màn hình, dán thẳng vào ô giá trị, rồi xoá clipboard.
+- **`DATABASE_URL` trên Vercel phải có ở cả scope Production và Preview** (bản preview cũng chạy với `VERCEL`, thiếu thì preview báo "chưa cấu hình"): `read -rs v; printf '%s' "$v" | vercel env add DATABASE_URL production; printf '%s' "$v" | vercel env add DATABASE_URL preview; unset v`, hoặc dashboard. Đổi env xong phải redeploy.
+- **Kiểm tra hai máy dùng cùng secret và cùng DB** (token và mật khẩu chỉ đi qua biến shell và pipe, không lên màn hình hay argv; `-H @-` cần curl ≥ 7.55): đăng nhập ở máy chính rồi gọi `GET /api/auth/me` ở **máy kia** bằng token đó:
+  ```bash
+  read -r -p "Username: " u; read -rs -p "Mật khẩu: " pw; echo
+  t=$(printf '{"username":"%s","password":"%s"}' "$u" "$pw" | curl -s -H 'content-type: application/json' --data-binary @- https://play-api.fudio101.com/api/auth/login | sed -n 's/.*"session":"\([^"]*\)".*/\1/p'); unset pw
+  printf 'authorization: Bearer %s\n' "$t" | curl -s -o /dev/null -w 'vercel %{http_code}\n' -H @- https://be-game-omega.vercel.app/api/auth/me
+  printf 'authorization: Bearer %s\n' "$t" | curl -s -o /dev/null -w 'chinh  %{http_code}\n' -H @- https://play-api.fudio101.com/api/auth/me
+  unset t u
+  ```
+  Cả hai `200` = cùng `SESSION_SECRET` và cùng Neon. Vercel `401` = secret hoặc DB khác; `503` = Vercel chưa cấu hình (thiếu biến hoặc chưa redeploy). Mật khẩu có `"` hay `\` thì `printf` này không escape JSON: dùng mật khẩu không có hai ký tự đó.
 - **Đổi `SESSION_SECRET` đăng xuất mọi người** (mọi token cũ hết hiệu lực); đổi ở cả hai backend cùng lúc.
 
 ### `ALLOWED_ORIGIN`

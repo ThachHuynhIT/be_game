@@ -35,7 +35,7 @@ Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy như sơ
 
 `/rooms` trả các phòng còn người (tối đa 30), `/leaderboard?limit=20` (1–100) trả điểm mọi thời đại. `GET /api/health` kiểm tra store (Redis/RAM, vòng pub/sub) và báo `commit` đang chạy, `redisHost`, `sharedStore`, `now` (chi tiết: `docs/GUIDE.md` → HTTP endpoints). Bảng route nằm ở `src/server/app.ts`.
 
-**Tài khoản** (đăng nhập bắt buộc để vào bàn; chi tiết: `docs/GUIDE.md` → "Tài khoản và theo dõi"): `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET`/`PATCH /api/auth/me`, `POST /api/track` (đếm lượt xem), và cho admin `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH /api/admin/users/<id>`. `/leaderboard` trả bảng mùa này (`{season:"current", rows}`) từ Postgres; `?season=old` trả bảng cũ. `/api/health` thêm `accounts: "postgres" | "memory"`. Chưa có `DATABASE_URL` thì tài khoản ở bộ nhớ (mất khi restart, mỗi máy một danh sách): chỉ để dev.
+**Tài khoản** (đăng nhập bắt buộc để vào bàn; chi tiết: `docs/GUIDE.md` → "Tài khoản và theo dõi"): `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET`/`PATCH /api/auth/me`, `POST /api/track` (đếm lượt xem), và cho admin `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH /api/admin/users/<id>`. `/leaderboard` trả bảng mùa này (`{season:"current", rows}`) từ Postgres; `?season=old` trả bảng cũ. `/api/health` thêm `accounts: "postgres" | "memory" | "unconfigured" | "unavailable"`. Chưa có `DATABASE_URL` thì ở dev tài khoản nằm trong bộ nhớ (mất khi restart, mỗi máy một danh sách); ở production (`NODE_ENV=production` hoặc `VERCEL`) thì tài khoản **chưa cấu hình**: route auth/admin/track trả 503 và không vào bàn được, trừ khi đặt `ACCOUNTS_MEMORY=1`.
 
 Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts` (Tiến Lên + health) và `api/[game]/[kind].ts` cho mọi endpoint của 6 game còn lại. Mọi file đều export cùng một server; `app.ts` định tuyến theo path. Game mới chỉ cần thêm route trong `app.ts`, không thêm file vào `api/`.
 
@@ -158,9 +158,10 @@ Server → client: `ack {id, ok, error?, code?}` · `state {view}` (mỗi ngư�
 |---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | _(trống = store trong RAM)_ | Redis để lưu phòng, lấy biến đầu tiên có giá trị theo thứ tự này. Trên Vercel là bắt buộc |
 | `ALLOWED_ORIGIN` | _(trống = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*` |
-| `DATABASE_URL` | _(trống = tài khoản trong RAM, chỉ để dev)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
+| `DATABASE_URL` | _(trống = tài khoản trong RAM ở dev; production thì "chưa cấu hình", 503)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
 | `SESSION_SECRET` | _(trống)_ | Khoá ký token đăng nhập (`openssl rand -base64 32`). **Bí mật**; production thiếu thì route auth trả 503 |
-| `ADMIN_USERNAMES` | _(trống)_ | Username thành admin khi đăng ký (ai đăng ký trước được quyền) |
+| `ADMIN_USERNAMES` | _(trống)_ | Username thành admin khi đăng ký **hoặc đăng nhập** (thêm tên một user đã có thì người đó thành admin ở lần đăng nhập kế tiếp; tên chưa có thì ai đăng ký trước được quyền) |
+| `ACCOUNTS_MEMORY` | _(trống)_ | `1` = cho production chạy tài khoản trong RAM khi không có `DATABASE_URL` (mất khi restart). Bình thường để trống |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Cổng và địa chỉ lắng nghe khi chạy local |
 | `BE_GAME_COUNT_COMMANDS` | _(trống)_ | `1` = log số lệnh Redis mỗi 60 giây (đo trước khi chuyển sang Upstash; xem `docs/SELF_HOSTING.md`) |
 | `BUILD_COMMIT` | _(deploy tự đặt)_ | Commit đang chạy trên máy tự host: workflow Deploy export, compose chuyển vào container; `/api/health` trả lại ở `commit` |

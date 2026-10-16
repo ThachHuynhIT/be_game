@@ -1,6 +1,6 @@
 # Self-hosted behind the host's Traefik + Cloudflare Tunnel (no published ports, no Caddy): be_game + Redis.
 #   docker compose -f compose.selfhost.yml up -d --build      → https://${GAME_DOMAIN}
-# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN (required), ALLOWED_ORIGIN, REDIS_URL, DATABASE_URL, SESSION_SECRET, ADMIN_USERNAMES and BE_GAME_COUNT_COMMANDS (optional).
+# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN (required), ALLOWED_ORIGIN, REDIS_URL, DATABASE_URL, SESSION_SECRET, ADMIN_USERNAMES, ACCOUNTS_MEMORY and BE_GAME_COUNT_COMMANDS (optional).
 #
 # be_game joins the external `traefik_network` (Traefik routes GAME_DOMAIN to it via the labels below);
 # Redis stays on the project's own network and is reachable only by be_game.
@@ -23,8 +23,10 @@ services:
       # Ops aid: BE_GAME_COUNT_COMMANDS=1 in .env logs the Redis command count every 60 s (docs/SELF_HOSTING.md).
       BE_GAME_COUNT_COMMANDS: ${BE_GAME_COUNT_COMMANDS:-}
       # Accounts (docs/SELF_HOSTING.md). DATABASE_URL (Neon) and SESSION_SECRET are secrets: only in .env (chmod 600), never printed.
-      # Without DATABASE_URL accounts live in memory (lost on restart): dev only.
+      # NODE_ENV=production here: without DATABASE_URL accounts are "unconfigured" (sign-in and joins refused)
+      # unless ACCOUNTS_MEMORY=1 opts in to an in-memory store (lost on restart).
       DATABASE_URL: ${DATABASE_URL:-}
+      ACCOUNTS_MEMORY: ${ACCOUNTS_MEMORY:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
       ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
       # Commit being deployed (exported by .github/workflows/deploy.yml); /api/health reports it.
