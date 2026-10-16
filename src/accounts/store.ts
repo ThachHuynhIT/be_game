@@ -62,14 +62,14 @@ class MemoryAccountStore implements AccountStore {
     const r = this.users.get(id);
     if (!r) return null;
     const { bumpSession, ...fields } = patch;
-    for (const [k, v] of Object.entries(fields)) if (v !== undefined) (r as any)[k] = v;
+    for (const [k, v] of Object.entries(fields)) if (v !== undefined) (r as any)[k] = v instanceof Date ? new Date(v) : v;
     if (bumpSession) r.sessionVersion += 1;
     return copy(r);
   }
 
   async listUsers(q: string, page: number, pageSize: number) {
     const needle = q.toLowerCase();
-    const all = [...this.users.values()].filter((r) => r.usernameKey.includes(needle)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const all = [...this.users.values()].filter((r) => r.usernameKey.includes(needle)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? -1 : 1));
     const start = (Math.max(1, page) - 1) * pageSize;
     return { rows: all.slice(start, start + pageSize).map((r) => ({ ...copy(r), games: 0 })), total: all.length };
   }

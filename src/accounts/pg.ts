@@ -27,6 +27,9 @@ const COLUMNS: Record<string, string> = {
   lastLoginAt: "last_login_at",
 };
 
+/** Arbitrary constant key for the migration advisory lock. */
+const MIGRATION_LOCK = 724_001;
+
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 class PgAccountStore implements AccountStore {
@@ -73,9 +76,10 @@ class PgAccountStore implements AccountStore {
   }
 
   async listUsers(q: string, page: number, pageSize: number) {
-    const like = `%${q.toLowerCase()}%`;
+    // Escape LIKE wildcards (Postgres default escape is backslash). pg-mem ignores backslash escapes for `_`.
+    const like = `%${q.toLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
     const total = await this.pool.query("select count(*) as n from users where username_key like $1", [like]);
-    const { rows } = await this.pool.query("select * from users where username_key like $1 order by created_at desc limit $2 offset $3", [
+    const { rows } = await this.pool.query("select * from users where username_key like $1 order by created_at desc, id limit $2 offset $3", [
       like,
       pageSize,
       (Math.max(1, page) - 1) * pageSize,
@@ -93,6 +97,20 @@ class PgAccountStore implements AccountStore {
 }
 
 export async function createPgAccountStore(pool: Pool): Promise<AccountStore> {
-  await migrate((sql, params) => pool.query(sql, params as any[]));
+  // One dedicated connection so the session-level advisory lock covers the whole migration.
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    try {
+      await client.query("select pg_advisory_lock($1)", [MIGRATION_LOCK]);
+      locked = true;
+    } catch {
+      // pg-mem has no pg_advisory_lock; migrations are idempotent so continuing unlocked is safe.
+    }
+    await migrate((sql, params) => client.query(sql, params as any[]));
+  } finally {
+    if (locked) await client.query("select pg_advisory_unlock($1)", [MIGRATION_LOCK]).catch(() => {});
+    client.release();
+  }
   return new PgAccountStore(pool);
 }
