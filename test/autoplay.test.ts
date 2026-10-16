@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RoomState } from "../src/game/room";
 import { type HubSocket, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
+import { accountSession } from "./helpers/accounts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Listener = (arg?: any) => void;
@@ -27,6 +28,7 @@ class Sock implements HubSocket {
 
 describe("auto-play for an offline opponent (Tiến Lên, through the hub)", () => {
   it("plays the offline player's turn right away once they are offline, not at the turn deadline", async () => {
+    const sessions = [await accountSession("Anh"), await accountSession("Binh")];
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       const store = createMemoryRoomStore<RoomState>();
@@ -36,8 +38,8 @@ describe("auto-play for an offline opponent (Tiến Lên, through the hub)", () 
       attachConnection(a, { hub });
       attachConnection(b, { hub });
       const code = await hub.createRoom();
-      a.say({ type: "join", code, name: "An", token: "token-aaaaaaaa" });
-      b.say({ type: "join", code, name: "Bình", token: "token-bbbbbbbb" });
+      a.say({ type: "join", code, token: "token-aaaaaaaa", session: sessions[0] });
+      b.say({ type: "join", code, token: "token-bbbbbbbb", session: sessions[1] });
       await vi.advanceTimersByTimeAsync(200);
       a.say({ type: "start" });
       await vi.advanceTimersByTimeAsync(200);

@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { CHAT_COOLDOWN_MS, EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
-import { type SocialRoom, randomCode, sendChat } from "../game/room";
+import { type SocialRoom, cleanName, randomCode, sendChat } from "../game/room";
 import { ADAPTERS, type GameAdapter, type Result, tienlenAdapter } from "./adapters";
-import { type CodedRoom, type GameKind, type RoomStore, getRoomStore } from "./store";
+import { ACCOUNTS_UNCONFIGURED, type AccountService, accountsConfigError, getAccountService } from "../accounts/service";
+import { type CodedRoom, type GameKind, type RoomStore, getRoomStore, nameKey } from "./store";
 
 /**
  * Transport- and game-agnostic WebSocket handling for the Vercel functions and the local server.
@@ -45,6 +46,8 @@ interface Conn {
   code: string | null;
   token: string | null;
   role: "player" | "spectator";
+  /** Account that joined; the look is re-read from the store by this id (a later password change revokes the join token, not the seat). */
+  userId: string | null;
 }
 
 interface LocalRoom {
@@ -95,6 +98,17 @@ function looksByName(room: LookRoom): Record<string, PlayerLook> {
   return out;
 }
 
+/** Client device id (random, stored in the browser). */
+export const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const ACCOUNT_TIMEOUT_MS = 5000;
+const ACCOUNT_DOWN = "Máy chủ tài khoản đang lỗi, thử lại sau";
+const NEED_LOGIN = "Cần đăng nhập";
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let t: ReturnType<typeof setTimeout>;
+  return Promise.race([p, new Promise<never>((_, reject) => (t = setTimeout(() => reject(new Error("timeout")), ms)))]).finally(() => clearTimeout(t));
+}
+
 const newId = (len = 8) => randomBytes(len).toString("base64url").slice(0, len);
 
 export class RoomHub<S extends CodedRoom = CodedRoom> {
@@ -142,6 +156,7 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
         const rec: GameRecord | undefined = this.adapter.lastRecord(draft);
         if (rec && rec.id !== this.adapter.lastRecord(JSON.parse(before) as S)?.id) {
           await this.store.recordGame(rec).catch((err) => console.error("[be_game] leaderboard:", err));
+          this.recordAccountResults(rec);
         }
         return { found: true, result };
       }
@@ -149,6 +164,20 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
       if (!fromCache) await new Promise((r) => setTimeout(r, 5 + Math.random() * 20 * (attempt + 1)));
     }
     throw new Error("Phòng đang bận, thử lại");
+  }
+
+  /** Feed the per-account leaderboard after the save; never awaited so Postgres cannot hold the room loop. */
+  private recordAccountResults(rec: GameRecord) {
+    const firsts = rec.results.filter((r) => r.rank === 0).length;
+    const rows = rec.results.map((r) => ({ usernameKey: nameKey(r.name), points: r.delta, rank: r.rank === 0 && firsts > 1 ? 2 : r.rank + 1 })); // ranks start at 0 here, at 1 in the account store; shared firsts do not count as wins
+    void (async () => {
+      try {
+        const svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
+        await svc.store.recordResults(this.adapter.game, rec.id, new Date(rec.at), rows);
+      } catch (err) {
+        console.error("[be_game] account results:", err instanceof Error ? err.message : "error");
+      }
+    })();
   }
 
   private cached(code: string) {
@@ -307,7 +336,7 @@ const cleanCode = (code: unknown) => String(code ?? "").toUpperCase().slice(0, 8
 
 /** Wire a freshly upgraded WebSocket into a game. */
 export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
-  const conn: Conn = { socket, code: null, token: null, role: "player" };
+  const conn: Conn = { socket, code: null, token: null, role: "player", userId: null };
   const hubPromise: Promise<RoomHub> = opts.hub ? Promise.resolve(opts.hub) : getHub(opts.game ?? "tienlen");
   let closed = false;
   let windowStart = Date.now();
@@ -340,21 +369,49 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     if (msg.type === "join" || msg.type === "watch") {
       const code = cleanCode(msg.code);
       const token = String(msg.token ?? "");
-      const name = String(msg.name ?? "");
-      const look = cleanLook(msg.look);
-      const res = await hub.mutate(code, (room, now) => {
-        const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
-        if (r.ok) setLook(room as unknown as LookRoom, token, look);
-        return r;
-      });
+      if (accountsConfigError()) return ack(id, { ok: false, error: ACCOUNTS_UNCONFIGURED });
+      let svc: AccountService;
+      let user: Awaited<ReturnType<AccountService["authenticate"]>>;
+      try {
+        svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
+        user = await withTimeout(svc.authenticate(typeof msg.session === "string" ? msg.session : null), ACCOUNT_TIMEOUT_MS);
+      } catch (err) {
+        console.error("[be_game] account auth:", err instanceof Error ? err.message : "error");
+        return ack(id, { ok: false, error: ACCOUNT_DOWN });
+      }
+      if (!user) return ack(id, { ok: false, error: NEED_LOGIN });
+      // The account decides name and look; whatever the client sent is ignored.
+      const name = user.username;
+      const look: PlayerLook = { icon: user.icon, color: user.color };
+      const res = await hub.mutate(
+        code,
+        (room, now): Result => {
+          const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
+          if (!r.ok) return r;
+          if (msg.type === "join") {
+            // A seat kept by token mid-game keeps its old name: never take over another account's seat.
+            const seat = (room as unknown as LookRoom).seats.find((p) => p?.token === token);
+            if (seat && seat.name !== cleanName(name)) return { ok: false, error: "Ghế này thuộc tài khoản khác" };
+          }
+          setLook(room as unknown as LookRoom, token, look);
+          return r;
+        },
+        (r) => !r.ok,
+      );
       if (!res.found) return ack(id, { ok: false, error: "Không tìm thấy phòng" });
       if (!res.result.ok) return ack(id, res.result);
       if (conn.code && conn.code !== code) hub.remove(conn);
       conn.code = code;
       conn.token = token;
+      conn.userId = user.id;
       conn.role = msg.type === "join" ? "player" : "spectator";
       hub.add(conn, code);
       ack(id, { ok: true });
+      if (typeof msg.device === "string" && DEVICE_RE.test(msg.device)) {
+        svc.store
+          .trackView({ path: `/play/${adapter.game}`, device: msg.device, userId: user.id })
+          .catch((err) => console.error("[be_game] track:", err instanceof Error ? err.message : "error"));
+      }
       // The save above already notified subscribers, but this socket may have registered after it.
       return hub.refresh(code);
     }
@@ -370,8 +427,19 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     }
 
     if (msg.type === "look") {
-      const look = cleanLook(msg.look);
-      if (!look) return ack(id, { ok: false, error: "Biểu tượng/màu không hợp lệ" });
+      // The payload is ignored: the look always comes from the account's current profile.
+      if (accountsConfigError()) return ack(id, { ok: false, error: ACCOUNTS_UNCONFIGURED });
+      if (!conn.userId) return ack(id, { ok: false, error: NEED_LOGIN });
+      const userId = conn.userId;
+      let user: Awaited<ReturnType<AccountService["store"]["userById"]>>;
+      try {
+        user = await withTimeout((await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS)).store.userById(userId), ACCOUNT_TIMEOUT_MS);
+      } catch (err) {
+        console.error("[be_game] account auth:", err instanceof Error ? err.message : "error");
+        return ack(id, { ok: false, error: ACCOUNT_DOWN });
+      }
+      if (!user || user.disabled) return ack(id, { ok: false, error: NEED_LOGIN });
+      const look: PlayerLook = { icon: user.icon, color: user.color };
       const res = await hub.mutate(code, (room) => setLook(room as unknown as LookRoom, token, look));
       return ack(id, res.found ? { ok: true } : { ok: false, error: "Không tìm thấy phòng" });
     }
