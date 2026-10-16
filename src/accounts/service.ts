@@ -256,6 +256,19 @@ let testInit: { build?: () => Promise<AccountService>; timeoutMs?: number } = {}
 export function resetAccountServiceForTests(opts: { build?: () => Promise<AccountService>; timeoutMs?: number } = {}) {
   singleton = null;
   testInit = opts;
+  lastPruneAt = -Infinity;
+}
+
+const VIEW_RETENTION_DAYS = 180;
+const PRUNE_EVERY_MS = 24 * 3600_000;
+let lastPruneAt = -Infinity;
+
+/** Deletes old page views at most once per 24 h per process (a long-lived phone backend keeps pruning). Returns whether it ran. */
+export function pruneViewsIfDue(store: AccountStore, now: number = Date.now()): boolean {
+  if (now - lastPruneAt < PRUNE_EVERY_MS) return false;
+  lastPruneAt = now;
+  void store.pruneViews(VIEW_RETENTION_DAYS).catch((e) => console.error("[be_game] pruneViews failed:", e instanceof Error ? e.message : "error"));
+  return true;
 }
 
 async function build(): Promise<AccountService> {
@@ -281,7 +294,7 @@ async function build(): Promise<AccountService> {
   const redis = redisUrl() ? await getRedis().catch(() => null) : null;
   limiter = redis ? redisRateLimiter(redis as any) : memoryRateLimiter();
   const svc = createAccountService(store, limiter);
-  void store.pruneViews(180).catch((e) => console.error("[be_game] pruneViews failed:", e instanceof Error ? e.message : "error"));
+  pruneViewsIfDue(store);
   return svc;
 }
 
@@ -300,6 +313,8 @@ export function getAccountService(): Promise<AccountService> {
     p.catch(() => {
       if (singleton === p) singleton = null;
     });
+  } else if (Date.now() - lastPruneAt >= PRUNE_EVERY_MS) {
+    singleton.then((svc) => pruneViewsIfDue(svc.store), () => {});
   }
   return singleton;
 }

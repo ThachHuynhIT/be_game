@@ -176,8 +176,9 @@ class PgAccountStore implements AccountStore {
   }
 
   async pruneViews(olderThanDays: number, now = new Date()) {
-    const cutoff = new Date(now.getTime() - olderThanDays * 86_400_000);
-    const r = await this.pool.query("delete from page_views where at < $1", [cutoff]);
+    // `day` is indexed (page_views_day); `at` is not.
+    const cutoff = vnDay(new Date(now.getTime() - olderThanDays * 86_400_000));
+    const r = await this.pool.query("delete from page_views where day < $1", [cutoff]);
     return r.rowCount ?? 0;
   }
 

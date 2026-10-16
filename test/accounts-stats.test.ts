@@ -105,3 +105,45 @@ describe.each([["memory", async () => createMemoryAccountStore()], ["postgres (p
     expect((await s.stats(7, now)).topPlayers.map((p) => p.name)).toEqual(["An", "Bao"]);
   });
 });
+
+describe("pruneViews uses the indexed day column", () => {
+  it("postgres (pg-mem): deletes by day < cutoff, keeps the cutoff day", async () => {
+    const db = newDb();
+    const { Pool } = db.adapters.createPg();
+    const pool = new Pool();
+    const s = await createPgAccountStore(pool);
+    const now = new Date("2026-10-16T05:00:00Z"); // VN day 2026-10-16; 180 days earlier = 2026-04-19
+    const ins = (at: Date, day: string) => pool.query("insert into page_views (at, day, path, device_id) values ($1, $2, '/', 'd')", [at, day]);
+    await ins(now, "2026-04-18"); // `at` is recent but the day is old: only a day-based prune removes it
+    await ins(now, "2026-04-19");
+    await ins(now, "2026-10-16");
+    const sql: string[] = [];
+    const query = pool.query.bind(pool);
+    pool.query = ((text: string, params?: unknown[]) => (sql.push(text), query(text, params as any[]))) as any;
+    expect(await s.pruneViews(180, now)).toBe(1);
+    expect(sql.some((t) => /delete from page_views where day < \$1/.test(t))).toBe(true);
+    expect((await query("select day from page_views order by day")).rows.map((r: any) => r.day)).toEqual(["2026-04-19", "2026-10-16"]);
+  });
+
+  it("memory: same day boundary", async () => {
+    const s = createMemoryAccountStore();
+    const now = new Date("2026-10-16T05:00:00Z");
+    await s.trackView({ path: "/", device: "d", userId: null, at: new Date("2026-04-18T05:00:00Z") });
+    await s.trackView({ path: "/", device: "d", userId: null, at: new Date("2026-04-19T05:00:00Z") });
+    expect(await s.pruneViews(180, now)).toBe(1);
+  });
+
+  it("runs at most once per 24 h per process", async () => {
+    const { pruneViewsIfDue, resetAccountServiceForTests } = await import("../src/accounts/service");
+    resetAccountServiceForTests();
+    let calls = 0;
+    const store = { pruneViews: async () => (calls++, 0) } as unknown as AccountStore;
+    const t0 = 1_800_000_000_000;
+    expect(pruneViewsIfDue(store, t0)).toBe(true);
+    expect(pruneViewsIfDue(store, t0 + 3600_000)).toBe(false);
+    expect(pruneViewsIfDue(store, t0 + 23 * 3600_000)).toBe(false);
+    expect(pruneViewsIfDue(store, t0 + 24 * 3600_000)).toBe(true);
+    expect(calls).toBe(2);
+    resetAccountServiceForTests();
+  });
+});

@@ -179,9 +179,9 @@ class MemoryAccountStore implements AccountStore {
   }
 
   async pruneViews(olderThanDays: number, now = new Date()) {
-    const cutoff = now.getTime() - olderThanDays * 86_400_000;
+    const cutoff = vnDay(new Date(now.getTime() - olderThanDays * 86_400_000));
     const before = this.views.length;
-    this.views = this.views.filter((v) => v.at.getTime() >= cutoff);
+    this.views = this.views.filter((v) => v.day >= cutoff);
     return before - this.views.length;
   }
 
