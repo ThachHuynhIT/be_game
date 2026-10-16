@@ -7,16 +7,22 @@ import { createGameServer } from "../src/server/app";
 let server: Server;
 let base = "";
 let ipN = 0;
+const saved = { admins: process.env.ADMIN_USERNAMES, secret: process.env.SESSION_SECRET, vercel: process.env.VERCEL };
+const restore = (k: string, v: string | undefined) => (v === undefined ? delete process.env[k] : (process.env[k] = v));
 
 beforeAll(async () => {
   process.env.ADMIN_USERNAMES = "boss";
   delete process.env.DATABASE_URL;
   delete process.env.SESSION_SECRET;
+  delete process.env.VERCEL;
   server = createGameServer();
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterAll(async () => {
+  restore("ADMIN_USERNAMES", saved.admins);
+  restore("SESSION_SECRET", saved.secret);
+  restore("VERCEL", saved.vercel);
   server.closeAllConnections();
   await new Promise((r) => server.close(r));
 });
@@ -173,5 +179,48 @@ describe("account routes", () => {
     expect(res.status).toBe(204);
     const stats = await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session });
     expect(stats.json.totals.views).toBe(1);
+  });
+
+  const regAs = (headers: Record<string, string>, n: number) =>
+    fetch(base + "/api/auth/register", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ username: `Ip${n}`, password: "matkhau123" }) }).then((r) => r.status);
+
+  it("keys the rate limit on cf-connecting-ip, ignoring a spoofed leading XFF", async () => {
+    const out: number[] = [];
+    for (let i = 0; i < 6; i++) out.push(await regAs({ "cf-connecting-ip": "5.5.5.5", "x-forwarded-for": `1.1.1.${i}, 5.5.5.5` }, i));
+    expect(out[5]).toBe(429);
+  });
+
+  it("uses x-real-ip on Vercel and ignores cf-connecting-ip", async () => {
+    process.env.VERCEL = "1";
+    process.env.SESSION_SECRET = "x".repeat(40);
+    try {
+      const out: number[] = [];
+      for (let i = 0; i < 6; i++) out.push(await regAs({ "x-real-ip": "6.6.6.6", "cf-connecting-ip": `2.2.2.${i}` }, i));
+      expect(out[5]).toBe(429);
+    } finally {
+      delete process.env.VERCEL;
+      delete process.env.SESSION_SECRET;
+    }
+  });
+
+  it("requires JSON content type, rejects foreign origins, and 404s a malformed admin id", async () => {
+    const plain = await fetch(base + "/api/auth/login", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
+    expect(plain.status).toBe(415);
+    process.env.ALLOWED_ORIGIN = "https://good.example.com";
+    try {
+      const bad = await call("POST", "/api/auth/login", { username: "Lan", password: "matkhau123" }, { headers: { origin: "https://evil.example.com" } });
+      expect(bad.status).toBe(403);
+    } finally {
+      delete process.env.ALLOWED_ORIGIN;
+    }
+    const boss = (await register("boss")).json;
+    expect((await call("PATCH", "/api/admin/users/%E0%A4%A", { disabled: true }, { token: boss.session })).status).toBe(404);
+  });
+
+  it("strips control characters from tracked paths", async () => {
+    const boss = (await register("boss")).json;
+    expect((await call("POST", "/api/track", { path: "/a\u0000b\n", device: "abcdefghijklmnop" })).status).toBe(204);
+    const stats = await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session });
+    expect(stats.json.topPages[0].path).toBe("/ab");
   });
 });

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isAllowedOrigin } from "./hub";
 import { type AccountService, TOO_MANY, getAccountService, publicUser, sessionSecret } from "../accounts/service";
 
 const MAX_BODY = 4096;
@@ -23,15 +24,22 @@ function send(res: ServerResponse, status: number, body?: unknown) {
 }
 const err = (res: ServerResponse, status: number, error: string) => send(res, status, { ok: false, error });
 
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v)?.trim() || "";
+
+/**
+ * Per deploy: on Vercel only the platform's x-real-ip / first XFF entry are trusted; elsewhere the phone sits behind a
+ * Cloudflare tunnel (cf-connecting-ip), otherwise the proxy-appended last XFF entry. A client-supplied header is never trusted blindly.
+ */
 export function clientIp(req: IncomingMessage): string {
-  const xff = req.headers["x-forwarded-for"];
-  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
-  const cf = req.headers["cf-connecting-ip"];
-  const ip = first || (Array.isArray(cf) ? cf[0] : cf)?.trim() || req.socket.remoteAddress || "unknown";
-  return ip.slice(0, 64);
+  const xff = one(req.headers["x-forwarded-for"]).split(",").map((x) => x.trim()).filter(Boolean);
+  let ip: string;
+  if (process.env.VERCEL) ip = one(req.headers["x-real-ip"]) || xff[0] || "";
+  else ip = one(req.headers["cf-connecting-ip"]) || xff[xff.length - 1] || "";
+  return (ip || req.socket.remoteAddress || "unknown").slice(0, 64);
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, anyType = false): Promise<Record<string, unknown>> {
+  if (!anyType && !/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) throw new HttpError(415, "Cần Content-Type: application/json");
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const c of req) {
@@ -65,7 +73,7 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 /** Strips query/hash; must start with "/" and be ≤ 200 chars. */
 export function normalizeTrackPath(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const p = raw.split("#")[0].split("?")[0];
+  const p = raw.split("#")[0].split("?")[0].replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
   return p.startsWith("/") && p.length <= 200 ? p : null;
 }
 
@@ -95,6 +103,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
   const method = req.method ?? "GET";
   const svc = await getAccountService();
   const ip = clientIp(req);
+  if (path !== "/api/track" && req.headers.origin && !isAllowedOrigin(req.headers.origin, req.headers.host)) return err(res, 403, "Origin không được phép");
   const methodNotAllowed = () => err(res, 405, "Method not allowed");
 
   if (path === "/api/track") {
@@ -152,8 +161,14 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
     const m = /^\/api\/admin\/users\/([^/]+)$/.exec(path);
     if (m) {
       if (method !== "PATCH") return methodNotAllowed();
+      let id: string;
+      try {
+        id = decodeURIComponent(m[1]);
+      } catch {
+        return err(res, 404, "Không tìm thấy người dùng");
+      }
       const b = await readJson(req);
-      const r = await svc.adminUpdate(user, decodeURIComponent(m[1]), { role: b.role as any, disabled: b.disabled as any, password: b.password as any });
+      const r = await svc.adminUpdate(user, id, { role: b.role as any, disabled: b.disabled as any, password: b.password as any });
       return r.ok ? send(res, 200, { ok: true, user: r.user }) : err(res, r.status, r.error);
     }
   }
@@ -164,7 +179,7 @@ async function track(req: IncomingMessage, res: ServerResponse, svc: AccountServ
   const ua = String(req.headers["user-agent"] ?? "");
   if (BOT_RE.test(ua)) return send(res, 204);
   if (!(await svc.limiter.hit(`track:ip:${ip}`, 60, 60))) return err(res, 429, TOO_MANY);
-  const b = await readJson(req);
+  const b = await readJson(req, true);
   const path = normalizeTrackPath(b.path);
   if (!path) return err(res, 400, "path không hợp lệ");
   if (typeof b.device !== "string" || !DEVICE_RE.test(b.device)) return err(res, 400, "device không hợp lệ");

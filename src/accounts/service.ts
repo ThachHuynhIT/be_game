@@ -39,9 +39,17 @@ export interface AccountService {
   adminUpdate(admin: UserRow, id: string, patch: { role?: Role; disabled?: boolean; password?: string }): Promise<Result<{ user: AdminUser }>>;
 }
 
+let warnedShort = false;
+
 /** Signing secret; null when it must be configured (production without SESSION_SECRET). */
 export function sessionSecret(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (env.SESSION_SECRET) return env.SESSION_SECRET;
+  if (env.SESSION_SECRET) {
+    if (!warnedShort && Buffer.byteLength(env.SESSION_SECRET) < 32) {
+      warnedShort = true;
+      console.warn("[be_game] SESSION_SECRET is shorter than 32 bytes; use a longer random value.");
+    }
+    return env.SESSION_SECRET;
+  }
   if (env.NODE_ENV === "production" || env.VERCEL) return null;
   return "dev-insecure-secret";
 }
@@ -122,8 +130,11 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       const found = name.ok ? await store.userByKey(name.key) : null;
       if (!found) {
         // Equalise timing with a real verification so unknown usernames are not detectable.
-        dummyHash ??= hashPassword("dummy-password");
-        await verifyPassword(password, await dummyHash);
+        dummyHash ??= hashPassword("dummy-password").catch((e) => {
+          dummyHash = null;
+          throw e;
+        });
+        await verifyPassword(password, await dummyHash).catch(() => false);
         return fail(401, BAD_LOGIN);
       }
       if (!(await verifyPassword(password, found.passwordHash)) || found.disabled) return fail(401, BAD_LOGIN);
