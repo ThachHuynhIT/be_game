@@ -20,9 +20,9 @@ export function readSession(token: string, secret: string, now = Date.now()): { 
     const got = Buffer.from(sig);
     if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
     const d = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as { uid?: unknown; ver?: unknown; exp?: unknown };
-    if (typeof d.uid !== "string" || typeof d.ver !== "number" || typeof d.exp !== "number") return null;
+    if (typeof d.uid !== "string" || !Number.isInteger(d.ver) || (d.ver as number) < 0 || typeof d.exp !== "number" || !Number.isFinite(d.exp)) return null;
     if (d.exp <= Math.floor(now / 1000)) return null;
-    return { uid: d.uid, ver: d.ver };
+    return { uid: d.uid, ver: d.ver as number };
   } catch {
     return null;
   }

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import RedisMock from "ioredis-mock";
 import { describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "../src/accounts/password";
@@ -46,5 +47,55 @@ describe("rate limits", () => {
     for (let i = 0; i < 3; i++) expect(await rl.hit("login:ip:1.2.3.4", 3, 900)).toBe(true);
     expect(await rl.hit("login:ip:1.2.3.4", 3, 900)).toBe(false);
     expect(await rl.hit("login:ip:5.6.7.8", 3, 900)).toBe(true);
+  });
+});
+
+describe("review fixes", () => {
+  it("NFC/NFD passwords are equivalent; length counts code points; oversized params rejected", async () => {
+    const nfc = "mậtkhẩu12".normalize("NFC");
+    const nfd = nfc.normalize("NFD");
+    expect(nfd).not.toBe(nfc);
+    const h = await hashPassword(nfd);
+    expect(await verifyPassword(nfc, h)).toBe(true);
+    expect(validatePassword(nfd)).toBeNull();
+    expect(validatePassword("😀".repeat(8))).toBeNull();
+    expect(validatePassword("😀".repeat(73))).not.toBeNull();
+    expect(await verifyPassword(nfc, h.replace("scrypt$32768$8$1", "scrypt$65536$8$1"))).toBe(false);
+    expect(await verifyPassword(nfc, h.replace("scrypt$32768$8$1", "scrypt$32768$8$2"))).toBe(false);
+  });
+  it("rejects malformed session tokens", () => {
+    const now = 1_790_000_000_000;
+    const t = signSession({ uid: "u1", ver: 2 }, "s", now);
+    const [p, sig] = t.split(".");
+    expect(readSession(`${p}.${sig}ab`, "s", now)).toBeNull();
+    expect(readSession(`${p}.${sig.slice(0, -2)}`, "s", now)).toBeNull();
+    const forge = (payload: string) => {
+      const b = Buffer.from(payload).toString("base64url");
+      return `${b}.${createHmac("sha256", "s").update(b).digest("base64url")}`;
+    };
+    const exp = Math.floor(now / 1000) + 100;
+    expect(readSession(forge("not json"), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: 1, ver: 1, exp })), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: "u", ver: "1", exp })), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: "u", ver: -1, exp })), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: "u", ver: 1.5, exp })), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: "u", ver: 1, exp: null })), "s", now)).toBeNull();
+    expect(readSession(forge(JSON.stringify({ uid: "u", ver: 1, exp })), "s", now)).toEqual({ uid: "u", ver: 1 });
+  });
+  it("rejects zero-width characters in usernames", () => {
+    expect(normalizeUsername("lan\u200Banh").ok).toBe(false);
+  });
+  it("redis bucket always has a TTL; memory limiter resets after the window", async () => {
+    const redis = new RedisMock();
+    await redisRateLimiter(redis as never).hit("t:1", 3, 900);
+    const ttl = await redis.ttl("be_game:rl:t:1");
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(900);
+    let t = 0;
+    const rl = memoryRateLimiter(() => t);
+    expect(await rl.hit("b", 1, 10)).toBe(true);
+    expect(await rl.hit("b", 1, 10)).toBe(false);
+    t = 61_000;
+    expect(await rl.hit("b", 1, 10)).toBe(true);
   });
 });

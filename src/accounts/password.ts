@@ -9,7 +9,7 @@ const MAXMEM = 64 * 1024 * 1024;
 const derive = (pw: string, salt: Buffer, n: number, r: number, p: number): Promise<Buffer> =>
   new Promise((resolve, reject) => {
     const opts: ScryptOptions = { N: n, r, p, maxmem: MAXMEM };
-    scrypt(pw, salt, KEYLEN, opts, (err, key) => (err ? reject(err) : resolve(key)));
+    scrypt(pw.normalize("NFC"), salt, KEYLEN, opts, (err, key) => (err ? reject(err) : resolve(key)));
   });
 
 /** Stored form: scrypt$N$r$p$<salt b64>$<hash b64>. */
@@ -26,6 +26,7 @@ export async function verifyPassword(pw: string, stored: string): Promise<boolea
     if (parts.length !== 6 || parts[0] !== "scrypt") return false;
     const [n, r, p] = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
     if (![n, r, p].every((x) => Number.isInteger(x) && x > 0)) return false;
+    if (n > N || r > R || p > P) return false;
     const salt = Buffer.from(parts[4], "base64");
     const expected = Buffer.from(parts[5], "base64");
     if (salt.length === 0 || expected.length === 0) return false;
