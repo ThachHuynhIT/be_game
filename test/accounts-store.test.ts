@@ -109,7 +109,7 @@ describe("migration locking (transaction-scoped, pooler-safe)", () => {
     const t = lockingPool();
     const s = await createPgAccountStore(t.pool);
     expect(t.connects()).toBe(1);
-    expect(t.log.slice(0, 3)).toEqual(["begin", "set local lock_timeout =", "select pg_advisory_xact_lock($1)"]);
+    expect(t.log.slice(0, 4)).toEqual(["begin", "set local lock_timeout =", "set local statement_timeout =", "select pg_advisory_xact_lock($1)"]);
     expect(t.log[t.log.length - 1]).toBe("commit");
     expect(t.log.some((l) => /advisory_unlock|pg_advisory_lock\(/.test(l))).toBe(false);
     expect(t.released).toEqual([undefined]);
@@ -131,7 +131,7 @@ describe("migration locking (transaction-scoped, pooler-safe)", () => {
       if (fail) throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
     });
     await expect(createPgAccountStore(t.pool)).rejects.toThrow(/lock timeout/);
-    expect(t.log).toEqual(["begin", "set local lock_timeout =", "select pg_advisory_xact_lock($1)", "rollback"]);
+    expect(t.log).toEqual(["begin", "set local lock_timeout =", "set local statement_timeout =", "select pg_advisory_xact_lock($1)", "rollback"]);
     expect(t.released).toEqual([undefined]);
     fail = false;
     const s = await createPgAccountStore(t.pool);
