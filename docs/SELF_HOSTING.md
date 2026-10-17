@@ -274,3 +274,5 @@ Theo skill `zangyapro-host` (bắt buộc với người và với AI agent):
 - **Không prune**: host dùng chung; xoá đúng image cũ theo ID.
 - **OIDC thay cho OAuth secret**: không có secret Tailscale lâu dài nào trên GitHub.
 - **Key deploy riêng, bị giới hạn**: lộ key thì chỉ dùng được từ trong tailnet, không mở được shell tương tác hay forward cổng.
+
+**Container không ra được internet (`accounts: "unavailable"`, kết nối Neon timeout).** Firewall của chủ máy (`/etc/nftables.d/51_docker.nft`) chỉ cho phép traffic đi ra từ interface tên `docker*`. Network của be_game vì vậy đặt bridge `docker-begame` (`compose.selfhost.yml`, network `be_game_net`). Đừng đổi tên đó, và đừng sửa firewall của chủ máy. Workflow Deploy đòi `/api/health` có `"accounts":"postgres"`, nên lỗi này làm run báo đỏ thay vì im lặng.

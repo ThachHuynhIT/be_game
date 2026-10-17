@@ -56,8 +56,13 @@ services:
       - ./data/redis:/data
 
 networks:
+  # The host firewall (owner-managed nftables, /etc/nftables.d/51_docker.nft) only forwards traffic out of
+  # interfaces named docker*: name this bridge so be_game can reach the internet (Neon, for accounts).
+  # A new network name, so compose creates it fresh instead of failing on the old be_game_default.
   default:
-    name: be_game_default
+    name: be_game_net
+    driver_opts:
+      com.docker.network.bridge.name: docker-begame
   traefik_network:
     name: traefik_network
     external: true
