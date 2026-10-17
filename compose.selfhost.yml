@@ -51,9 +51,12 @@ services:
     security_opt:
       - no-new-privileges:true
     command: ["redis-server", "--appendonly", "yes"]
-    # Explicit, so redis is recreated on be_game_net after the network rename (its old container pointed at the removed be_game_default).
     networks:
       - default
+    # Bumped when redis must be recreated (2026-10-17: its old container still pointed at the removed be_game_default
+    # network; a config change is what makes compose recreate an otherwise unchanged service).
+    labels:
+      - "be_game.redis.config=2"
     volumes:
       # Bind mount, not a named volume: lives in the deploy directory, so host backups of /home cover it.
       - ./data/redis:/data
