@@ -3,6 +3,7 @@ import { ADAPTERS } from "../src/server/adapters";
 import { type HubSocket, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
 import type { GameKind } from "../src/server/store";
+import { accountSession } from "./helpers/accounts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Listener = (arg?: any) => void;
@@ -35,6 +36,7 @@ const GAMES: GameKind[] = ["tienlen", "meono", "typhu", "splendor", "bang", "can
 // in the past, so the hub re-ran `tick` every 100 ms and pushed ~10 views a second to everyone still playing.
 describe("no tick busy-loop while an opponent stays offline", () => {
   it.each(GAMES)("%s", async (game) => {
+    const sessions = await Promise.all([0, 1, 2].map((i) => accountSession(`Pl${i}`)));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       const hub = createRoomHub(createMemoryRoomStore(), ADAPTERS[game] as never);
@@ -42,7 +44,7 @@ describe("no tick busy-loop while an opponent stays offline", () => {
       const socks = ["aaaaaaaa", "bbbbbbbb", "cccccccc"].map((t, i) => {
         const s = new Sock();
         attachConnection(s, { hub });
-        s.say({ type: "join", code, name: `P${i}`, token: `token-${t}` });
+        s.say({ type: "join", code, token: `token-${t}`, session: sessions[i] });
         return s;
       });
       await vi.advanceTimersByTimeAsync(200);

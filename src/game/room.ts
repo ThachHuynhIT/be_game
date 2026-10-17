@@ -130,7 +130,7 @@ export function randomCode(length = 5, random: () => number = Math.random) {
 }
 
 export const cleanName = (name: unknown) =>
-  (typeof name === "string" ? name : "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_LENGTH) || "Người chơi";
+  [...(typeof name === "string" ? name : "").replace(/\s+/g, " ").trim()].slice(0, MAX_NAME_LENGTH).join("") || "Người chơi";
 
 export function newRoom(code: string): RoomState {
   return { code, hostId: "", seats: [null, null, null, null], game: null, turnDeadline: null, lastWinner: null };
