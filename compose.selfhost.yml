@@ -51,6 +51,9 @@ services:
     security_opt:
       - no-new-privileges:true
     command: ["redis-server", "--appendonly", "yes"]
+    # Explicit, so redis is recreated on be_game_net after the network rename (its old container pointed at the removed be_game_default).
+    networks:
+      - default
     volumes:
       # Bind mount, not a named volume: lives in the deploy directory, so host backups of /home cover it.
       - ./data/redis:/data
