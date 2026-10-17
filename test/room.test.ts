@@ -116,3 +116,12 @@ describe("room lifecycle", () => {
     }
   });
 });
+
+describe("cleanName", () => {
+  it("collapses whitespace and keeps the letter s", async () => {
+    const { cleanName } = await import("../src/game/room");
+    expect(cleanName("  boss\t\n  Sang   sư ")).toBe("boss Sang sư");
+    expect(cleanName("sss")).toBe("sss");
+    expect(cleanName("   ")).toBe("Người chơi");
+  });
+});

@@ -148,7 +148,7 @@ jobs:
               node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>r.text()).then(t=>console.log(t),()=>{})" \
               2>/dev/null || true)
             # Healthy AND running this commit (not the previous container still answering).
-            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* && $health == *'"accounts":"postgres"'* ]]; then
               echo "healthy at $SHA"
               exit 0
             fi
@@ -165,7 +165,7 @@ jobs:
         run: |
           for i in $(seq 1 20); do
             health=$(curl -fsS "https://${{ vars.GAME_DOMAIN }}/api/health" || true)
-            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* && $health == *'"accounts":"postgres"'* ]]; then
               echo "healthy at $SHA"; exit 0
             fi
             sleep 3
@@ -191,7 +191,7 @@ jobs:
         run: |
           for i in $(seq 1 60); do
             health=$(curl -fsS "$URL" || true)
-            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* ]]; then
+            if [[ $health == *'"ok":true'* && $health == *"\"commit\":\"$SHA\""* && $health == *'"accounts":"postgres"'* ]]; then
               echo "Vercel healthy at $SHA"; exit 0
             fi
             sleep 10

@@ -1,9 +1,11 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
+import { accountsConfigError, getAccountService, warnIfAccountsUnconfigured } from "../accounts/service";
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
 import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
+import { handleAccountRoute } from "./authRoutes";
 import { type GameKind, getRoomStore, redisUrl } from "./store";
 
 /**
@@ -42,13 +44,15 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
 const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
 
 export function createGameServer(): Server {
+  warnIfAccountsUnconfigured();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     const path = pathOf(req);
     cors(req, res);
     if (req.method === "OPTIONS") return void res.writeHead(204).end();
     if (path === "/api/health") return void health(res);
+    if (await handleAccountRoute(req, res, path)) return;
     const route = ROUTES[path];
     if (route?.kind === "rooms") return void listRooms(route.game, res);
     if (route?.kind === "leaderboard") return void leaderboard(route.game, req, res);
@@ -107,6 +111,9 @@ function cors(req: IncomingMessage, res: ServerResponse) {
   if (origin && isAllowedOrigin(origin, req.headers.host)) {
     res.setHeader("access-control-allow-origin", origin);
     res.setHeader("vary", "origin");
+    res.setHeader("access-control-allow-headers", "Authorization, Content-Type");
+    res.setHeader("access-control-allow-methods", "GET, POST, PATCH, OPTIONS");
+    res.setHeader("access-control-max-age", "600");
   }
 }
 
@@ -130,11 +137,21 @@ async function listRooms(game: GameKind, res: ServerResponse) {
 }
 
 async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResponse) {
+  const q = new URL(req.url ?? "/", "http://x").searchParams;
+  const old = q.get("season") === "old";
   try {
-    const limit = Math.min(Math.max(Number(new URL(req.url ?? "/", "http://x").searchParams.get("limit")) || 20, 1), 100);
-    const store = await getRoomStore(game);
-    json(res, 200, { ok: true, players: await store.leaderboard(limit) });
+    const limit = Math.min(Math.max(Math.floor(Number(q.get("limit"))) || (old ? 20 : 50), 1), 100);
+    if (old) {
+      const store = await getRoomStore(game);
+      return json(res, 200, { ok: true, players: await store.leaderboard(limit) });
+    }
+    const svc = await withTimeout(getAccountService(), 5000, "accounts");
+    json(res, 200, { season: "current", rows: await withTimeout(svc.store.leaderboard(game, limit), 5000, "leaderboard") });
   } catch (err) {
+    if (!old) {
+      console.error("[be_game] leaderboard:", err instanceof Error ? err.message : "error");
+      return json(res, 503, { ok: false, error: "Máy chủ tài khoản đang lỗi, thử lại sau" });
+    }
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
 }
@@ -159,6 +176,7 @@ async function health(res: ServerResponse) {
     // The deploy workflow waits for this to equal the commit it shipped (old container / old Vercel build = mismatch).
     commit: deployedCommit(),
     games: Object.keys(ADAPTERS),
+    accounts: await accountsKind(),
   };
   try {
     const store = await withTimeout(getRoomStore("tienlen"), 5000, "connect");
@@ -187,5 +205,15 @@ async function health(res: ServerResponse) {
     json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, now: Date.now(), ...info });
   } catch (err) {
     json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, now: Date.now(), ...info });
+  }
+}
+
+/** Which account store is live; never throws (health must not depend on it). */
+async function accountsKind(): Promise<string> {
+  if (accountsConfigError()) return "unconfigured";
+  try {
+    return (await withTimeout(getAccountService(), 5000, "accounts")).store.kind;
+  } catch {
+    return "unavailable";
   }
 }
