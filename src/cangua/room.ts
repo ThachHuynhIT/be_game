@@ -29,6 +29,8 @@ export interface CNPlayer {
   lastSeen: number;
   left?: boolean;
   kicked?: boolean;
+  /** Auto-play (Ctrl+Shift+Y): the server rolls and moves for this player. */
+  auto?: boolean;
   wins: number;
   points: number;
   games: number;
@@ -179,6 +181,13 @@ export function cnCommand(room: CNRoom, token: string, msg: CNCommand, now: numb
   if (msg.type === "start") return startCN(room, p, now);
   if (msg.type === "kick") return kickCN(room, p, msg.playerId, now);
   if (msg.type === "settings") return setSettings(room, p, msg as unknown as Record<string, unknown>);
+  if (msg.type === "auto") {
+    if (msg.on === true) p.auto = true;
+    else delete p.auto;
+    // A step that is already due (its phase started over ABSENT_MS ago) is played right away.
+    tickCN(room, now, random);
+    return { ok: true };
+  }
   const g = room.current;
   if (!g) return { ok: false, error: "Chưa bắt đầu ván" };
   if (!g.players.includes(p.id)) return { ok: false, error: "Bạn không chơi ván này" };
@@ -230,7 +239,8 @@ export function tickCN(room: CNRoom, now: number, random: Random = Math.random):
       const p = findById(room, id);
       return !p || !isOnline(p, now);
     };
-    if (tickGame(g, now, nameOf(room), absent, random)) {
+    const auto = (id: string) => !!findById(room, id)?.auto;
+    if (tickGame(g, now, nameOf(room), absent, random, auto)) {
       changed = true;
       afterChange(room, now);
     }
@@ -286,6 +296,7 @@ export function cnView(room: CNRoom, player: CNPlayer | null, now: number): CNRo
     code: room.code,
     meId: player?.id ?? "",
     role: player ? "player" : "spectator",
+    ...(player?.auto ? { auto: true } : {}),
     serverTime: now,
     settings: cnSettingsOf(room),
     seats: room.seats.map((p) =>

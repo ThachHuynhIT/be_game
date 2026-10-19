@@ -124,6 +124,8 @@ stateDiagram-v2
 
 - `TURN_MS = 15_000` (dùng `turnMs` từ cài đặt) cho mỗi pha; `ABSENT_MS = 2_500`.
 - `tickGame` chạy `autoStep` khi `now ≥ deadline` hoặc người đến lượt vắng mặt (không có ghế / `!isOnline`: đã `leave` hoặc quá `PRESENCE_TIMEOUT_MS = 25s`) và `now ≥ phaseAt + ABSENT_MS`. `autoStep`: nếu đang `roll` thì gieo (dùng `random`); nếu sau đó vẫn là người đó ở pha `move` (hoặc vốn đang ở pha `move`) thì đi `bestMove`: ưu tiên đá ngựa (3000 + tiến độ) > vào/lên cột đích (2000 + đích) > ra quân (1000) > con đi xa nhất. Mỗi tick chỉ một `autoStep`; lần gieo lại sau 6 sẽ là tick sau.
+
+**Auto-play (Ctrl+Shift+Y ở client):** lệnh `{ type: "auto", on }` đặt `CNPlayer.auto`; `tickCN` truyền nó vào `tickGame` qua tham số `auto`, nên lượt của người bật auto được đi hộ sau `ABSENT_MS` như người offline (cùng `autoStep`/`bestMove`). Bật auto gọi `tickCN` ngay để một bước đã đến hạn được đi luôn. `view.auto` chỉ có trong view của chính người đó.
 - `nextGameTickAt` = min(`deadline`, `phaseAt + ABSENT_MS` nếu còn ở tương lai); hub dùng `nextCNTickAt`.
 - `leave` giữa ván giữ ghế, bị chơi hộ. Chủ phòng kick người offline → `forfeitPlayer`: xoá khỏi `players` và `done`, đưa 4 ngựa về chuồng, thêm vào `forfeited`; còn < 2 người (hoặc < 2 người đang đua) thì kết thúc; nếu đang là lượt họ thì chuyển cho người đua kế tiếp.
 

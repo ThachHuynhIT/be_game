@@ -331,9 +331,17 @@ function autoStep(s: CNState, now: number, names: NameOf, random: Random) {
   if (h !== null) moveHorse(s, id, h, now, names);
 }
 
-export function tickGame(s: CNState, now: number, names: NameOf, absent: (id: string) => boolean, random: Random = Math.random): boolean {
+/** `auto`: players who switched auto-play on — played for at the same pace as an offline player. */
+export function tickGame(
+  s: CNState,
+  now: number,
+  names: NameOf,
+  absent: (id: string) => boolean,
+  random: Random = Math.random,
+  auto: (id: string) => boolean = () => false,
+): boolean {
   if (s.status !== "playing" || !s.turn) return false;
-  if (now >= (s.deadline ?? Infinity) || (absent(s.turn) && now >= s.phaseAt + ABSENT_MS)) {
+  if (now >= (s.deadline ?? Infinity) || ((absent(s.turn) || auto(s.turn)) && now >= s.phaseAt + ABSENT_MS)) {
     autoStep(s, now, names, random);
     return true;
   }

@@ -342,6 +342,29 @@ describe("room flow", () => {
     expect(cnSummary(r, T)).toMatchObject({ code: "HORSE", status: "waiting", games: 1 });
   });
 
+  it("auto-play plays an online player's turn after the short pace, and only their own flag counts", () => {
+    const r = room();
+    cnCommand(r, "token-aaaa", { type: "start" }, T);
+    const g = r.current!;
+    const turnTok = r.seats.find((p) => p?.id === g.turn)!.token;
+    const otherTok = r.seats.find((p) => p?.id !== g.turn)!.token;
+    const first = g.turn!;
+    // Not on: nothing happens before the deadline.
+    expect(tickCN(r, T + 10_000, dice(2))).toBe(false);
+    expect(cnCommand(r, turnTok, { type: "auto", on: true }, T + 1, dice(2)).ok).toBe(true);
+    expect(cnView(r, r.seats.find((p) => p?.id === first)!, T).auto).toBe(true);
+    expect(cnView(r, r.seats.find((p) => p?.id !== first)!, T).auto).toBeUndefined();
+    // Too early: the pace is ABSENT_MS after the phase began.
+    expect(tickCN(r, g.phaseAt + 100, dice(2))).toBe(false);
+    expect(tickCN(r, g.phaseAt + ABSENT_MS + 1, dice(2))).toBe(true);
+    expect(g.roll?.player).toBe(first);
+    // The other player has not switched it on, so their turn is not played for them.
+    cnCommand(r, otherTok, { type: "auto", on: false }, T + 2, dice(2));
+    // Switching off stops it.
+    cnCommand(r, turnTok, { type: "auto", on: false }, T + 3, dice(2));
+    expect(cnView(r, r.seats.find((p) => p?.id === first)!, T).auto).toBeUndefined();
+  });
+
   it("an offline player is auto-played and can be kicked", () => {
     const r = room();
     cnCommand(r, "token-aaaa", { type: "start" }, T);
