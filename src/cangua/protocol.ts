@@ -77,6 +77,8 @@ export interface CNRoomView {
   code: string;
   meId: string;
   role: "player" | "spectator";
+  /** Only in your own view: your auto-play (Ctrl+Shift+Y) is on and the server rolls and moves for you. */
+  auto?: boolean;
   serverTime: number;
   settings: CNSettings;
   seats: (CNSeatView | null)[];
@@ -101,6 +103,7 @@ export interface CNRoomSummary {
  *   { type: "settings", exitOn1?, noJump?, ladder?, threeSixes?, rankAll?, turnSeconds?, first?, second? }
  *   { type: "roll" }                 // roll the die
  *   { type: "move", horse: 0-3 }     // move one of the legal horses
+ *   { type: "auto", on }             // your own auto-play: the server rolls and moves (best move) for you
  */
 export type CNCommand =
   | { type: "start" }
@@ -117,4 +120,5 @@ export type CNCommand =
     }
   | { type: "kick"; playerId: string }
   | { type: "roll" }
-  | { type: "move"; horse: number };
+  | { type: "move"; horse: number }
+  | { type: "auto"; on: boolean };
