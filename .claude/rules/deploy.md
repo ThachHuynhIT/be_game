@@ -17,8 +17,10 @@ paths:
 Read `docs/DEPLOYMENT.md` (environments, release flow) and `docs/SELF_HOSTING.md` (the server) first. Two backends are live at once — self-hosted primary and Vercel backup, separate Redis today (shared-Upstash cutover not done) — and the zonenop-game frontend fails over between them. The live server `vsmart-zangyapro` is an arm64 phone **shared with its owner** (`fudio101`); we are user `zonenop`.
 
 ## On the server
-- Work only in `/home/zonenop` and in our own containers/images/compose project (`be_game`). Home Assistant, Traefik, cloudflared, `/home/fudio101` and `vsmart-zangyapro-homeserver-*` services are read-only.
-- Never `docker system prune`, `docker volume prune`, `docker builder prune` or `docker image prune -a`. Remove our own images by name/ID.
+- Work only in `/home/zonenop` and in our own containers/images/compose project (`be_game`). Read-only: compose projects `homeassistant`, `traefik` (`traefik`, `traefik-socket-proxy`) and `cloudflared`, the network `traefik_network`, `/home/fudio101`, `vsmart-zangyapro-homeserver-*` services. Stopping Traefik or cloudflared takes every public site down.
+- Never `docker system prune`, `docker volume prune`, `docker network prune`, `docker builder prune` or `docker image prune -a`. Remove our own images by name/ID.
+- The Traefik health check (`loadbalancer.healthcheck.path=/api`) runs every 30 s forever: keep it on a path that writes nothing (never `/api/health`, which writes Redis). Redis stays off `traefik_network`.
+- The owner backs up `/home` only (no named volumes, images, `node_modules`, `.next`, `.cache`, logs). After a reflash their restore runs `docker compose up -d` for every project that was **running** at backup time; a stopped project stays stopped.
 - Builds run in our own BuildKit builder (`be_game`, driver `docker-container`), never the daemon's `default` one the owner shares. The deploy caps that builder's cache (`docker buildx prune --builder be_game --max-used-space 1gb`) and stops it; pruning is only ever scoped with `--builder <ours>`.
 - Ask the user before: restarting the Docker daemon, rebooting, `apk add`. Never: `apk upgrade`, kernel/`/boot`, firewall, sshd, Tailscale, NetworkManager, `/sys/class/power_supply`.
 - Before deploying from the repo, diff `~/apps/be_game` on the server against the repo: the owner edits files there directly. Bring their changes into the repo first or the deploy overwrites them.

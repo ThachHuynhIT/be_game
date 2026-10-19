@@ -89,7 +89,7 @@ Details: `docs/GUIDE.md` → "Quy ước chung & bẫy thường gặp" and "Th�
 - **Vercel** project `be-game` (`be-game-omega.vercel.app`, **backup**): deploys every push to `main` via Vercel Git; other branches get previews that **share the production Upstash Redis** — a PR that changes state shape can affect live backup rooms.
 - The frontend (zonenop-game) tries the primary (`GET /api/rooms`, 3 s) and falls back to Vercel for lobbies/new rooms; rooms are pinned to their backend while the Redis stores are separate. Keep `GET /api/rooms` cheap and present everywhere, and keep the hub error `"Không tìm thấy phòng"` stable — the frontend relies on both.
 - Both backends and the frontend deploy independently: protocol changes add optional fields only; deploy be_game before zonenop-game. A red CI on `main` skips the primary deploy while Vercel still deploys (version skew). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-- On that host: work only in `/home/zonenop`; owner's containers/files are read-only; **never** `docker system|volume|builder prune` or `image prune -a`; ask before Docker restart, reboot, `apk add`; never touch kernel/boot/firewall/sshd/Tailscale/WiFi/power.
+- On that host: work only in `/home/zonenop`; owner's containers/files are read-only; **never** `docker system|volume|network|builder prune` or `image prune -a`; ask before Docker restart, reboot, `apk add`; never touch kernel/boot/firewall/sshd/Tailscale/WiFi/power.
 - **The owner sometimes edits `~/apps/be_game` directly.** Before any deploy from the repo, diff the server copy against the repo and bring their changes in first.
 - Production deploys of the **frontend** (zonenop-game) on Vercel are the user's to trigger.
 
