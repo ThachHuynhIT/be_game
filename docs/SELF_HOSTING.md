@@ -237,8 +237,10 @@ Sau khi chuyển, **lưu lượng của chính điện thoại cũng đi vào Up
 
 Theo skill `zangyapro-host` (bắt buộc với người và với AI agent):
 
-- Chỉ làm trong `/home/zonenop` và container/image/compose project của mình. Đồ của chủ máy (Home Assistant, Traefik, cloudflared, `/home/fudio101`, service `vsmart-zangyapro-homeserver-*`) chỉ được xem.
-- **Không bao giờ** `docker system prune`, `docker volume prune`, `docker image prune -a`, `docker builder prune` — chúng xoá cả đồ của chủ máy. Dọn theo tên/ID.
+- Chỉ làm trong `/home/zonenop` và container/image/compose project của mình. Đồ của chủ máy (compose `homeassistant`, `traefik` (container `traefik`, `traefik-socket-proxy`), `cloudflared`, network `traefik_network`, `/home/fudio101`, service `vsmart-zangyapro-homeserver-*`) chỉ được xem: dừng Traefik hay cloudflared là mọi site công khai sập, kể cả của mình.
+- **Không bao giờ** `docker system prune`, `docker volume prune`, `docker network prune`, `docker image prune -a`, `docker builder prune` — chúng xoá cả image, dữ liệu và network của chủ máy. Dọn theo tên/ID.
+- Backup của chủ máy chỉ gồm `/home` (bỏ `node_modules`, `.next`, `.cache`, log), không gồm named volume hay image: dữ liệu để ở bind mount trong thư mục app (Redis ở `./data/redis`). Sau khi flash lại máy, chủ máy khôi phục home và chạy `docker compose up -d` cho mọi project **đang chạy** lúc backup (image tự build lại từ source; `BUILD_COMMIT` trống nên `/api/health` báo `commit: null` cho tới lần deploy kế tiếp). Project đang dừng thì vẫn dừng, nên đừng để be_game dừng.
+- Health check của Traefik (`loadbalancer.healthcheck.path`) được gọi mãi mãi mỗi 30 s: phải trỏ vào đường dẫn không ghi gì (be_game dùng `/api`, **không** dùng `/api/health` vì nó ghi Redis). Redis không bao giờ vào `traefik_network`.
 - Build cache chỉ dọn theo builder của mình: `docker buildx prune --builder be_game` (deploy tự làm). Builder `default` là của chung; ngày 14/10 đã dọn một lần 5 GB cache cũ (toàn bộ là của be_game/zonenop-game) với sự đồng ý của người dùng.
 - Hỏi trước (để báo chủ máy): restart Docker daemon, reboot, `apk add`.
 - Không đụng: `apk upgrade`, kernel, `/boot`, firewall (`/etc/nftables*`), sshd, Tailscale, NetworkManager/WiFi, `/sys/class/power_supply`.
