@@ -1,8 +1,10 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAccountService, resetAccountServiceForTests } from "../src/accounts/service";
 import { createGameServer } from "../src/server/app";
+import { ADAPTERS } from "../src/server/adapters";
+import { getRoomStore, type GameKind } from "../src/server/store";
 
 let server: Server;
 let base = "";
@@ -45,6 +47,65 @@ async function call(method: string, path: string, body?: unknown, opts: { token?
 const register = (username: string, password = "matkhau123", ip?: string) => call("POST", "/api/auth/register", { username, password }, { ip });
 
 describe("account routes", () => {
+  it("skips a room store that never resolves and still returns healthy rooms", async () => {
+    const { json } = await register("HungStore");
+    const store = await getRoomStore("tienlen");
+    const spy = vi.spyOn(store, "recentRooms").mockImplementation(() => new Promise(() => {}));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const r = await call("GET", "/api/auth/rooms", undefined, { token: json.session });
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual({ ok: true, rooms: [] });
+    } finally { spy.mockRestore(); log.mockRestore(); }
+  }, 10_000);
+  it("requires a session to list my playing rooms", async () => {
+    expect((await call("GET", "/api/auth/rooms")).status).toBe(401);
+  });
+
+  it("lists only active playing rooms owned by me, across all seven games, without private fields", async () => {
+    const { json } = await register("RoomOwner");
+    const uid = json.user.id;
+    const expected: { game: GameKind; code: string }[] = [];
+    const now = Date.now();
+    for (const game of Object.keys(ADAPTERS) as GameKind[]) {
+      const adapter = ADAPTERS[game];
+      const store = await getRoomStore(game);
+      const code = `M${game}`;
+      const room = adapter.newRoom(code);
+      let id = 0;
+      for (let i = 0; i < 3; i++) expect(adapter.join(room, `room-token-${i}`, `Player${i}`, now, () => `p${++id}`, i === 0 ? uid : `other-${i}`).ok).toBe(true);
+      expect(adapter.command(room, "room-token-0", { type: "start" }, now).ok).toBe(true);
+      expect(adapter.summary(room, now)).toMatchObject({ status: "playing" });
+      await store.create(room);
+      expected.push({ game, code });
+      const clone = JSON.parse(JSON.stringify(room));
+      clone.code = `K${game}`;
+      clone.seats[0].kicked = true;
+      await store.create(clone);
+      const offline = JSON.parse(JSON.stringify(room));
+      offline.code = `O${game}`;
+      for (const p of offline.seats) if (p) p.lastSeen = now - 60_000;
+      await store.create(offline);
+      const waiting = adapter.newRoom(`W${game}`);
+      adapter.join(waiting, "waiting-token", "RoomOwner", now, () => "waiting", uid);
+      await store.create(waiting);
+    }
+    const r = await call("GET", "/api/auth/rooms", undefined, { token: json.session });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true, rooms: expected });
+    expect(r.text).not.toContain("token");
+    expect(r.text).not.toContain(uid);
+  });
+
+  it("still lists other games if one room store fails", async () => {
+    const { json } = await register("StoreError");
+    const store = await getRoomStore("tienlen");
+    const spy = vi.spyOn(store, "recentRooms").mockRejectedValue(new Error("store down"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect((await call("GET", "/api/auth/rooms", undefined, { token: json.session })).json).toEqual({ ok: true, rooms: [] });
+    } finally { spy.mockRestore(); log.mockRestore(); }
+  });
   it("registers without leaking hashes", async () => {
     const r = await register("Lan");
     expect(r.status).toBe(200);

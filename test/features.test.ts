@@ -25,7 +25,7 @@ const T0 = 5_000_000;
 function roomWith(count: number) {
   const room = newRoom("QWERT");
   const players = Array.from({ length: count }, (_, i) => {
-    const r = joinRoom(room, `token-${i}-features`, `P${i}`, T0, id);
+    const r = joinRoom(room, `token-${i}-features`, `P${i}`, T0, id, `token-${i}-features`);
     if (!r.ok) throw new Error(r.error);
     return r.player;
   });
@@ -83,7 +83,7 @@ describe("kick / spectators / emoji / scoring (room)", () => {
     players[0].lastSeen = players[1].lastSeen = later;
     expect(kickPlayer(room, players[0], players[2].id, later).ok).toBe(true);
     expect(room.game!.forfeited).toEqual([players[2].id]);
-    expect(joinRoom(room, "token-2-features", "back", later, id)).toMatchObject({ ok: false });
+    expect(joinRoom(room, "token-2-features", "back", later, id, "token-2-features")).toMatchObject({ ok: false });
   });
 
   it("kicking between games frees the seat", () => {
@@ -146,8 +146,8 @@ describe("leaderboard + room index (store via hub)", () => {
     const hub = createRoomHub(store);
     const code = await hub.createRoom();
     await hub.mutate(code, (room, now) => {
-      joinRoom(room, "tok-lb-aaaaaaa", "An", now, id);
-      joinRoom(room, "tok-lb-bbbbbbb", "Bình", now, id);
+      joinRoom(room, "tok-lb-aaaaaaa", "An", now, id, "tok-lb-aaaaaaa");
+      joinRoom(room, "tok-lb-bbbbbbb", "Bình", now, id, "tok-lb-bbbbbbb");
     });
     // Drive the game to its end through tick() with everyone "online" but idle.
     for (let i = 0; i < 400; i++) {
@@ -175,7 +175,7 @@ describe("chat", () => {
     const { newRoom, joinRoom, watchRoom, sendChat, roomView } = await import("../src/game/room");
     const room = newRoom("CHATS");
     let n = 0;
-    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`);
+    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`, "token-aaaa");
     watchRoom(room, "token-watch", "Khách", 1000);
     expect(sendChat(room, "token-aaaa", "  chào   cả nhà \n ", 1001)).toEqual({ ok: true });
     expect(sendChat(room, "token-watch", "hay quá 🐔", 1002)).toEqual({ ok: true });
@@ -198,8 +198,8 @@ describe("tiến lên settings (room)", () => {
     const { newRoom, joinRoom, updateSettings, roomView, startGame } = await import("../src/game/room");
     const room = newRoom("SETTS");
     let n = 0;
-    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`);
-    joinRoom(room, "token-bbbb", "Bình", 1000, () => `p${++n}`);
+    joinRoom(room, "token-aaaa", "An", 1000, () => `p${++n}`, "token-aaaa");
+    joinRoom(room, "token-bbbb", "Bình", 1000, () => `p${++n}`, "token-bbbb");
     const [host, guest] = [room.seats[0]!, room.seats[1]!];
     expect(roomView(room, host, 1000).settings).toEqual({ autoPass: true, first: 2, second: 1 });
     expect(updateSettings(room, guest, { first: 5 }).ok).toBe(false);

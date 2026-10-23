@@ -43,6 +43,8 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export interface RoomPlayer {
   id: string;
   token: string;
+  /** Account that holds the seat (absent on rooms saved before accounts owned seats). */
+  uid?: string;
   name: string;
   lastSeen: number;
   /** Explicitly left (closed the tab / navigated away) — treated as offline immediately. */
@@ -146,6 +148,7 @@ export const isOnline = (p: { left?: boolean; lastSeen: number }, now: number) =
 export interface GoneSeat {
   id: string;
   token: string;
+  uid?: string;
   name: string;
   wins: number;
   points?: number;
@@ -166,34 +169,35 @@ const nameKey = (name: string) => cleanName(name).toLocaleLowerCase("vi");
 export function rememberGone(room: SeatRoom<SeatLike>, p: SeatLike, now: number) {
   if (p.kicked) return;
   const gone = (room.gone ?? []).filter((g) => g.id !== p.id && g.token !== p.token && now - g.at < GONE_SEAT_TTL_MS);
-  gone.push({ id: p.id, token: p.token, name: p.name, wins: p.wins, points: p.points ?? 0, games: p.games ?? 0, at: now });
+  gone.push({ id: p.id, token: p.token, ...(p.uid ? { uid: p.uid } : {}), name: p.name, wins: p.wins, points: p.points ?? 0, games: p.games ?? 0, at: now });
   room.gone = gone.slice(-MAX_GONE_SEATS);
 }
 
 /**
- * The seat a joining player already has: the one holding their token, else an offline seat under
- * the same name (the same person on a new tab or device, whose token changed), which then takes the
- * new token. A namesake who is online keeps their seat, so the caller seats the joiner separately.
+ * Match the browser token, then the account, then an offline legacy seat by name.
  */
-export function findReturning<P extends SeatLike>(room: SeatRoom<P>, token: string, name: string, now: number): P | null {
+export function findReturning<P extends SeatLike>(room: SeatRoom<P>, token: string, name: string, now: number, uid: string): P | null {
   const own = room.seats.find((p) => p?.token === token);
   if (own) return own;
+  // Same account on another device: the seat follows the account; the old device is told it was replaced.
+  const account = room.seats.find((p) => p && p.uid === uid);
+  if (account) { account.token = token; return account; }
   const key = nameKey(name);
-  const namesake = room.seats.find((p) => p && !p.kicked && !isOnline(p, now) && nameKey(p.name) === key) ?? null;
-  if (namesake) namesake.token = token;
+  const namesake = room.seats.find((p) => p && !p.uid && !p.kicked && !isOnline(p, now) && nameKey(p.name) === key) ?? null;
+  if (namesake) { namesake.token = token; namesake.uid = uid; }
   return namesake;
 }
 
 /**
- * Take the remembered seat of a player coming back after their seat was freed: by token, else by
- * name. The caller builds the new seat from it (same id and stats). Expired entries are dropped.
+ * Take a freed seat by token, then account, then legacy name; expired entries are dropped.
  */
-export function takeGone(room: SeatRoom<SeatLike>, token: string, name: string, now: number): GoneSeat | null {
+export function takeGone(room: SeatRoom<SeatLike>, token: string, name: string, now: number, uid: string): GoneSeat | null {
   const seated = new Set(room.seats.flatMap((p) => (p ? [p.id] : [])));
   const gone = (room.gone ?? []).filter((g) => now - g.at < GONE_SEAT_TTL_MS && !seated.has(g.id));
   const key = nameKey(name);
   let i = gone.findIndex((g) => g.token === token);
-  if (i < 0) i = gone.findIndex((g) => nameKey(g.name) === key);
+  if (i < 0) i = gone.findIndex((g) => g.uid === uid);
+  if (i < 0) i = gone.findIndex((g) => !g.uid && nameKey(g.name) === key);
   const back = i >= 0 ? gone.splice(i, 1)[0] : null;
   if (gone.length) room.gone = gone;
   else delete room.gone;
@@ -201,10 +205,11 @@ export function takeGone(room: SeatRoom<SeatLike>, token: string, name: string, 
 }
 
 /** A new seat for `token`, continuing a remembered one when there is one. */
-export function seatFor(back: GoneSeat | null, token: string, name: string, now: number, newId: () => string) {
+export function seatFor(back: GoneSeat | null, token: string, name: string, now: number, newId: () => string, uid: string) {
   return {
     id: back?.id ?? newId(),
     token,
+    uid,
     name: cleanName(name),
     lastSeen: now,
     wins: back?.wins ?? 0,
@@ -230,21 +235,22 @@ export function joinRoom(
   name: string,
   now: number,
   newId: () => string,
+  uid: string,
 ): { ok: true; player: RoomPlayer } | { ok: false; error: string } {
   if (typeof token !== "string" || token.length < 8 || token.length > 128) {
     return { ok: false, error: "Phiên không hợp lệ" };
   }
-  let player = findReturning(room, token, name, now);
+  let player = findReturning(room, token, name, now, uid);
   if (player?.kicked) return { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" };
   if (player) {
-    if (!inPlayingGame(room, player.id)) player.name = cleanName(name);
+    if (!inPlayingGame(room, player.id)) { player.name = cleanName(name); player.uid = uid; }
     // Coming back to your own turn after being away gets a fresh timer.
     if (!isOnline(player, now) && room.game?.turn === player.id) freshTurnTimer(room, now);
   } else {
     dropGoneSeats(room, now);
     const free = room.seats.findIndex((s) => s === null);
     if (free < 0) return { ok: false, error: "Phòng đã đủ 4 người" };
-    player = seatFor(takeGone(room, token, name, now), token, name, now, newId);
+    player = seatFor(takeGone(room, token, name, now, uid), token, name, now, newId, uid);
     room.seats[free] = player;
   }
   player.lastSeen = now;

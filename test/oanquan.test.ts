@@ -259,8 +259,8 @@ describe("room", () => {
   function room2() {
     let n = 0;
     const room = newOQRoom("OAQ01");
-    joinOQ(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinOQ(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinOQ(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinOQ(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     return room;
   }
 

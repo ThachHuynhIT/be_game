@@ -105,8 +105,8 @@ describe("buying and reserving", () => {
   it("hides other players' reserved cards", () => {
     let n = 0;
     const room = newSPRoom("GEMSS");
-    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     spCommand(room, "token-aaaa", { type: "start" }, T);
     const g = room.current!;
     const turnToken = g.turn === "p1" ? "token-aaaa" : "token-bbbb";
@@ -153,8 +153,8 @@ describe("room settings", () => {
   it("target, turn time and points apply to the next game and scoring", () => {
     let n = 0;
     const room = newSPRoom("GEMST");
-    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(spCommand(room, "token-aaaa", { type: "settings", target: 13 }, T).ok).toBe(false);
     expect(spCommand(room, "token-aaaa", { type: "settings", target: 10, turnSeconds: 60, first: 3, second: 1 }, T).ok).toBe(true);
     spCommand(room, "token-aaaa", { type: "start" }, T);
@@ -176,8 +176,8 @@ describe("fixes", () => {
   it("shows face-up reserved cards to others, keeps blind ones hidden", () => {
     let n = 0;
     const room = newSPRoom("GEMSV");
-    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinSP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinSP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     spCommand(room, "token-aaaa", { type: "start" }, T);
     const g = room.current!;
     const [first, second] = g.turn === "p1" ? ["token-aaaa", "token-bbbb"] : ["token-bbbb", "token-aaaa"];

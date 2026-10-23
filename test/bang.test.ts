@@ -473,7 +473,7 @@ describe("room", () => {
     const room: BangRoom = newBangRoom("BANG1");
     const toks = ["tok-aaaaaaaa", "tok-bbbbbbbb", "tok-cccccccc", "tok-dddddddd"];
     let n = 0;
-    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`);
+    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`, t);
     expect(bangCommand(room, toks[0], { type: "start" }, T).ok).toBe(true);
     const g = room.current!;
     for (const id of g.order) pickCharacter(g, id, g.picks[id][0], T, names);
@@ -686,7 +686,7 @@ describe("bug fixes", () => {
     const room: BangRoom = newBangRoom("BANG2");
     const toks = ["tok-aaaaaaaa", "tok-bbbbbbbb", "tok-cccccccc", "tok-dddddddd"];
     let n = 0;
-    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`);
+    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`, t);
     expect(bangCommand(room, toks[0], { type: "settings", first: 5, second: 3 }, T).ok).toBe(true);
     expect(bangCommand(room, toks[0], { type: "start" }, T).ok).toBe(true);
     const g = room.current!;

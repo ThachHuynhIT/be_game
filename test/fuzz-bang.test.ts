@@ -146,7 +146,7 @@ describe("fuzz bang", () => {
       const room = newBangRoom(`BF${seed}`);
       const toks = Array.from({ length: n }, (_, i) => `token-${seed}-${i}-xxxx`);
       let c = 0;
-      toks.forEach((t, i) => joinBang(room, t, `P${i}`, T0, () => `p${c++}`));
+      toks.forEach((t, i) => joinBang(room, t, `P${i}`, T0, () => `p${c++}`, t));
       const packs = EXPANSIONS.filter(() => rnd() < 0.6);
       expect(bangCommand(room, toks[0], { type: "settings", packs, turnSeconds: 45, respondSeconds: 10 }, T0).ok).toBe(true);
       expect(bangCommand(room, toks[0], { type: "start" }, T0).ok).toBe(true);
@@ -234,7 +234,7 @@ describe("bang regressions found by fuzzing", () => {
     const T = 1_000_000;
     const toks = ["tok-aaaaaaaa", "tok-bbbbbbbb", "tok-cccccccc", "tok-dddddddd"];
     let n = 0;
-    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`);
+    for (const t of toks) joinBang(room, t, `P${n}`, T, () => `p${n++}`, t);
     expect(bangCommand(room, toks[0], { type: "start" }, T).ok).toBe(true);
     const g = room.current!;
     const later = T + 10 * 60_000;

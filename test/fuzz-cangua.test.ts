@@ -166,7 +166,7 @@ describe("fuzz cangua: room level", () => {
       let id = 0;
       const n = 2 + Math.floor(r() * 3);
       const tokens = Array.from({ length: n }, (_, i) => `secret-token-${seed}-${i}-xyz`);
-      tokens.forEach((t, i) => joinCN(room, t, `P${i}`, now, () => `id${id++}`));
+      tokens.forEach((t, i) => joinCN(room, t, `P${i}`, now, () => `id${id++}`, t));
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       cnCommand(room, tokens[0], { type: "settings", ladder: r() < 0.5, noJump: r() < 0.5, rankAll: r() < 0.5, exitOn1: r() < 0.5, turnSeconds: 10 }, now);
       expect(cnCommand(room, tokens[0], { type: "start" }, now).ok).toBe(true);

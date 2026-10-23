@@ -158,4 +158,5 @@ export type ServerMessage =
   | { type: "state"; view: RoomView }
   /** This connection is about to hit the platform time limit — open a new one now. */
   | { type: "reconnect" }
+  | { type: "signedOut"; reason: "replaced" | "revoked" }
   | { type: "pong" };

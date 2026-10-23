@@ -6,6 +6,7 @@ type Listener = (arg?: any) => void;
 
 /** In-process stand-in for a WebSocket, with a tiny client API for tests. */
 export class FakeSocket implements HubSocket {
+  closed: { code?: number; reason?: string } | null = null;
   inbox: ServerMessage[] = [];
   private listeners: Record<string, Listener[]> = {};
   private nextId = 1;
@@ -15,7 +16,8 @@ export class FakeSocket implements HubSocket {
     this.inbox.push(JSON.parse(data));
     this.waiters.splice(0).forEach((w) => w());
   }
-  close() {
+  close(code?: number, reason?: string) {
+    this.closed = { code, reason };
     this.emit("close");
   }
   on(event: string, listener: Listener) {

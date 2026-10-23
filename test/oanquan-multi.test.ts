@@ -275,14 +275,14 @@ describe("3 and 4 players: room", () => {
   function roomN(n: number) {
     let k = 0;
     const room = newOQRoom("OAQ03");
-    for (const t of ["aaaa", "bbbb", "cccc", "dddd"].slice(0, n)) joinOQ(room, `token-${t}`, t, T, () => `p${++k}`);
+    for (const t of ["aaaa", "bbbb", "cccc", "dddd"].slice(0, n)) joinOQ(room, `token-${t}`, t, T, () => `p${++k}`, `token-${t}`);
     return room;
   }
 
   it("seats up to 4 players and refuses the 5th; needs at least 2", () => {
     const room = roomN(4);
     expect(room.seats).toHaveLength(4);
-    expect(joinOQ(room, "token-eeee", "e", T, () => "p5").ok).toBe(false);
+    expect(joinOQ(room, "token-eeee", "e", T, () => "p5", "token-eeee").ok).toBe(false);
     const solo = roomN(1);
     expect(oqCommand(solo, "token-aaaa", { type: "start" }, T).ok).toBe(false);
   });

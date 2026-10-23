@@ -2,9 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEVICE_RE, isAllowedOrigin } from "./hub";
 import { isPlayPath } from "../accounts/types";
 import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret } from "../accounts/service";
+import { ADAPTERS } from "./adapters";
+import { getRoomStore, type GameKind } from "./store";
 
 const MAX_BODY = 4096;
 const STORE_TIMEOUT_MS = 5000;
+const ROOM_STORE_TIMEOUT_MS = 3000;
 const UNAVAILABLE = "Máy chủ tài khoản đang lỗi, thử lại sau";
 const NEED_LOGIN = "Cần đăng nhập";
 const BOT_RE = /bot|crawl|spider|preview|monitor/i;
@@ -57,9 +60,9 @@ async function readJson(req: IncomingMessage, anyType = false): Promise<Record<s
   }
 }
 
-const withTimeout = <T>(p: Promise<T>): Promise<T> => {
+const withTimeout = <T>(p: Promise<T>, ms = STORE_TIMEOUT_MS): Promise<T> => {
   let t: NodeJS.Timeout;
-  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error("account store timed out")), STORE_TIMEOUT_MS)))]).finally(() => clearTimeout(t)) as Promise<T>;
+  return Promise.race([p, new Promise<never>((_, rej) => (t = setTimeout(() => rej(new Error("store timed out")), ms)))]).finally(() => clearTimeout(t)) as Promise<T>;
 };
 
 const bearer = (req: IncomingMessage): string | null => {
@@ -121,6 +124,26 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
   }
 
   const user = await svc.authenticate(bearer(req));
+  if (path === "/api/auth/rooms") {
+    if (method !== "GET") return methodNotAllowed();
+    if (!user) return err(res, 401, NEED_LOGIN);
+    const now = Date.now();
+    const rooms = (await Promise.all((Object.keys(ADAPTERS) as GameKind[]).map(async (game) => {
+      try {
+        const recent = await withTimeout(getRoomStore(game).then((store) => store.recentRooms(60)), ROOM_STORE_TIMEOUT_MS);
+        const adapter = ADAPTERS[game];
+        return recent.filter((room) => {
+          const seats = (room as unknown as { seats: ({ uid?: string; kicked?: boolean } | null)[] }).seats;
+          return adapter.isActive(room, now) && seats.some((p) => p?.uid === user.id && !p.kicked)
+            && (adapter.summary(room, now) as { status: string }).status === "playing";
+        }).map((room) => ({ game, code: room.code }));
+      } catch (e) {
+        console.error(`[be_game] my rooms (${game}):`, e instanceof Error ? e.message : "error");
+        return [];
+      }
+    }))).flat();
+    return send(res, 200, { ok: true, rooms });
+  }
   if (path === "/api/auth/logout") {
     if (method !== "POST") return methodNotAllowed();
     if (user) await svc.logout(user);

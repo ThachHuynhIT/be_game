@@ -140,7 +140,7 @@ describe("fuzz oanquan: room level", () => {
       let id = 0;
       const n = 2 + Math.floor(r() * 3);
       const tokens = Array.from({ length: n }, (_, i) => `secret-token-${seed}-${i}-xyz`);
-      tokens.forEach((t, i) => joinOQ(room, t, `P${i}`, now, () => `id${id++}`));
+      tokens.forEach((t, i) => joinOQ(room, t, `P${i}`, now, () => `id${id++}`, t));
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       expect(oqCommand(room, tokens[0], { type: "settings", quanNon: r() < 0.5, turnSeconds: 15 }, now).ok).toBe(true);
       expect(oqCommand(room, tokens[0], { type: "start" }, now, r).ok).toBe(true);

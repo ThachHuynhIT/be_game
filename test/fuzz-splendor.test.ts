@@ -97,7 +97,7 @@ describe("fuzz splendor", () => {
       const room = newSPRoom(`FZ${seed}`);
       const toks = Array.from({ length: n }, (_, i) => `token-${seed}-${i}-xxxx`);
       let c = 0;
-      toks.forEach((t, i) => joinSP(room, t, `P${i}`, T0, () => `p${c++}`));
+      toks.forEach((t, i) => joinSP(room, t, `P${i}`, T0, () => `p${c++}`, t));
       expect(spCommand(room, toks[0], { type: "settings", target: 15, turnSeconds: 30 }, T0).ok).toBe(true);
       expect(spCommand(room, toks[0], { type: "start" }, T0).ok).toBe(true);
       // spectator

@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
+import { tienlenAdapter } from "../src/server/adapters";
 import { createMemoryRoomStore } from "../src/server/store";
 import { getAccountService } from "../src/accounts/service";
 import { FakeSocket } from "./helpers/fakeSocket";
@@ -29,6 +30,112 @@ async function joinedPair(hubA: RoomHub, hubB: RoomHub) {
 }
 
 describe("RoomHub over WebSocket messages", () => {
+  it("does not tick after replacing its last local socket", async () => {
+    vi.useFakeTimers();
+    const store = createMemoryRoomStore<ReturnType<typeof tienlenAdapter.newRoom>>();
+    const adapter = { ...tienlenAdapter, tick: vi.fn(tienlenAdapter.tick) };
+    const hub = createRoomHub(store, adapter);
+    const other = createRoomHub(store, tienlenAdapter);
+    const code = await hub.createRoom();
+    try {
+      await other.mutate(code, (room, now) => {
+        for (let i = 0; i < 3; i++) tienlenAdapter.join(room, "token-seat-" + i, "Player" + i, now, () => "p" + i, "uid-" + i);
+        expect(tienlenAdapter.command(room, "token-seat-0", { type: "start" }, now).ok).toBe(true);
+        room.game!.status = "playing";
+      });
+      const socket = new FakeSocket();
+      hub.add({ socket, code, token: "token-seat-0", role: "player", userId: "uid-0", session: null, authCheckedAt: 0 }, code);
+      await hub.refresh(code);
+      const state = (await store.load(code))!.state;
+      const at = adapter.nextTickAt(state, Date.now());
+      expect(at).not.toBeNull();
+      await other.mutate(code, (room, now) => tienlenAdapter.join(room, "token-new-device", "Player0", now, () => "new", "uid-0"), (r) => !r.ok);
+      await hub.refresh(code, (await store.load(code))!.version);
+      expect(socket.inbox).toContainEqual({ type: "signedOut", reason: "replaced" });
+      expect(socket.closed).toEqual({ code: 4001, reason: "replaced" });
+      expect((hub as unknown as { rooms: Map<string, unknown> }).rooms.has(code)).toBe(false);
+      const mutate = vi.spyOn(hub, "mutate");
+      await vi.advanceTimersByTimeAsync(Math.max(0, at! - Date.now()) + 1000);
+      expect(mutate).not.toHaveBeenCalled();
+      expect(adapter.tick).not.toHaveBeenCalled();
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+
+  it("discards leave queued behind the ping that revokes the socket", async () => {
+    const session = await accountSession("QueueRevoked");
+    const svc = await getAccountService();
+    const store = createMemoryRoomStore();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    let now = Date.now();
+    const s = new FakeSocket();
+    attachConnection(s, { hub, now: () => now });
+    await s.request({ type: "join", code, token: "token-queue-xxxx", session });
+    await svc.logout((await svc.authenticate(session))!);
+    now += 30_001;
+    s.say({ type: "ping" });
+    s.say({ type: "leave" });
+    await s.waitFor((m) => m.type === "signedOut");
+    // Let the already-enqueued leave reach the queue runner.
+    await new Promise((r) => setImmediate(r));
+    expect(((await store.load(code))!.state as unknown as { seats: ({ token: string } | null)[] }).seats.some((p) => p?.token === "token-queue-xxxx")).toBe(true);
+  });
+  it("replaces the old device across hubs without freeing the account seat", async () => {
+    const store = createMemoryRoomStore();
+    const hubA = createRoomHub(store);
+    const hubB = createRoomHub(store);
+    const { a, b, code } = await joinedPair(hubA, hubB);
+    const before = await a.view();
+    const replacement = connect(hubB);
+    expect((await replacement.request({ type: "join", code, token: "token-new-device", session: S.An })).ok).toBe(true);
+    expect(await a.waitFor((m) => (m as { type: string }).type === "signedOut")).toMatchObject({ type: "signedOut", reason: "replaced" });
+    expect(a.closed).toEqual({ code: 4001, reason: "replaced" });
+    expect((await replacement.view()).meId).toBe(before.meId);
+    expect((await replacement.view()).seats.filter(Boolean)).toHaveLength(2);
+    b.close(); replacement.close();
+  });
+
+  it("checks revoked sessions only on the first ping after 30 seconds and keeps the seat", async () => {
+    const session = await accountSession("RevokePing");
+    const svc = await getAccountService();
+    const store = createMemoryRoomStore();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    let now = Date.now();
+    const s = new FakeSocket();
+    attachConnection(s, { hub, now: () => now } as Parameters<typeof attachConnection>[1]);
+    await s.request({ type: "join", code, token: "token-revoked-xx", session });
+    await svc.logout((await svc.authenticate(session))!);
+    now += 30_000;
+    s.say({ type: "ping" });
+    await s.waitFor((m) => m.type === "pong");
+    expect(s.inbox.some((m) => (m as { type: string }).type === "signedOut")).toBe(false);
+    now++;
+    s.say({ type: "ping" });
+    expect(await s.waitFor((m) => (m as { type: string }).type === "signedOut")).toMatchObject({ type: "signedOut", reason: "revoked" });
+    expect(s.closed).toEqual({ code: 4001, reason: "revoked" });
+    expect(JSON.stringify((await store.load(code))!.state)).toContain("token-revoked-xx");
+  });
+
+  it("keeps the socket when session reauthentication fails", async () => {
+    const session = await accountSession("ErrorPing");
+    const svc = await getAccountService();
+    const hub = createRoomHub(createMemoryRoomStore());
+    const code = await hub.createRoom();
+    let now = Date.now();
+    const s = new FakeSocket();
+    attachConnection(s, { hub, now: () => now } as Parameters<typeof attachConnection>[1]);
+    await s.request({ type: "join", code, token: "token-error-xxxx", session });
+    const spy = vi.spyOn(svc, "authenticate").mockRejectedValue(new Error("db down"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      now += 30_001;
+      s.say({ type: "ping" });
+      await s.waitFor((m) => m.type === "pong");
+      expect(s.inbox.some((m) => (m as { type: string }).type === "signedOut")).toBe(false);
+      expect(log).toHaveBeenCalled();
+    } finally { spy.mockRestore(); log.mockRestore(); s.close(); }
+  });
   it("creates, joins, starts and deals private hands", async () => {
     const hub = createRoomHub(createMemoryRoomStore());
     const { a, b } = await joinedPair(hub, hub);

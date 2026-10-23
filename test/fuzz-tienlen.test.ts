@@ -203,7 +203,7 @@ function runRoom(seed: number, n0: number) {
   let players: RoomPlayer[] = [];
   let online: boolean[] = [];
   for (let i = 0; i < n; i++) {
-    const r = joinRoom(room, `token-${seed}-${i}-xxxxxxxx`, `P${i}`, now, () => `id${++idc}`);
+    const r = joinRoom(room, `token-${seed}-${i}-xxxxxxxx`, `P${i}`, now, () => `id${++idc}`, `token-${seed}-${i}-xxxxxxxx`);
     if (!r.ok) throw new Error(r.error);
     players.push(r.player);
     online.push(true);
@@ -306,7 +306,7 @@ function runRoom(seed: number, n0: number) {
         online[i] = !online[i];
         if (!online[i] && rand() < 0.3) leaveRoom(room, players[i], now);
         else if (online[i]) {
-          const rj = joinRoom(room, players[i].token, players[i].name, now, () => `id${++idc}`);
+          const rj = joinRoom(room, players[i].token, players[i].name, now, () => `id${++idc}`, players[i].token);
           if (rj.ok) players[i] = rj.player;
         }
         hist.push(`toggle ${i} ${online[i]}`);
@@ -347,7 +347,7 @@ function runRoom(seed: number, n0: number) {
     if (players.length < 2) break;
     n = players.length;
     online = players.map(() => true);
-    for (const p of players) joinRoom(room, p.token, p.name, now, () => `id${++idc}`);
+    for (const p of players) joinRoom(room, p.token, p.name, now, () => `id${++idc}`, p.token);
     if (!players.some((p) => p.id === room.hostId)) break;
   }
 }
