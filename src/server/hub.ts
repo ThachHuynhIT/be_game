@@ -274,6 +274,8 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
           }
           if (view) send(conn.socket, { type: "state", view: typeof view === "object" && Object.keys(looks).length ? { ...view, looks } : view });
         }
+        // Replacing the last socket removes this local room; do not re-arm or refresh it again.
+        if (this.rooms.get(code) !== r) break;
         this.arm(code, r, state, now);
       } while (r.dirty);
     })().finally(() => {

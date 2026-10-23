@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
+import { tienlenAdapter } from "../src/server/adapters";
 import { createMemoryRoomStore } from "../src/server/store";
 import { getAccountService } from "../src/accounts/service";
 import { FakeSocket } from "./helpers/fakeSocket";
@@ -29,6 +30,37 @@ async function joinedPair(hubA: RoomHub, hubB: RoomHub) {
 }
 
 describe("RoomHub over WebSocket messages", () => {
+  it("does not tick after replacing its last local socket", async () => {
+    vi.useFakeTimers();
+    const store = createMemoryRoomStore<ReturnType<typeof tienlenAdapter.newRoom>>();
+    const adapter = { ...tienlenAdapter, tick: vi.fn(tienlenAdapter.tick) };
+    const hub = createRoomHub(store, adapter);
+    const other = createRoomHub(store, tienlenAdapter);
+    const code = await hub.createRoom();
+    try {
+      await other.mutate(code, (room, now) => {
+        for (let i = 0; i < 3; i++) tienlenAdapter.join(room, "token-seat-" + i, "Player" + i, now, () => "p" + i, "uid-" + i);
+        expect(tienlenAdapter.command(room, "token-seat-0", { type: "start" }, now).ok).toBe(true);
+        room.game!.status = "playing";
+      });
+      const socket = new FakeSocket();
+      hub.add({ socket, code, token: "token-seat-0", role: "player", userId: "uid-0", session: null, authCheckedAt: 0 }, code);
+      await hub.refresh(code);
+      const state = (await store.load(code))!.state;
+      const at = adapter.nextTickAt(state, Date.now());
+      expect(at).not.toBeNull();
+      await other.mutate(code, (room, now) => tienlenAdapter.join(room, "token-new-device", "Player0", now, () => "new", "uid-0"), (r) => !r.ok);
+      await hub.refresh(code, (await store.load(code))!.version);
+      expect(socket.inbox).toContainEqual({ type: "signedOut", reason: "replaced" });
+      expect(socket.closed).toEqual({ code: 4001, reason: "replaced" });
+      expect((hub as unknown as { rooms: Map<string, unknown> }).rooms.has(code)).toBe(false);
+      const mutate = vi.spyOn(hub, "mutate");
+      await vi.advanceTimersByTimeAsync(Math.max(0, at! - Date.now()) + 1000);
+      expect(mutate).not.toHaveBeenCalled();
+      expect(adapter.tick).not.toHaveBeenCalled();
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+
   it("discards leave queued behind the ping that revokes the socket", async () => {
     const session = await accountSession("QueueRevoked");
     const svc = await getAccountService();
