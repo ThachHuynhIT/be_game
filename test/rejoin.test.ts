@@ -33,8 +33,10 @@ function setup(adapter: GameAdapter) {
   const room = adapter.newRoom("ABCDE");
   const seats = () => (room as unknown as { seats: (Seat | null)[] }).seats.filter((s): s is Seat => !!s);
   const join = (token: string, name: string, now: number) => {
-    const r = adapter.join(room, token, name, now, newId);
+    const r = adapter.join(room, token, name, now, newId, token);
     if (!r.ok) throw new Error(r.error);
+    // This fixture represents rooms persisted before account-owned seats.
+    for (const seat of seats()) delete (seat as Seat & { uid?: string }).uid;
   };
   join(A, "Thach", T);
   join(B, "Lan", T);
@@ -46,6 +48,61 @@ function setup(adapter: GameAdapter) {
 }
 
 describe.each(ADAPTERS)("%s: reconnecting keeps the player", (_game, adapter) => {
+  it("an account takes its online seat with a new token, even in a full room", () => {
+    const room = adapter.newRoom("ABCDE");
+    let n = 0;
+    const id = () => `p${++n}`;
+    const join = adapter.join as (...args: unknown[]) => { ok: boolean };
+    expect(join(room, A, "Thach", T, id, "account-a").ok).toBe(true);
+    const seats = () => (room as unknown as { seats: (Seat & { uid?: string } | null)[] }).seats;
+    const original = seats().find(Boolean)!;
+    for (let i = 1; i < seats().length; i++) expect(join(room, `token-fill-${i}`, `Player${i}`, T, id, `account-${i}`).ok).toBe(true);
+    expect(join(room, "token-new-device", "Thach", T + 1, id, "account-a").ok).toBe(true);
+    expect(seats().find((p) => p?.id === original.id)).toMatchObject({ token: "token-new-device", uid: "account-a" });
+    expect(seats().filter(Boolean)).toHaveLength(seats().length);
+    const out = JSON.stringify([adapter.view(room, "token-new-device", "player", T + 1), adapter.summary(room, T + 1)]);
+    expect(out).not.toContain('"uid"');
+    expect(out).not.toContain("account-a");
+  });
+
+  it("takes the same online seat mid-game without changing the game or stats", () => {
+    const room = adapter.newRoom("ABCDE");
+    let n = 0;
+    const id = () => `p${++n}`;
+    for (let i = 0; i < 3; i++) expect(adapter.join(room, `token-seat-${i}`, `Player${i}`, T, id, `account-${i}`).ok).toBe(true);
+    expect(adapter.command(room, "token-seat-0", { type: "start" }, T).ok).toBe(true);
+    const state = room as unknown as { game: unknown; current?: { status: string }; seats: (Seat | null)[] };
+    const game = (typeof state.game === "object" ? state.game : state.current) as { status: string };
+    // Fix the phase explicitly because a Tiến Lên deal can otherwise win instantly.
+    game.status = "playing";
+    const before = JSON.stringify(game);
+    const seat = state.seats.find((p) => p?.token === "token-seat-0")!;
+    seat.wins = 2;
+    seat.points = 7;
+    expect(adapter.join(room, "token-new-device", "Renamed", T + 1, id, "account-0").ok).toBe(true);
+    expect(state.seats.find((p) => p?.token === "token-new-device")).toMatchObject({ id: seat.id, wins: 2, points: 7 });
+    expect(state.seats.filter(Boolean)).toHaveLength(3);
+    expect(JSON.stringify(game)).toBe(before);
+  });
+
+  it("a different account cannot reclaim an owned offline seat by name", () => {
+    const room = adapter.newRoom("ABCDE");
+    let n = 0;
+    const id = () => `p${++n}`;
+    const join = adapter.join as (...args: unknown[]) => { ok: boolean };
+    join(room, A, "Thach", T, id, "account-a");
+    const seats = (room as unknown as { seats: (Seat | null)[] }).seats;
+    const original = seats.find(Boolean)!;
+    join(room, "token-other-xxx", "Thach", T + PRESENCE_TIMEOUT_MS + 1, id, "account-other");
+    expect(seats.find((p) => p?.id === original.id)?.token).toBe(A);
+  });
+
+  it("claims a legacy offline seat by name and attaches the account", () => {
+    const { room, aId } = setup(adapter);
+    const join = adapter.join as (...args: unknown[]) => { ok: boolean };
+    expect(join(room, "token-new-device", "Thach", T + PRESENCE_TIMEOUT_MS + 1, () => "new", "account-a").ok).toBe(true);
+    expect((room as unknown as { seats: (Seat | null)[] }).seats.find((p) => p?.id === aId)).toMatchObject({ uid: "account-a" });
+  });
   it("a seat dropped after the grace period comes back with the same id and stats", () => {
     const { room, seats, join, aId } = setup(adapter);
     const t = T + SEAT_GRACE_MS + 1;

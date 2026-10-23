@@ -143,6 +143,37 @@ describe("finished games feed the per-account leaderboard", () => {
 });
 
 describe("long names and seat ownership", () => {
+  it("rejoins the same account after a username change mid-game", async () => {
+    const session = await accountSession("Lan");
+    const svc = await getAccountService();
+    const store = createMemoryRoomStore<RoomState>();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    const a = connect(hub);
+    await a.request({ type: "join", code, token: "token-aaaaaaaa", session });
+    await connect(hub).request({ type: "join", code, token: "token-bbbbbbbb", session: await accountSession("Minh") });
+    await a.request({ type: "start" });
+    await svc.updateMe((await svc.authenticate(session))!, { username: "Lan Moi" });
+    expect(await connect(hub).request({ type: "join", code, token: "token-aaaaaaaa", session })).toMatchObject({ ok: true });
+    expect((await store.load(code))!.state.seats.filter(Boolean)).toHaveLength(2);
+  });
+
+  it("refuses another uid even when its new username equals the seat name", async () => {
+    const session = await accountSession("Lan");
+    const svc = await getAccountService();
+    const store = createMemoryRoomStore<RoomState>();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    const a = connect(hub);
+    await a.request({ type: "join", code, token: "token-aaaaaaaa", session });
+    await connect(hub).request({ type: "join", code, token: "token-bbbbbbbb", session: await accountSession("Minh") });
+    await a.request({ type: "start" });
+    await svc.updateMe((await svc.authenticate(session))!, { username: "Lan Moi" });
+    const other = await accountSession("Lan");
+    const newAccount = await svc.register({ username: "Lan", password: "matkhau123" }, "10.8.0.1");
+    if (!newAccount.ok) throw new Error("register");
+    expect(await connect(hub).request({ type: "join", code, token: "token-aaaaaaaa", session: newAccount.session })).toMatchObject({ ok: false, error: "Ghế này thuộc tài khoản khác" });
+  });
   const LONG = "Nguyễn Văn Ánh Đặngx";
   it("seats a 20-character username unchanged and ranks it", async () => {
     const name = LONG;

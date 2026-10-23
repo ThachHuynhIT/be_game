@@ -385,8 +385,8 @@ describe("house rules", () => {
   it("settings carry the house rules into the game and the view lists what I can do", () => {
     let n = 0;
     const room = newTPRoom("RULES");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(tpCommand(room, "token-aaaa", { type: "settings", buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" }, T).ok).toBe(true);
     expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
     expect(room.current!.rules).toMatchObject({ buildRule: "chain", needGroup: false, sellLand: false, bankruptTo: "creditor" });
@@ -449,8 +449,8 @@ describe("table settings", () => {
   it("selling land while in debt pays the debt once there's enough cash", () => {
     let n = 0;
     const room = newTPRoom("DEBTL");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
     const g = room.current!;
     g.turn = "p1";
@@ -486,8 +486,8 @@ describe("table settings", () => {
   it("room settings validate and reach the game", () => {
     let n = 0;
     const room = newTPRoom("KNOBS");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(tpCommand(room, "token-aaaa", { type: "settings", goSalary: 150 }, T).ok).toBe(false);
     expect(tpCommand(room, "token-aaaa", { type: "settings", unmortgageFee: 15 }, T).ok).toBe(false);
     expect(
@@ -598,8 +598,8 @@ describe("room", () => {
   it("runs through join, settings, start and a command", () => {
     let n = 0;
     const room = newTPRoom("ABCDE");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(tpCommand(room, "token-bbbb", { type: "settings", startCash: 2000 }, T).ok).toBe(false);
     expect(tpCommand(room, "token-aaaa", { type: "settings", startCash: 2000, timeLimit: 0 }, T).ok).toBe(true);
     expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
@@ -616,8 +616,8 @@ describe("room", () => {
     expect(hub).toBeTruthy();
     let n = 0;
     const room = newTPRoom("QWERT");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     tpCommand(room, "token-aaaa", { type: "start" }, T);
     const g = room.current!;
     const loser = g.turn!;
@@ -658,8 +658,8 @@ describe("settings", () => {
   it("host settings validate and apply to the next game", () => {
     let n = 0;
     const room = newTPRoom("SETTP");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(tpCommand(room, "token-aaaa", { type: "settings", stepSeconds: 7 }, T).ok).toBe(false);
     expect(tpCommand(room, "token-aaaa", { type: "settings", first: 2, second: 3 }, T).ok).toBe(false);
     expect(tpCommand(room, "token-aaaa", { type: "settings", stepSeconds: 45, doubleGo: true, parkingPot: true, first: 6, second: 2 }, T).ok).toBe(true);
@@ -675,8 +675,8 @@ describe("token picking", () => {
   it("lets a player pick an emoji and colour nobody else holds", () => {
     let n = 0;
     const room = newTPRoom("PICK");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     const seatPiece = (token: string) => tpView(room, room.seats[token === "token-aaaa" ? 0 : 1], T).seats.find((s) => s?.id === (token === "token-aaaa" ? "p1" : "p2"))!.piece;
     expect(seatPiece("token-aaaa")).toEqual({ emoji: "🛵", color: "#ef4444" });
     expect(seatPiece("token-bbbb")).toEqual({ emoji: "🐃", color: "#3b82f6" });
@@ -688,7 +688,7 @@ describe("token picking", () => {
     expect(seatPiece("token-aaaa")).toEqual({ emoji: "🚗", color: "#06b6d4" });
     // An's old starting piece is free again; a third player never gets a duplicate.
     expect(tpCommand(room, "token-bbbb", { type: "pick", emoji: "🛵", color: "#ef4444" }, T).ok).toBe(true);
-    joinTP(room, "token-cccc", "Cường", T, () => `p${++n}`);
+    joinTP(room, "token-cccc", "Cường", T, () => `p${++n}`, "token-cccc");
     const c = tpView(room, room.seats[2], T).seats.find((s) => s?.id === "p3")!.piece;
     expect([c.emoji, c.color]).not.toContain("🚗");
     expect(c.emoji === "🛵" || c.color === "#ef4444" || c.color === "#06b6d4" || c.emoji === "🚗").toBe(false);
@@ -699,12 +699,12 @@ describe("unique pieces", () => {
   it("re-rolls a colliding piece at random and keeps everyone different", () => {
     let n = 0;
     const room = newTPRoom("UNIQ");
-    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinTP(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinTP(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     // Simulate an old/raced state: both hold the same piece.
     room.seats[0]!.piece = { emoji: "🚗", color: "#06b6d4" };
     room.seats[1]!.piece = { emoji: "🚗", color: "#06b6d4" };
-    joinTP(room, "token-cccc", "Cường", T, () => `p${++n}`);
+    joinTP(room, "token-cccc", "Cường", T, () => `p${++n}`, "token-cccc");
     const ps = tpView(room, room.seats[2], T).seats.flatMap((s) => (s ? [s.piece] : []));
     expect(new Set(ps.map((p) => p.emoji)).size).toBe(3);
     expect(new Set(ps.map((p) => p.color)).size).toBe(3);

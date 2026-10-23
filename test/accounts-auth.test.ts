@@ -18,6 +18,32 @@ describe("passwords", () => {
   });
 });
 describe("sessions", () => {
+  it("a second login revokes the first session and issues a valid replacement", async () => {
+    const { createAccountService } = await import("../src/accounts/service");
+    const { createMemoryAccountStore } = await import("../src/accounts/store");
+    const svc = createAccountService(createMemoryAccountStore(), memoryRateLimiter());
+    const input = { username: "Lan", password: "matkhau123" };
+    const reg = await svc.register(input, "10.1.1.1");
+    const first = await svc.login(input, "10.1.1.2");
+    if (!reg.ok || !first.ok) throw new Error("setup");
+    expect(await svc.authenticate(first.session)).not.toBeNull();
+    const second = await svc.login(input, "10.1.1.3");
+    if (!second.ok) throw new Error(second.error);
+    expect(await svc.authenticate(first.session)).toBeNull();
+    expect(await svc.authenticate(reg.session)).toBeNull();
+    expect(await svc.authenticate(second.session)).not.toBeNull();
+  });
+
+  it("does not issue a stale session when the login update loses the user", async () => {
+    const { createAccountService } = await import("../src/accounts/service");
+    const { createMemoryAccountStore } = await import("../src/accounts/store");
+    const store = createMemoryAccountStore();
+    const svc = createAccountService(store, memoryRateLimiter());
+    const input = { username: "Lan", password: "matkhau123" };
+    expect((await svc.register(input, "10.2.1.1")).ok).toBe(true);
+    store.updateUser = async () => null;
+    expect(await svc.login(input, "10.2.1.2")).toMatchObject({ ok: false, status: 500 });
+  });
   const now = 1_790_000_000_000;
   it("round-trips, rejects a tampered or foreign token, and expires after 30 days", () => {
     const t = signSession({ uid: "u1", ver: 2 }, "s3cret", now);

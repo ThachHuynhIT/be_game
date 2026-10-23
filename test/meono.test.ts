@@ -255,8 +255,8 @@ describe("expansion cards", () => {
 describe("Mèo Nổ room", () => {
   it("host sets packs, starts, and a finished game is scored", () => {
     const room = newMeoRoom("MEOWS");
-    const a = joinMeo(room, "token-meo-a1", "An", T, () => "a");
-    const b = joinMeo(room, "token-meo-b1", "Bình", T, () => "b");
+    const a = joinMeo(room, "token-meo-a1", "An", T, () => "a", "token-meo-a1");
+    const b = joinMeo(room, "token-meo-b1", "Bình", T, () => "b", "token-meo-b1");
     expect(a.ok && b.ok).toBe(true);
     expect(meoCommand(room, "token-meo-b1", { type: "settings", expansions: ["imploding"] }, T).ok).toBe(false);
     expect(meoCommand(room, "token-meo-a1", { type: "settings", expansions: ["imploding", "bogus" as never] }, T).ok).toBe(true);
@@ -280,8 +280,8 @@ describe("Mèo Nổ room", () => {
     const hub = createRoomHub(createMemoryRoomStore<MeoRoom>(), meonoAdapter);
     const code = await hub.createRoom();
     const res = await hub.mutate(code, (room, now) => [
-      meonoAdapter.join(room, "token-hub-aaa", "A", now, () => "A"),
-      meonoAdapter.join(room, "token-hub-bbb", "B", now, () => "B"),
+      meonoAdapter.join(room, "token-hub-aaa", "A", now, () => "A", "account-a"),
+      meonoAdapter.join(room, "token-hub-bbb", "B", now, () => "B", "account-b"),
       meonoAdapter.command(room, "token-hub-aaa", { type: "start" }, now),
     ]);
     expect(res.found && res.result.every((r) => r.ok)).toBe(true);
@@ -296,8 +296,8 @@ describe("settings", () => {
   it("host sets turn / Nope timers and points for the next game", () => {
     let n = 0;
     const room = newMeoRoom("SETMN");
-    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(meoCommand(room, "token-bbbb", { type: "settings", turnSeconds: 45 }, T).ok).toBe(false);
     expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 12 }, T).ok).toBe(false);
     expect(meoCommand(room, "token-aaaa", { type: "settings", turnSeconds: 45, nopeSeconds: 5, first: 3, second: 1, expansions: ["streaking"] }, T).ok).toBe(true);
@@ -379,8 +379,8 @@ describe("Streaking Kittens pack", () => {
   it("Đánh dấu reveals a card of the target; Lời nguyền makes their hand blind", () => {
     let n = 0;
     const room = newMeoRoom("MARKS");
-    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     meoCommand(room, "token-aaaa", { type: "settings", expansions: ["streaking"] }, T);
     meoCommand(room, "token-aaaa", { type: "start" }, T);
     const g = room.current!;
@@ -614,8 +614,8 @@ describe("presets", () => {
   it("a preset decides the packs and the player range; custom uses the ticked packs", () => {
     let n = 0;
     const room = newMeoRoom("ZOMBI");
-    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     expect(meoCommand(room, "token-aaaa", { type: "settings", preset: "nope" }, T).ok).toBe(false);
     expect(meoCommand(room, "token-aaaa", { type: "settings", preset: "zombiewar", expansions: ["barking"] }, T).ok).toBe(true);
     // Zombie War is for 3–7 players.
@@ -631,8 +631,8 @@ describe("presets", () => {
   it("custom plays the ticked packs, zombie included", () => {
     let n = 0;
     const room = newMeoRoom("CUSTM");
-    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`);
-    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinMeo(room, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinMeo(room, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     meoCommand(room, "token-aaaa", { type: "settings", preset: "custom", expansions: ["zombie", "barking"] }, T);
     meoCommand(room, "token-aaaa", { type: "start" }, T);
     expect(room.current?.expansions).toEqual(["barking", "zombie"]);

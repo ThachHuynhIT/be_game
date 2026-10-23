@@ -165,9 +165,11 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
         return fail(401, BAD_LOGIN);
       }
       if (!(await verifyPassword(password, found.passwordHash)) || found.disabled) return fail(401, BAD_LOGIN);
-      let user = await promote(found);
-      user = (await store.updateUser(user.id, { lastLoginAt: new Date(now()) })) ?? user;
-      cache.delete(user.id);
+      const promoted = await promote(found);
+      // Signing in revokes every other session: one account, one device.
+      const user = await store.updateUser(promoted.id, { lastLoginAt: new Date(now()), bumpSession: true });
+      cache.delete(promoted.id);
+      if (!user) return fail(500, "Không thể cập nhật phiên đăng nhập");
       return { ok: true, session: issue(user), user: publicUser(user) };
     },
 

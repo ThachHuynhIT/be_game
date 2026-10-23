@@ -20,7 +20,7 @@ const T0 = 1_000_000;
 function roomWith(count: number) {
   const room = newRoom("ABCDE");
   const players = Array.from({ length: count }, (_, i) => {
-    const r = joinRoom(room, `token-${i}-xxxxxx`, `P${i}`, T0, id);
+    const r = joinRoom(room, `token-${i}-xxxxxx`, `P${i}`, T0, id, `token-${i}-xxxxxx`);
     if (!r.ok) throw new Error(r.error);
     return r.player;
   });
@@ -31,11 +31,11 @@ describe("room lifecycle", () => {
   it("seats up to 4, re-attaches by token and rejects a 5th", () => {
     const { room, players } = roomWith(4);
     expect(room.hostId).toBe(players[0].id);
-    const again = joinRoom(room, "token-1-xxxxxx", "Renamed", T0 + 5, id);
+    const again = joinRoom(room, "token-1-xxxxxx", "Renamed", T0 + 5, id, "token-1-xxxxxx");
     expect(again.ok && again.player.id).toBe(players[1].id);
     expect(room.seats[1]?.name).toBe("Renamed");
-    expect(joinRoom(room, "token-9-xxxxxx", "X", T0, id)).toEqual({ ok: false, error: "Phòng đã đủ 4 người" });
-    expect(joinRoom(room, "short", "X", T0, id).ok).toBe(false);
+    expect(joinRoom(room, "token-9-xxxxxx", "X", T0, id, "token-9-xxxxxx")).toEqual({ ok: false, error: "Phòng đã đủ 4 người" });
+    expect(joinRoom(room, "short", "X", T0, id, "short").ok).toBe(false);
   });
 
   it("only the host can start, and each view shows only your own hand", () => {

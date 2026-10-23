@@ -25,6 +25,7 @@ export interface HubSocket {
 }
 
 export interface AttachOptions {
+  now?: () => number;
   /** When the platform will kill this connection; the client is told to reconnect shortly before. */
   deadline?: Date;
   /** Defaults to the process-wide hub for `game` (Tiến Lên if omitted). */
@@ -39,7 +40,7 @@ const RECONNECT_LEAD_MS = 25_000;
 const MAX_MESSAGES_PER_SECOND = 20;
 
 type Ack = { ok: true; code?: string } | { ok: false; error: string };
-type OutMessage = ({ type: "ack"; id: number } & Ack) | { type: "state"; view: unknown } | { type: "reconnect" } | { type: "pong" };
+type OutMessage = ({ type: "ack"; id: number } & Ack) | { type: "state"; view: unknown } | { type: "reconnect" } | { type: "pong" } | { type: "signedOut"; reason: "replaced" | "revoked" };
 
 interface Conn {
   socket: HubSocket;
@@ -48,6 +49,8 @@ interface Conn {
   role: "player" | "spectator";
   /** Account that joined; the look is re-read from the store by this id (a later password change revokes the join token, not the seat). */
   userId: string | null;
+  session: string | null;
+  authCheckedAt: number;
 }
 
 interface LocalRoom {
@@ -77,7 +80,7 @@ export function cleanLook(raw: unknown): PlayerLook | null {
   return { icon: ic, color: color.toLowerCase() };
 }
 
-type LookRoom = { seats: ({ token: string; name: string } | null)[]; spectators?: { token: string; name: string }[]; looks?: Record<string, PlayerLook> };
+type LookRoom = { seats: ({ token: string; name: string; uid?: string } | null)[]; spectators?: { token: string; name: string }[]; looks?: Record<string, PlayerLook> };
 
 /** Remember this token's look (dropping looks of tokens that left the room). */
 function setLook(room: LookRoom, token: string, look: PlayerLook | null) {
@@ -101,6 +104,7 @@ function looksByName(room: LookRoom): Record<string, PlayerLook> {
 /** Client device id (random, stored in the browser). */
 export const DEVICE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const ACCOUNT_TIMEOUT_MS = 5000;
+const SESSION_RECHECK_MS = 30_000;
 const ACCOUNT_DOWN = "Máy chủ tài khoản đang lỗi, thử lại sau";
 const NEED_LOGIN = "Cần đăng nhập";
 
@@ -110,6 +114,10 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 const newId = (len = 8) => randomBytes(len).toString("base64url").slice(0, len);
+
+export function replacedBy(state: LookRoom, conn: { role: string; userId: string | null; token: string | null }): boolean {
+  return conn.role === "player" && !!conn.userId && state.seats.some((p) => p?.uid === conn.userId && p.token !== conn.token);
+}
 
 export class RoomHub<S extends CodedRoom = CodedRoom> {
   private rooms = new Map<string, LocalRoom>();
@@ -258,6 +266,12 @@ export class RoomHub<S extends CodedRoom = CodedRoom> {
         for (const conn of r.conns) {
           if (!conn.token) continue;
           const view = this.adapter.view(state, conn.token, conn.role, now);
+          if (!view && replacedBy(state as unknown as LookRoom, conn)) {
+            send(conn.socket, { type: "signedOut", reason: "replaced" });
+            this.remove(conn);
+            conn.socket.close(4001, "replaced");
+            continue;
+          }
           if (view) send(conn.socket, { type: "state", view: typeof view === "object" && Object.keys(looks).length ? { ...view, looks } : view });
         }
         this.arm(code, r, state, now);
@@ -336,7 +350,8 @@ const cleanCode = (code: unknown) => String(code ?? "").toUpperCase().slice(0, 8
 
 /** Wire a freshly upgraded WebSocket into a game. */
 export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
-  const conn: Conn = { socket, code: null, token: null, role: "player", userId: null };
+  const conn: Conn = { socket, code: null, token: null, role: "player", userId: null, session: null, authCheckedAt: 0 };
+  const now = opts.now ?? Date.now;
   const hubPromise: Promise<RoomHub> = opts.hub ? Promise.resolve(opts.hub) : getHub(opts.game ?? "tienlen");
   let closed = false;
   let windowStart = Date.now();
@@ -355,6 +370,21 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
   const handle = async (hub: RoomHub, msg: InMessage) => {
     const adapter = hub.adapter;
     if (msg.type === "ping") {
+      if (conn.userId && conn.session && now() - conn.authCheckedAt > SESSION_RECHECK_MS) {
+        conn.authCheckedAt = now();
+        try {
+          const svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
+          const user = await withTimeout(svc.authenticate(conn.session), ACCOUNT_TIMEOUT_MS);
+          if (!user) {
+            send(socket, { type: "signedOut", reason: "revoked" });
+            hub.remove(conn);
+            socket.close(4001, "revoked");
+            return;
+          }
+        } catch (err) {
+          console.error("[be_game] session recheck:", err instanceof Error ? err.message : "error");
+        }
+      }
       send(socket, { type: "pong" });
       if (conn.code && conn.token) {
         const { token } = conn;
@@ -386,12 +416,12 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       const res = await hub.mutate(
         code,
         (room, now): Result => {
-          const r = msg.type === "join" ? adapter.join(room, token, name, now, newId) : adapter.watch(room, token, name, now);
+          const r = msg.type === "join" ? adapter.join(room, token, name, now, newId, user.id) : adapter.watch(room, token, name, now);
           if (!r.ok) return r;
           if (msg.type === "join") {
             // A seat kept by token mid-game keeps its old name: never take over another account's seat.
             const seat = (room as unknown as LookRoom).seats.find((p) => p?.token === token);
-            if (seat && seat.name !== cleanName(name)) return { ok: false, error: "Ghế này thuộc tài khoản khác" };
+            if (seat && (seat.uid ? seat.uid !== user.id : seat.name !== cleanName(name))) return { ok: false, error: "Ghế này thuộc tài khoản khác" };
           }
           setLook(room as unknown as LookRoom, token, look);
           return r;
@@ -404,6 +434,8 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
       conn.code = code;
       conn.token = token;
       conn.userId = user.id;
+      conn.session = typeof msg.session === "string" ? msg.session : null;
+      conn.authCheckedAt = now();
       conn.role = msg.type === "join" ? "player" : "spectator";
       hub.add(conn, code);
       ack(id, { ok: true });
@@ -487,8 +519,10 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     const msg = parse(data);
     if (!msg) return;
     queue = queue.then(async () => {
+      if (closed) return;
       try {
-        await handle(await hubPromise, msg);
+        const hub = await hubPromise;
+        if (!closed) await handle(hub, msg);
       } catch (err) {
         console.error("[be_game]", err);
         if ("id" in msg) ack(Number(msg.id) || 0, { ok: false, error: err instanceof Error ? err.message : "Lỗi máy chủ" });

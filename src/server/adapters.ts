@@ -124,7 +124,7 @@ export type Result = { ok: true } | { ok: false; error: string };
 export interface GameAdapter<S extends CodedRoom = CodedRoom> {
   game: GameKind;
   newRoom(code: string): S;
-  join(room: S, token: string, name: string, now: number, newId: () => string): Result;
+  join(room: S, token: string, name: string, now: number, newId: () => string, uid: string): Result;
   watch(room: S, token: string, name: string, now: number): Result;
   heartbeat(room: S, token: string, now: number): void;
   leave(room: S, token: string, now: number): void;
@@ -143,7 +143,7 @@ export interface GameAdapter<S extends CodedRoom = CodedRoom> {
 export const tienlenAdapter: GameAdapter<RoomState> = {
   game: "tienlen",
   newRoom,
-  join: (room, token, name, now, newId) => joinRoom(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinRoom(room, token, name, now, newId, uid),
   watch: watchRoom,
   heartbeat(room, token, now) {
     const p = findByToken(room, token);
@@ -186,7 +186,7 @@ export const tienlenAdapter: GameAdapter<RoomState> = {
 export const meonoAdapter: GameAdapter<MeoRoom> = {
   game: "meono",
   newRoom: newMeoRoom,
-  join: (room, token, name, now, newId) => joinMeo(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinMeo(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: meoHeartbeat,
   leave: leaveMeo,
@@ -209,7 +209,7 @@ export const meonoAdapter: GameAdapter<MeoRoom> = {
 export const typhuAdapter: GameAdapter<TPRoom> = {
   game: "typhu",
   newRoom: newTPRoom,
-  join: (room, token, name, now, newId) => joinTP(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinTP(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: tpHeartbeat,
   leave: leaveTP,
@@ -232,7 +232,7 @@ export const typhuAdapter: GameAdapter<TPRoom> = {
 export const splendorAdapter: GameAdapter<SPRoom> = {
   game: "splendor",
   newRoom: newSPRoom,
-  join: (room, token, name, now, newId) => joinSP(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinSP(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: spHeartbeat,
   leave: leaveSP,
@@ -255,7 +255,7 @@ export const splendorAdapter: GameAdapter<SPRoom> = {
 export const bangAdapter: GameAdapter<BangRoom> = {
   game: "bang",
   newRoom: newBangRoom,
-  join: (room, token, name, now, newId) => joinBang(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinBang(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: bangHeartbeat,
   leave: leaveBang,
@@ -278,7 +278,7 @@ export const bangAdapter: GameAdapter<BangRoom> = {
 export const oanquanAdapter: GameAdapter<OQRoom> = {
   game: "oanquan",
   newRoom: newOQRoom,
-  join: (room, token, name, now, newId) => joinOQ(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinOQ(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: oqHeartbeat,
   leave: leaveOQ,
@@ -301,7 +301,7 @@ export const oanquanAdapter: GameAdapter<OQRoom> = {
 export const canguaAdapter: GameAdapter<CNRoom> = {
   game: "cangua",
   newRoom: newCNRoom,
-  join: (room, token, name, now, newId) => joinCN(room, token, name, now, newId),
+  join: (room, token, name, now, newId, uid) => joinCN(room, token, name, now, newId, uid),
   watch: (room, token, name, now) => watchRoom(room, token, name, now),
   heartbeat: cnHeartbeat,
   leave: leaveCN,

@@ -57,7 +57,7 @@ function runGame(seed: number, n: number) {
   const players: MeoPlayer[] = [];
   const online: boolean[] = [];
   for (let i = 0; i < n; i++) {
-    const r = joinMeo(room, `token-${seed}-${i}-xxxxxxxx`, `P${i}`, now, () => `id${++idc}`);
+    const r = joinMeo(room, `token-${seed}-${i}-xxxxxxxx`, `P${i}`, now, () => `id${++idc}`, `token-${seed}-${i}-xxxxxxxx`);
     if (!r.ok) throw new Error(r.error);
     players.push(r.player);
     online.push(true);
@@ -234,7 +234,7 @@ function runGame(seed: number, n: number) {
             online[i] = !online[i];
             if (!online[i] && rand() < 0.3) leaveMeo(room, players[i].token, now, rand);
             if (online[i]) {
-              const rj = joinMeo(room, players[i].token, players[i].name, now, () => `id${++idc}`);
+              const rj = joinMeo(room, players[i].token, players[i].name, now, () => `id${++idc}`, players[i].token);
               if (rj.ok) players[i] = rj.player;
             }
             hist.push(`toggle ${i} -> ${online[i]}`);
@@ -300,7 +300,7 @@ function runGame(seed: number, n: number) {
       // Re-attach everyone (heartbeat) so nobody is stale.
       for (const p of players) {
         if (p.kicked) continue;
-        joinMeo(room, p.token, p.name, now, () => `id${++idc}`);
+        joinMeo(room, p.token, p.name, now, () => `id${++idc}`, p.token);
       }
       if (players.some((p) => p.kicked)) break;
     }
@@ -361,7 +361,7 @@ describe("Mèo Nổ regressions found by fuzzing", () => {
     const room = newMeoRoom("KCURS");
     let n = 0;
     const ps = [0, 1, 2].map((i) => {
-      const r = joinMeo(room, `token-k-${i}-xxxxxxxx`, `P${i}`, T0, () => `k${++n}`);
+      const r = joinMeo(room, `token-k-${i}-xxxxxxxx`, `P${i}`, T0, () => `k${++n}`, `token-k-${i}-xxxxxxxx`);
       if (!r.ok) throw new Error(r.error);
       return r.player;
     });

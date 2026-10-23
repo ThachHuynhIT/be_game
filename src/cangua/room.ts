@@ -25,6 +25,7 @@ import type { CNCommand, CNRoomSummary, CNRoomView, CNSettings } from "./protoco
 export interface CNPlayer {
   id: string;
   token: string;
+  uid?: string;
   name: string;
   lastSeen: number;
   left?: boolean;
@@ -72,17 +73,18 @@ export function joinCN(
   name: string,
   now: number,
   newId: () => string,
+  uid: string,
 ): { ok: true; player: CNPlayer } | { ok: false; error: string } {
   if (typeof token !== "string" || token.length < 8 || token.length > 128) return { ok: false, error: "Phiên không hợp lệ" };
-  let player = findReturning(room, token, name, now);
+  let player = findReturning(room, token, name, now, uid);
   if (player?.kicked) return { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" };
   if (player) {
-    if (!inPlayingGame(room, player.id)) player.name = cleanName(name);
+    if (!inPlayingGame(room, player.id)) { player.name = cleanName(name); player.uid = uid; }
   } else {
     dropGoneSeats(room, now);
     const free = room.seats.findIndex((s) => s === null);
     if (free < 0) return { ok: false, error: `Phòng đã đủ ${MAX_PLAYERS} người` };
-    player = seatFor(takeGone(room, token, name, now), token, name, now, newId);
+    player = seatFor(takeGone(room, token, name, now, uid), token, name, now, newId, uid);
     room.seats[free] = player;
   }
   player.lastSeen = now;

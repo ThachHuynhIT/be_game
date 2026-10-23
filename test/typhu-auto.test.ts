@@ -111,8 +111,8 @@ describe("Cờ Tỷ Phú auto-play through the room", () => {
   it("toggles with { type: 'auto' }, plays the player's turn while they stay online, and only they see the flag", () => {
     let id = 0;
     const room = newTPRoom("AUTO1");
-    joinTP(room, "token-aaaaaaaa", "An", T, () => `p${id++}`);
-    joinTP(room, "token-bbbbbbbb", "Bình", T, () => `p${id++}`);
+    joinTP(room, "token-aaaaaaaa", "An", T, () => `p${id++}`, "token-aaaaaaaa");
+    joinTP(room, "token-bbbbbbbb", "Bình", T, () => `p${id++}`, "token-bbbbbbbb");
     expect(tpCommand(room, "token-aaaaaaaa", { type: "start" }, T).ok).toBe(true);
     const g = room.current!;
     const turnToken = room.seats.find((p) => p?.id === g.turn)!.token;

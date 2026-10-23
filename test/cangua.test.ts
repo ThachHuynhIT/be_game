@@ -306,8 +306,8 @@ describe("room flow", () => {
   function room() {
     let n = 0;
     const r = newCNRoom("HORSE");
-    joinCN(r, "token-aaaa", "An", T, () => `p${++n}`);
-    joinCN(r, "token-bbbb", "Bình", T, () => `p${++n}`);
+    joinCN(r, "token-aaaa", "An", T, () => `p${++n}`, "token-aaaa");
+    joinCN(r, "token-bbbb", "Bình", T, () => `p${++n}`, "token-bbbb");
     return r;
   }
 

@@ -385,7 +385,7 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
       for (let i = 0; i < n; i++) {
         const tok = `token-secret-${seed}-${i}-abcdef`;
         tokens.push(tok);
-        expect(joinTP(room, tok, `P${i}`, now, () => `id${id++}`, r).ok).toBe(true);
+        expect(joinTP(room, tok, `P${i}`, now, () => `id${id++}`, tok, r).ok).toBe(true);
       }
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       const maps = ["std", "large", "huge"];
