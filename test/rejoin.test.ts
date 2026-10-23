@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createRoomHub } from "../src/server/hub";
+import { createMemoryRoomStore } from "../src/server/store";
 import { PRESENCE_TIMEOUT_MS, SEAT_GRACE_MS } from "../src/game/room";
 import {
   type GameAdapter,
@@ -48,6 +50,37 @@ function setup(adapter: GameAdapter) {
 }
 
 describe.each(ADAPTERS)("%s: reconnecting keeps the player", (_game, adapter) => {
+  it("rejects a kicked account on another device without persisting its changed token", async () => {
+    const store = createMemoryRoomStore();
+    const hub = createRoomHub(store, adapter);
+    const code = await hub.createRoom();
+    let target = 1;
+    await hub.mutate(code, (room, now) => {
+      for (let i = 0; i < 4; i++) expect(adapter.join(room, "token-kick-" + i, "Player" + i, now, () => "p" + i, "account-" + i).ok).toBe(true);
+      expect(adapter.command(room, "token-kick-0", { type: "start" }, now).ok).toBe(true);
+      const state = room as unknown as { game: unknown; current?: { status: string }; seats: (Seat & { lastSeen: number; kicked?: boolean } | null)[] };
+      const game = (typeof state.game === "object" ? state.game : state.current) as { status: string };
+      if (_game === "bang") {
+        const bang = game as unknown as { ps: Record<string, { role: string }> };
+        // Keep a sheriff and another outlaw alive after the chosen outlaw is kicked.
+        const roles = ["sheriff", "renegade", "outlaw", "outlaw"];
+        roles.forEach((role, i) => { bang.ps["p" + i].role = role; });
+        target = Number(Object.keys(bang.ps).find((id) => bang.ps[id].role === "outlaw")!.slice(1));
+      } else game.status = "playing";
+      state.seats.find((p) => p?.id === "p" + target)!.lastSeen = 0;
+      expect(adapter.command(room, "token-kick-0", { type: "kick", playerId: "p" + target }, now).ok).toBe(true);
+      expect(state.seats.find((p) => p?.id === "p" + target)?.kicked).toBe(true);
+      if (_game === "bang") expect(game.status).not.toBe("ended");
+      else expect(game.status).toBe("playing");
+    });
+    const before = await store.load(code);
+    const result = await hub.mutate(code, (room, now) => adapter.join(room, "token-new-device", "Player" + target, now, () => "new", "account-" + target), (r) => !r.ok);
+    expect(result).toEqual({ found: true, result: { ok: false, error: "Bạn đã bị chủ phòng mời ra khỏi ván này" } });
+    const after = await store.load(code);
+    expect(after).toEqual(before);
+    expect((after!.state as unknown as { seats: (Seat | null)[] }).seats.find((p) => p?.id === "p" + target)?.token).toBe("token-kick-" + target);
+  });
+
   it("an account takes its online seat with a new token, even in a full room", () => {
     const room = adapter.newRoom("ABCDE");
     let n = 0;
