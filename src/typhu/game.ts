@@ -1127,27 +1127,9 @@ export function forfeitPlayer(s: TPState, id: string, now: number, names: NameOf
 // ─── Timers ─────────────────────────────────────────────────────────
 
 /**
- * Build houses for an auto-playing player at the end of their turn: always the lot with the fewest houses
- * (then the cheapest), only where `buildBlocker` allows it (table rules: full group, even / chain, no mortgage),
- * and never below AUTO_KEEP_CASH.
- */
-function autoBuild(s: TPState, id: string, now: number, names: NameOf) {
-  for (let guard = 0; guard < 100; guard++) {
-    let best: { pos: number; houses: number; cost: number } | null = null;
-    for (const [key, d] of Object.entries(s.deeds)) {
-      const pos = Number(key);
-      if (d.owner !== id || buildBlocker(s, id, pos)) continue;
-      const cost = houseCost(sq(s, pos) as Extract<Ownable, { kind: "prop" }>, d.houses + 1, rulesOf(s));
-      if (s.ps[id].cash - cost <= AUTO_KEEP_CASH) continue;
-      if (!best || d.houses < best.houses || (d.houses === best.houses && cost < best.cost)) best = { pos, houses: d.houses, cost };
-    }
-    if (!best || !build(s, id, best.pos, now, names).ok) return;
-  }
-}
-
-/**
  * Play one automatic step for the current player: on a timeout or while offline it only keeps the game moving
- * (no purchases); with auto-play on (`playing`) it also buys cheap squares and builds, keeping a cash reserve.
+ * (no purchases); with auto-play on (`playing`) it also buys cheap squares, keeping a cash reserve. It never builds:
+ * houses stay the player's own call.
  */
 function autoStep(s: TPState, now: number, names: NameOf, random: Random, playing: boolean) {
   const id = s.turn!;
@@ -1162,8 +1144,6 @@ function autoStep(s: TPState, now: number, names: NameOf, random: Random, playin
       return;
     }
     case "end":
-      // Building and ending happen in one step: building leaves the phase (and its timer) unchanged.
-      if (playing) autoBuild(s, id, now, names);
       endTurn(s, id, now, names);
       return;
     case "debt": {
@@ -1177,7 +1157,7 @@ function autoStep(s: TPState, now: number, names: NameOf, random: Random, playin
 
 /**
  * `absent`: offline players — their turn is played for them and offers to them expire.
- * `auto`: players who switched auto-play on — their turn is played (buying and building) at the same pace,
+ * `auto`: players who switched auto-play on — their turn is played (buying, not building) at the same pace,
  * while offers to them still wait for an answer.
  */
 export function tickGame(

@@ -232,14 +232,14 @@ Server giữ **150 dòng cuối** (trước đây 16) và gửi cả mảng tron
 | `TRADE_MS` | 30 000 | Lời mời trade |
 | `ABSENT_MS` | 2 500 | Người tới lượt offline (hoặc đang bật auto-play) được tự đi sau chừng này kể từ `phaseAt` |
 | `AUTO_BUY_BELOW` | 300 | Auto-play chỉ mua ô giá dưới mức này |
-| `AUTO_KEEP_CASH` | 150 | Auto-play chỉ mua / xây khi sau đó còn **hơn** số tiền này |
+| `AUTO_KEEP_CASH` | 150 | Auto-play chỉ mua khi sau đó còn **hơn** số tiền này |
 
 `setPhase` đặt `phaseAt = now` và `deadline`. Build/sell/mortgage/trade **không** đặt lại deadline; `payJail` thì có.
 
 `tickGame` (mỗi tick tối đa **một** bước tự động để người khác theo dõi kịp):
 1. Trade hết hạn hoặc người nhận offline → huỷ.
 2. `endsAt` đã qua → `endGame(byTime)`.
-3. Lượt hết deadline, hoặc người tới lượt offline / đang bật auto-play và `now ≥ phaseAt + ABSENT_MS` → `autoStep`: `roll` → tung; `buy` → **không mua** (auto-play: mua nếu giá < `AUTO_BUY_BELOW` và còn > `AUTO_KEEP_CASH`); `end` → (auto-play: `autoBuild` — xây ô ít nhà nhất rồi rẻ nhất, chỉ chỗ `buildBlocker` cho phép, giữ > `AUTO_KEEP_CASH`) chuyển lượt; `debt` → `autoLiquidate` rồi trả nợ, không đủ thì phá sản.
+3. Lượt hết deadline, hoặc người tới lượt offline / đang bật auto-play và `now ≥ phaseAt + ABSENT_MS` → `autoStep`: `roll` → tung; `buy` → **không mua** (auto-play: mua nếu giá < `AUTO_BUY_BELOW` và còn > `AUTO_KEEP_CASH`); `end` → chuyển lượt (auto-play **không** tự xây nhà, xây là việc của người chơi); `debt` → `autoLiquidate` rồi trả nợ, không đủ thì phá sản.
 
 **Auto-play (Ctrl+Shift+Y ở client):** lệnh `{ type: "auto", on }` đặt `TPPlayer.auto`; `tickTP` truyền nó vào `tickGame` qua tham số `auto` (khác `absent`: lời mời trade / vay gửi tới người bật auto **không** bị huỷ ngay, vẫn chờ tới hạn). Bật auto gọi `tickTP` ngay để một bước đã đến hạn được đi luôn. `view.auto` chỉ có trong view của chính người đó.
 

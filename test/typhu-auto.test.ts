@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BOARD, groupPositions, houseCost } from "../src/typhu/board";
-import { ABSENT_MS, AUTO_BUY_BELOW, AUTO_KEEP_CASH, type TPState, buildBlocker, newTPGame, proposeTrade, rulesOf, tickGame } from "../src/typhu/game";
+import { BOARD, groupPositions } from "../src/typhu/board";
+import { ABSENT_MS, AUTO_BUY_BELOW, AUTO_KEEP_CASH, type TPState, newTPGame, proposeTrade, tickGame } from "../src/typhu/game";
 import { joinTP, newTPRoom, tickTP, tpCommand, tpView } from "../src/typhu/room";
 
 const names = (id: string) => id;
@@ -59,32 +59,14 @@ describe("Cờ Tỷ Phú auto-play (Ctrl+Shift+Y)", () => {
     expect(s.deeds[cheap]).toBeUndefined();
   });
 
-  it("builds evenly on a full colour group at the end of the turn, keeps the reserve, then ends the turn", () => {
-    const s = game(1000);
+  it("never builds, even on a full colour group with plenty of cash, then ends the turn", () => {
+    const s = game(5000);
     const group = groupPositions("brown");
     for (const pos of group) s.deeds[pos] = { owner: "a", houses: 0, mortgaged: false };
     s.phase = "end";
     step(s);
-    const houses = group.map((p) => s.deeds[p].houses);
-    expect(Math.min(...houses)).toBeGreaterThan(0);
-    expect(Math.max(...houses) - Math.min(...houses)).toBeLessThanOrEqual(1); // even-build rule
-    expect(s.ps.a.cash).toBeGreaterThan(AUTO_KEEP_CASH);
-    // It stopped only because of the reserve (or the hotel cap): every build still allowed would cut into it.
-    for (const p of group) {
-      if (buildBlocker(s, "a", p)) continue;
-      const cost = houseCost(BOARD[p] as Extract<(typeof BOARD)[number], { kind: "prop" }>, s.deeds[p].houses + 1, rulesOf(s));
-      expect(s.ps.a.cash - cost).toBeLessThanOrEqual(AUTO_KEEP_CASH);
-    }
-    expect(s.turn).toBe("b");
-  });
-
-  it("does not build without the full group when the table needs it", () => {
-    const s = game(1000);
-    const [first] = groupPositions("brown");
-    s.deeds[first] = { owner: "a", houses: 0, mortgaged: false };
-    s.phase = "end";
-    step(s);
-    expect(s.deeds[first].houses).toBe(0);
+    expect(group.map((p) => s.deeds[p].houses)).toEqual(group.map(() => 0));
+    expect(s.ps.a.cash).toBe(5000);
     expect(s.turn).toBe("b");
   });
 

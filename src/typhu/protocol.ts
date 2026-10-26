@@ -148,7 +148,7 @@ export interface TPRoomSummary {
  *   { type: "loan", to, amount, rate: 10 | 20 }  // ask `to` to lend `amount`; repaid + rate% after 5 of your turns
  *   { type: "loananswer", accept }   // the lender answers; the borrower can withdraw with accept: false
  *   { type: "tradeanswer", accept }   // the receiver answers; the proposer can withdraw with accept: false
- *   { type: "auto", on }   // your own auto-play: the server plays your turns (buys squares under AUTO_BUY_BELOW, builds), keeping AUTO_KEEP_CASH
+ *   { type: "auto", on }   // your own auto-play: the server plays your turns (buys squares under AUTO_BUY_BELOW, never builds), keeping AUTO_KEEP_CASH
  */
 export type TPCommand =
   | { type: "start" }
