@@ -35,6 +35,8 @@ import {
   type TPState,
   answerLoan,
   answerTrade,
+  auctionMinNext,
+  bid,
   DEFAULT_TP_RULES,
   build,
   buildBlocker,
@@ -212,6 +214,7 @@ function startTP(room: TPRoom, host: TPPlayer, now: number, random: Random): Res
       landSalePct: st.landSalePct,
       jailRent: st.jailRent,
       doubleRoll: st.doubleRoll,
+      auction: st.auction === true,
     },
   }, random);
   return { ok: true };
@@ -259,6 +262,7 @@ function setSettings(room: TPRoom, host: TPPlayer, msg: Record<string, unknown>)
   if (msg.risingCost !== undefined) next.risingCost = msg.risingCost === true;
   if (msg.jailRent !== undefined) next.jailRent = msg.jailRent === true;
   if (msg.doubleRoll !== undefined) next.doubleRoll = msg.doubleRoll === true;
+  if (msg.auction !== undefined) next.auction = msg.auction === true;
   if (msg.sellLand !== undefined) next.sellLand = msg.sellLand === true;
   if (msg.bankruptTo !== undefined) {
     if (msg.bankruptTo !== "bank" && msg.bankruptTo !== "creditor") return { ok: false, error: "Luật phá sản không hợp lệ" };
@@ -367,6 +371,9 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
       break;
     case "skip":
       res = skipBuy(g, p.id, now, names);
+      break;
+    case "bid":
+      res = bid(g, p.id, msg.amount, now, names);
       break;
     case "end":
       res = endTurn(g, p.id, now, names);
@@ -551,6 +558,8 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
           dice: g.dice,
           rollAgain: g.rollAgain,
           debt: g.debt ? { amount: g.debt.amount, to: g.debt.to, reason: g.debt.reason } : null,
+          // Whitelisted fields only; `deadline` is the same clock as `current.deadline`.
+          auction: g.auction ? { pos: g.auction.pos, bid: g.auction.bid, bidder: g.auction.bidder, minNext: auctionMinNext(g.auction), deadline: g.auction.deadline } : null,
           trade: g.trade,
           loan: g.loan ?? null,
           loans: g.loans ?? [],

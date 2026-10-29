@@ -41,6 +41,8 @@ export interface TPSettings {
   jailRent: boolean;
   /** A double gives another roll. */
   doubleRoll: boolean;
+  /** An unbought square (skipped / timed out) goes to auction; missing on older servers. */
+  auction?: boolean;
 }
 
 /** A player's token: the emoji that walks the board and the colour of their houses / deeds. */
@@ -99,6 +101,8 @@ export interface TPGameView {
   dice: [number, number] | null;
   rollAgain: boolean;
   debt: { amount: number; to: string | null; reason: string } | null;
+  /** The running auction (phase "auction"): `minNext` is the lowest bid allowed now, `deadline` the same clock as `deadline` above. */
+  auction?: { pos: number; bid: number; bidder: string | null; minNext: number; deadline: number } | null;
   trade: { from: string; to: string; give: TradeSide; get: TradeSide; deadline: number } | null;
   /** Pending request to borrow money, and the loans in force. */
   loan: LoanOffer | null;
@@ -147,6 +151,7 @@ export interface TPRoomSummary {
  *   { type: "trade", to, give: {props, cash}, get: {props, cash} }
  *   { type: "loan", to, amount, rate: 10 | 20 }  // ask `to` to lend `amount`; repaid + rate% after 5 of your turns
  *   { type: "loananswer", accept }   // the lender answers; the borrower can withdraw with accept: false
+ *   { type: "bid", amount }   // auction rule: raise the price of the square being auctioned (anyone still in the game, cash only)
  *   { type: "tradeanswer", accept }   // the receiver answers; the proposer can withdraw with accept: false
  *   { type: "auto", on }   // your own auto-play: the server plays your turns (buys squares under AUTO_BUY_BELOW, never builds), keeping AUTO_KEEP_CASH
  */
@@ -172,6 +177,7 @@ export type TPCommand =
       landSalePct?: number;
       jailRent?: boolean;
       doubleRoll?: boolean;
+      auction?: boolean;
     }
   | { type: "pick"; emoji: string; color: string }
   | { type: "kick"; playerId: string }
@@ -179,6 +185,7 @@ export type TPCommand =
   | { type: "build" | "sell" | "sellland" | "mortgage" | "unmortgage"; pos: number }
   | { type: "trade"; to: string; give: TradeSide; get: TradeSide }
   | { type: "loan"; to: string; amount: number; rate: number }
+  | { type: "bid"; amount: number }
   | { type: "loananswer"; accept: boolean }
   | { type: "tradeanswer"; accept: boolean }
   | { type: "auto"; on: boolean };
