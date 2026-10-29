@@ -16,9 +16,9 @@ export interface CodedRoom {
   code: string;
 }
 
-export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang" | "cangua" | "oanquan";
+export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang" | "cangua" | "oanquan" | "noichu";
 
-export const GAME_KINDS = ["tienlen", "meono", "typhu", "splendor", "bang", "cangua", "oanquan"] as const satisfies readonly GameKind[];
+export const GAME_KINDS = ["tienlen", "meono", "typhu", "splendor", "bang", "cangua", "oanquan", "noichu"] as const satisfies readonly GameKind[];
 
 export interface StoredRoom<S extends CodedRoom = CodedRoom> {
   state: S;

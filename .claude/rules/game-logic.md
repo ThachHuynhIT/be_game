@@ -7,6 +7,7 @@ paths:
   - "src/bang/**"
   - "src/cangua/**"
   - "src/oanquan/**"
+  - "src/noichu/**"
 ---
 
 # Game logic rules

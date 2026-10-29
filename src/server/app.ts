@@ -39,6 +39,9 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
   "/api/oanquan/ws": { game: "oanquan", kind: "ws" },
   "/api/oanquan/rooms": { game: "oanquan", kind: "rooms" },
   "/api/oanquan/leaderboard": { game: "oanquan", kind: "leaderboard" },
+  "/api/noichu/ws": { game: "noichu", kind: "ws" },
+  "/api/noichu/rooms": { game: "noichu", kind: "rooms" },
+  "/api/noichu/leaderboard": { game: "noichu", kind: "leaderboard" },
 };
 
 const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();

@@ -88,7 +88,7 @@ describe("migrateGame", () => {
 describe("migrateAll", () => {
   it("covers every game", async () => {
     const all = await migrateAll(src as never, dst as never, true);
-    expect(all.map((r) => r.game).sort()).toEqual(["bang", "cangua", "meono", "oanquan", "splendor", "tienlen", "typhu"]);
+    expect(all.map((r) => r.game).sort()).toEqual(["bang", "cangua", "meono", "noichu", "oanquan", "splendor", "tienlen", "typhu"]);
   });
 });
 

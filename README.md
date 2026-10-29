@@ -2,7 +2,7 @@
 
 > Tài liệu cho developer (kiến trúc, giao thức, luật từng game, cách thêm game mới): [`docs/GUIDE.md`](docs/GUIDE.md).
 
-> Bảy game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`), **Mèo Nổ** (`/api/meono/*`), **Cờ Tỷ Phú** (`/api/typhu/*`), **Đá Quý** — lối chơi Splendor (`/api/splendor/*`), **Cờ Cá Ngựa** (`/api/cangua/*`), **Ô Ăn Quan** (`/api/oanquan/*`) và **Đấu Súng** — lối chơi Bang! kèm 7 bản mở rộng (`/api/bang/*`), cùng chung hạ tầng hub / Redis / chat. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`), code ở `src/game/`, `src/meono/`, `src/typhu/`, `src/splendor/`, `src/bang/`, `src/cangua/`, `src/oanquan/`. Trên Vercel, các endpoint `/api/<game>/<kind>` dùng chung một function động `api/[game]/[kind].ts` để nằm trong giới hạn 12 function của gói Hobby.
+> Tám game: **Tiến Lên Miền Nam** (`/api/ws`, `/api/rooms`, `/api/leaderboard`), **Mèo Nổ** (`/api/meono/*`), **Cờ Tỷ Phú** (`/api/typhu/*`), **Đá Quý** — lối chơi Splendor (`/api/splendor/*`), **Cờ Cá Ngựa** (`/api/cangua/*`), **Ô Ăn Quan** (`/api/oanquan/*`), **Nối Chữ** (`/api/noichu/*`) và **Đấu Súng** — lối chơi Bang! kèm 7 bản mở rộng (`/api/bang/*`), cùng chung hạ tầng hub / Redis / chat. Luật từng game nằm sau một `GameAdapter` (`src/server/adapters.ts`), code ở `src/game/`, `src/meono/`, `src/typhu/`, `src/splendor/`, `src/bang/`, `src/cangua/`, `src/oanquan/`, `src/noichu/`. Trên Vercel, các endpoint `/api/<game>/<kind>` dùng chung một function động `api/[game]/[kind].ts` để nằm trong giới hạn 12 function của gói Hobby.
 
 Backend cho các game online của site game, gồm luật chơi, phòng chơi và WebSocket realtime. Phần giao diện nằm trong repo [zonenop-game](https://github.com/ThachHuynhIT/zonenop-game) (chạy ở `https://play.fudio101.com`, bản Vercel `zonenop-game.vercel.app`; route `/tien-len` …) và kết nối tới backend này qua `NEXT_PUBLIC_TIENLEN_SERVER_URL` (máy dự phòng: `NEXT_PUBLIC_TIENLEN_FALLBACK_URL`). Repo `portfolio` không còn chứa game.
 
@@ -32,6 +32,7 @@ Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy như sơ
 | Đấu Súng (Bang!) | `src/bang/` | 3–8 | `/api/bang/ws` | `/api/bang/rooms` | `/api/bang/leaderboard` |
 | Cờ Cá Ngựa | `src/cangua/` | 2–4 | `/api/cangua/ws` | `/api/cangua/rooms` | `/api/cangua/leaderboard` |
 | Ô Ăn Quan | `src/oanquan/` | 2–4 | `/api/oanquan/ws` | `/api/oanquan/rooms` | `/api/oanquan/leaderboard` |
+| Nối Chữ | `src/noichu/` | 2–8 | `/api/noichu/ws` | `/api/noichu/rooms` | `/api/noichu/leaderboard` |
 
 `/rooms` trả các phòng còn người (tối đa 30), `/leaderboard?limit=20` (1–100) trả điểm mọi thời đại. `GET /api/health` kiểm tra store (Redis/RAM, vòng pub/sub) và báo `commit` đang chạy, `redisHost`, `sharedStore`, `now` (chi tiết: `docs/GUIDE.md` → HTTP endpoints). Bảng route nằm ở `src/server/app.ts`.
 
@@ -43,6 +44,8 @@ Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, 
 
 **Ô Ăn Quan** (`src/oanquan/`, 2–4 người): vòng 6 × N ô (N = số người) — mỗi người một đoạn gồm ô quan `6i` rồi 5 ô dân `6i+1…6i+5` (2 người = bàn 12 ô quen thuộc: ô quan 0 và 6, người thứ nhất giữ ô 1–5, người thứ hai giữ ô 7–11); hướng `+1` là "phải" theo góc nhìn người đi, lượt đi vòng theo thứ tự chỗ ngồi. Lệnh `{ type: "move", cell, dir: 1 | -1 }`: bốc một ô dân bên mình, rải từng viên, gặp ô dân có quân thì rải tiếp, gặp ô quan có quân thì dừng, gặp ô trống rồi ô có quân thì ăn (ăn liên tiếp), hai ô trống liền thì dừng. Luật bàn: giá quan 5/10 dân, **quan non** (ô quan còn quan mà dưới 5 dân thì không ăn được; bật sẵn), thời gian lượt 15/20/30/45 giây, điểm Nhất/Nhì. Đầu lượt mà hàng mình trống thì tự rải quân (5 dân từ phần đã ăn, thiếu thì vay lần lượt những người kế tiếp còn dân — khoản vay trả lại khi tính điểm; những người còn chơi cũng không đủ dân thì bị loại: bỏ lượt, ô còn lại vẫn nằm trên bàn; còn một người thì người đó thắng). Hết mọi quan và ô quan trống thì mỗi người còn chơi thu dân trên hàng mình; điểm = dân + quan × giá − vay + cho vay; xếp hạng theo điểm (bằng điểm thì chung hạng) rồi tính điểm xếp hạng Nhất/Nhì (hai người hoà = 0 điểm). `lastMove` trong view gồm bàn trước nước đi và từng bước (`pick` / `sow` / `capture`) để client diễn hoạt. Hết giờ hoặc mất kết nối thì máy đi một nước hợp lệ ngẫu nhiên.
 
+**Nối Chữ** (`src/noichu/`, 2–8 người): lần lượt gõ một từ ghép 2 tiếng có trong từ điển, tiếng đầu phải trùng tiếng cuối của từ trước (kể cả dấu thanh), không dùng lại từ đã có. Lệnh `{ type: "word", text }`; từ sai bị từ chối và vẫn được gõ lại, **hết giờ thì bị loại**, người cuối cùng còn lại thắng (tối đa 300 từ mỗi ván). Luật bàn: thời gian lượt 10/15/20/30 giây, bật/tắt kiểm tra từ điển, điểm Nhất/Nhì. Chi tiết và giấy phép từ điển: `docs/games/noichu.md`.
+
 ## Cấu trúc
 
 | Đường dẫn | Nội dung |
@@ -50,6 +53,7 @@ Trên Vercel có 5 function: `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, 
 | `src/bang/` | Đấu Súng (xem mục riêng bên dưới) |
 | `src/cangua/` | Cờ Cá Ngựa: `board` (bàn 15×15, đường 56 ô, chuồng 6 bậc — chép sang zonenop-game), `game`, `room`, `protocol`. Luật tuỳ chọn: xuất quân bằng 1 hoặc 6, không nhảy qua đầu ngựa, lên chuồng theo số, ba lần 6 mất lượt, xếp hạng hết |
 | `src/oanquan/` | Ô Ăn Quan: `board` (bố cục 12 ô, tuỳ chọn), `game`, `room`, `protocol` (xem mục riêng bên dưới) |
+| `src/noichu/` | Nối Chữ: `board` (hằng số, chuẩn hoá từ — chép sang zonenop-game), `words` + `dict/` (từ điển Viet74K, **GPL-2.0**), `game`, `room`, `protocol` (xem `docs/games/noichu.md`) |
 | `src/meono/`, `src/typhu/`, `src/splendor/` | Mèo Nổ, Cờ Tỷ Phú, Đá Quý: `cards`/`board`, `game`, `room`, `protocol` |
 | `src/game/` | Luật chơi thuần TS: `cards`, `combos` (nhận diện bộ, chặn, chặt), `rules` (tới trắng), `game` (máy trạng thái ván), `room` (vòng đời phòng, không dùng timer), `protocol` (định dạng message) |
 | `src/server/hub.ts` | Xử lý từng kết nối: load → apply → compare-and-swap, phát thay đổi qua pub/sub, timer lượt, gửi `reconnect` trước khi hết thời gian của function |
