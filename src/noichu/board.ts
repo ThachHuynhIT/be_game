@@ -28,8 +28,8 @@ export function dictionaryModeOf(value: unknown): DictionaryMode {
 /** A game ends after this many words in the chain (including the opening word), so it always finishes. */
 export const MAX_WORDS = 300;
 
-/** A word is exactly two syllables of letters only; each at most this long (Vietnamese syllables are ≤ 7, loan words like "instagram" are longer). */
-export const MAX_SYLLABLE_LENGTH = 10;
+/** A word is exactly two syllables of letters only; each syllable at most this long (Vietnamese syllables are ≤ 7). */
+export const MAX_SYLLABLE_LENGTH = 8;
 
 /** Tone marks matter: "mèo" does not continue "meo". */
 export const syllablesOf = (word: string): [string, string] => {
