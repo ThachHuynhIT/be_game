@@ -7,19 +7,21 @@ export const TURN_SECONDS_OPTIONS = [10, 15, 20, 30];
 export const DEFAULT_TURN_SECONDS = 20;
 
 /**
- * How strictly a word is checked:
+ * How strictly a word is checked (there is no "no check": gibberish is always refused):
  *   strict — it must be in the dictionary (default);
- *   loose  — the dictionary or any pair of real Vietnamese syllables (accepts "đôi mắt", still refuses "qqqqq");
- *   off    — any two syllables of letters.
+ *   loose  — the dictionary or any pair of real Vietnamese syllables (accepts "đôi mắt", still refuses "qqqqq").
  */
-export type DictionaryMode = "strict" | "loose" | "off";
-export const DICTIONARY_MODES: readonly DictionaryMode[] = ["strict", "loose", "off"];
+export type DictionaryMode = "strict" | "loose";
+export const DICTIONARY_MODES: readonly DictionaryMode[] = ["strict", "loose"];
 export const DEFAULT_DICTIONARY_MODE: DictionaryMode = "strict";
 
-/** Reads a mode from a setting or saved state; the first version stored a boolean (true = strict, false = off). */
+/**
+ * Reads a mode from a setting or saved state. Earlier versions stored a boolean (true = check, false = no check)
+ * and, briefly, "off": with no "no check" mode left, those mean the most permissive one, loose.
+ */
 export function dictionaryModeOf(value: unknown): DictionaryMode {
-  if (value === "strict" || value === "loose" || value === "off") return value;
-  if (value === false) return "off";
+  if (value === "strict" || value === "loose") return value;
+  if (value === false || value === "off") return "loose";
   return DEFAULT_DICTIONARY_MODE;
 }
 

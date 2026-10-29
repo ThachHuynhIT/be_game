@@ -143,7 +143,7 @@ function setSettings(room: NCRoom, host: NCPlayer, msg: Record<string, unknown>)
   if (room.current?.status === "playing") return { ok: false, error: "Đổi luật khi ván đã kết thúc" };
   const next = ncSettingsOf(room);
   if (msg.dictionary !== undefined) {
-    // A boolean is accepted too (what the first client sent): true = strict, false = off.
+    // A boolean is accepted too (what the first client sent): true = strict, false = loose (the old "no check").
     const mode = typeof msg.dictionary === "boolean" ? dictionaryModeOf(msg.dictionary) : msg.dictionary;
     if (!DICTIONARY_MODES.includes(mode as never)) return { ok: false, error: "Luật từ điển không hợp lệ" };
     next.dictionary = mode as NCSettings["dictionary"];

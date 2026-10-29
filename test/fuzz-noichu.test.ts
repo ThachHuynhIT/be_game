@@ -62,7 +62,7 @@ describe("fuzz noichu: random commands, forfeits and ticks", () => {
       const n = 2 + Math.floor(r() * (MAX_PLAYERS - 1));
       const ids = Array.from({ length: n }, (_, i) => `p${i}`);
       let now = 1_000_000;
-      let s = newNCGame(ids, now, { turnMs: r() < 0.5 ? 10_000 : undefined, dictionary: r() < 0.7 ? "strict" : r() < 0.5 ? "loose" : "off" }, r);
+      let s = newNCGame(ids, now, { turnMs: r() < 0.5 ? 10_000 : undefined, dictionary: r() < 0.6 ? "strict" : "loose" }, r);
       const pk = <T,>(a: readonly T[]) => a[Math.floor(r() * a.length)];
       for (let i = 0; i < 600 && s.status === "playing"; i++) {
         const tag = `seed ${seed} n ${n} i ${i}`;

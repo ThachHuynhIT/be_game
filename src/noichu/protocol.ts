@@ -9,7 +9,7 @@ export const NOICHU_WS_PATH = "/api/noichu/ws";
 
 export interface NCSettings {
   turnSeconds: number;
-  /** How words are checked: strict = in the dictionary, loose = dictionary or two real syllables, off = any two syllables. */
+  /** How words are checked: strict = in the dictionary, loose = dictionary or two real Vietnamese syllables. */
   dictionary: DictionaryMode;
   first: number;
   second: number;
@@ -91,7 +91,7 @@ export interface NCRoomSummary {
 
 /**
  * Nối Chữ commands (acked like the other games):
- *   { type: "start" } · { type: "settings", turnSeconds?, dictionary?: "strict" | "loose" | "off", first?, second? } · { type: "kick", playerId }
+ *   { type: "start" } · { type: "settings", turnSeconds?, dictionary?: "strict" | "loose", first?, second? } · { type: "kick", playerId }
  *   { type: "word", text }   // a two-syllable word that starts with the last syllable of the previous word
  */
 export type NCCommand =
