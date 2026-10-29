@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { type DictionaryMode, MAX_WORDS, dictionaryModeOf, normalizeWord, syllablesOf } from "../src/noichu/board";
+import { type DictionaryMode, MAX_SYLLABLE_LENGTH, MAX_WORDS, dictionaryModeOf, normalizeWord, syllablesOf } from "../src/noichu/board";
 import { type NCState, forfeitPlayer, needOf, newNCGame, nextGameTickAt, playWord, tickGame } from "../src/noichu/game";
 import { joinNC, ncCommand, ncSettingsOf, ncSummary, ncView, newNCRoom, nextNCTickAt, tickNC } from "../src/noichu/room";
-import { EXTRA_WORDS } from "../src/noichu/extra";
-import { hasWord, wordsStartingWith } from "../src/noichu/words";
+import { EXTRA_WORDS, LOAN_SYLLABLES } from "../src/noichu/extra";
+import { hasWord, isSyllable, wordsStartingWith } from "../src/noichu/words";
 
 const names = (id: string) => id;
 const T = 1_000_000;
@@ -30,7 +30,7 @@ describe("words", () => {
     expect(normalizeWord("một hai ba")).toBeNull();
     expect(normalizeWord("mot-hai")).toBeNull();
     expect(normalizeWord("mot 2")).toBeNull();
-    expect(normalizeWord("abcdefghi xe")).toBeNull(); // a syllable longer than 8 letters
+    expect(normalizeWord("abcdefghijk xe")).toBeNull(); // a syllable longer than 10 letters
     expect(normalizeWord(42)).toBeNull();
     expect(normalizeWord("a ".repeat(30))).toBeNull();
   });
@@ -64,6 +64,47 @@ describe("extra words", () => {
     s.chain = [{ by: null, word: "con mèo", at: T }];
     expect(wordsStartingWith("mèo").length).toBeGreaterThan(0);
     expect(playWord(s, "a", wordsStartingWith("mèo")[0], T, names).ok).toBe(true);
+  });
+});
+
+describe("loan words", () => {
+  it("loan tokens are plain lower-case letters that normalizeWord accepts", () => {
+    expect(LOAN_SYLLABLES.length).toBeGreaterThan(150);
+    for (const w of LOAN_SYLLABLES) {
+      expect(w, w).toMatch(/^\p{L}+$/u);
+      expect(w, w).toBe(w.toLowerCase());
+      expect(w.length, w).toBeLessThanOrEqual(MAX_SYLLABLE_LENGTH);
+    }
+  });
+
+  it("longer loan words fit, but the length cap still exists", () => {
+    expect(MAX_SYLLABLE_LENGTH).toBe(10);
+    expect(normalizeWord("instagram story")).toBe("instagram story");
+    expect(normalizeWord("hamburger kfc")).toBe("hamburger kfc");
+    expect(normalizeWord("abcdefghijk xe")).toBeNull(); // 11 letters
+  });
+
+  it("strict knows common loan phrases, loose also takes any real syllable with a loan token", () => {
+    expect(hasWord("trang web")).toBe(true);
+    expect(hasWord("chơi game")).toBe(true);
+    expect(hasWord("bi a")).toBe(true);
+    expect(isSyllable("zalo")).toBe(true);
+    expect(isSyllable("web")).toBe(true);
+    const phrase = "bật stream"; // not in any list
+    expect(hasWord(phrase)).toBe(false);
+    const strict = game({ dictionary: "strict" });
+    strict.chain = [{ by: null, word: "mở bật", at: T }];
+    expect(playWord(strict, "a", phrase, T, names)).toEqual({ ok: false, error: "Từ này không có trong từ điển" });
+    const loose = game({ dictionary: "loose" });
+    loose.chain = [{ by: null, word: "mở bật", at: T }];
+    expect(playWord(loose, "a", phrase, T, names)).toEqual({ ok: true });
+  });
+
+  it("loan tokens do not open the door to gibberish", () => {
+    for (const junk of ["zzzz wwww", "asdf ghjk", "xin chaof", "qqqqq zalo"]) {
+      const [a, b] = junk.split(" ");
+      expect(isSyllable(a) && isSyllable(b), junk).toBe(false);
+    }
   });
 });
 

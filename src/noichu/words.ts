@@ -1,6 +1,6 @@
 import { syllablesOf } from "./board";
 import { WORDS_TEXT } from "./dict/words";
-import { EXTRA_WORDS } from "./extra";
+import { EXTRA_WORDS, LOAN_SYLLABLES } from "./extra";
 
 /**
  * The dictionary: the Viet74K list (dict/README.md has its source and licence) plus our own extra phrases
@@ -10,7 +10,7 @@ import { EXTRA_WORDS } from "./extra";
 let words: Set<string> | null = null;
 /** Dictionary words by their first syllable. */
 let byFirst: Map<string, string[]> | null = null;
-/** Every syllable that occurs in the dictionary: the real Vietnamese syllables (loose mode). */
+/** Every syllable that occurs in the dictionary, plus the loan-word tokens (loose mode). */
 let syllables: Set<string> | null = null;
 /** Words whose last syllable begins at least MIN_CONTINUATIONS other words: good opening words. */
 let openers: string[] | null = null;
@@ -21,7 +21,7 @@ function load() {
   if (words) return;
   words = new Set([...WORDS_TEXT.split("\n"), ...EXTRA_WORDS]);
   const list = [...words];
-  syllables = new Set(list.flatMap((w) => syllablesOf(w)));
+  syllables = new Set([...list.flatMap((w) => syllablesOf(w)), ...LOAN_SYLLABLES]);
   byFirst = new Map();
   for (const w of list) {
     const first = syllablesOf(w)[0];
@@ -37,7 +37,7 @@ export function hasWord(word: string): boolean {
   return words!.has(word);
 }
 
-/** Whether `syllable` is a real Vietnamese syllable, judged by the dictionary (loose mode). */
+/** Whether `syllable` is a real Vietnamese syllable or a known loan-word token, judged by the dictionary (loose mode). */
 export function isSyllable(syllable: string): boolean {
   load();
   return syllables!.has(syllable);

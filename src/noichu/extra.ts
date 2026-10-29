@@ -36,9 +36,35 @@ const PLAIN = [
   "ăn cơm,ăn sáng,ăn trưa,ăn tối,ăn tết,ăn uống,ăn mặc,ăn nói,ăn chơi,ăn ngủ,ăn chay,ăn mặn,uống nước,uống trà,uống thuốc,uống sữa,uống rượu,uống bia,đi học,đi làm,đi chơi,đi ngủ,đi bộ,đi chợ,đi xe,đi chùa,đi biển,đi tắm,đi lại,đi đứng,đi thi,đi lính,đi về,đi qua,chạy bộ,chạy xe,chạy nhảy,chạy đua,chạy trốn,nhảy múa,nhảy dây,nhảy cao,nhảy xa,hát hò,hát ca,ca hát,múa hát,học bài,học hành,học tập,học giỏi,học sinh,làm bài,làm việc,làm ăn,làm quen,làm lành,làm đẹp,làm nũng,làm duyên,làm bếp,làm vườn,làm ruộng,nói chuyện,nói dối,nói thật,nói đùa,nói nhỏ,nói to,nghe nhạc,nghe lời,nghe nói,xem phim,xem tivi,xem bóng,đọc sách,đọc báo,viết thư,viết bài,vẽ tranh,chơi game,chơi bóng,chơi cờ,chơi đàn,chơi nhạc,đá bóng,đá cầu,bơi lội,leo núi,tắm rửa,tắm biển,tắm gội,rửa bát,rửa mặt,rửa tay,quét nhà,lau nhà,giặt giũ,nấu cơm,nấu ăn,nấu nướng,mua bán,mua sắm,mua sách,bán hàng,gọi điện,nhắn tin,ngủ trưa,ngủ gật,ngủ say,thức dậy,thức khuya,dậy sớm,ngồi học,đứng dậy,nằm ngủ,cười nói,khóc lóc,vui chơi,vui vẻ,buồn bã,buồn chán,giận dữ,tức giận,sợ hãi,lo lắng,nhớ nhung,yêu thương,thương nhớ,thương yêu,mến thương,quý mến,kính trọng,tập thể,tập luyện,tập đi,tập bơi,tập đọc,tập viết,chăm sóc,chăm chỉ,chăm học,giúp đỡ,giúp việc,cho phép,cảm ơn,xin lỗi,xin chào,chào hỏi,tạm biệt,hẹn hò,hẹn gặp,gặp gỡ,gặp mặt,gặp nhau,chia sẻ,chia tay,chia buồn,chúc mừng,chúc tết,mừng tuổi,lì xì,sinh nhật,đám cưới,đám tang,đám giỗ",
   // Family
   "chú bác,cô dì,cô chú,cậu mợ,dì dượng,chú thím,bác gái,bác trai,anh trai,chị gái,em trai,em gái,ông nội,ông ngoại,bà nội,bà ngoại,cháu nội,cháu ngoại,con trai,con gái,con dâu,con rể,bố vợ,mẹ chồng,mẹ kế,bố dượng,anh rể,chị dâu,em rể,em dâu,họ hàng,thông gia,sui gia,cha ông,tổ tiên,ông bà,cha mẹ,bố mẹ,anh chị,anh em,chị em,vợ chồng,gia đình,con cái,cháu con,cháu chắt,hàng xóm,bạn bè,bạn thân,bạn học,bạn trai,bạn gái,thầy cô,thầy giáo,cô giáo,bác sĩ,y tá,công nhân,nông dân,kỹ sư,luật sư,ca sĩ,diễn viên,nhà báo,nhà văn,nhà thơ,học trò,sinh viên",
-  // Modern and borrowed words
+  // Borrowed words: Vietnamese spellings that Viet74K lacks, and common phrases with Latin-spelled loans
+  "bi a,xi nê,ắc quy,ca rô,sô cô,mì ý,pho mát,phô mai,sơ mi,com lê",
+  "trang web,chơi game,game thủ,gửi email,đi grab,gọi grab,đặt grab,xe grab,đi taxi,gọi taxi,bắt taxi,xe taxi,quán cafe,quán bar,quán pub,uống cafe,ăn buffet,ăn pizza,bánh pizza,bánh burger,ăn burger,nước coca,uống pepsi,mua online,bán online,học online,họp online,xem video,gọi video,quay video,tải app,cài app,bấm like,đăng story,đăng status,chụp selfie,gửi file,vào wifi,mở laptop,máy laptop,nghe rap,nghe jazz,nghe podcast,thẻ visa,gọi shipper,đặt order,săn sale,mã voucher,đi gym,tập gym,học yoga,tập yoga,mặc jean,quần jean,quần jeans,áo polo,mặc polo,mặc hoodie,áo hoodie,nhắn zalo,gửi zalo,gọi zalo,xem youtube,xem tiktok,lướt facebook,lướt web,lướt tiktok,bài post,trang fanpage,tài khoản,đăng nhập,đăng xuất,mật khẩu,tải xuống,tải lên",
+  // Modern words
   "ti vi,sa lông,cà vạt,xi măng,bê tông,ô tô,xe hơi,xe đạp,xe máy,xe buýt,xe tải,xe lửa,xe ôm,tàu hoả,tàu hỏa,tàu thuỷ,tàu thủy,máy bay,máy tính,máy giặt,máy lạnh,máy ảnh,máy in,máy quay,điều hoà,điều hòa,tủ lạnh,nồi cơm,bếp gas,điện thoại,điện thoại,điện máy,điện tử,đồ chơi,đồ chơi,quần áo,giày dép,sách vở,bút chì,bút bi,cửa sổ,cửa hàng,cửa hiệu,tiền bạc,công việc,thời gian,cuộc sống,sức khoẻ,sức khỏe,thời tiết,mùa xuân,mùa hè,mùa thu,mùa đông,ngày mai,hôm nay,hôm qua,buổi sáng,buổi trưa,buổi chiều,buổi tối,ban đêm,ban ngày,năm mới,năm nay",
 ];
+
+/**
+ * Borrowed words as people type them (Latin spelling, often with f/j/w/z), used as single "syllables" in loose
+ * mode so "trang web", "gửi zalo" or "đi grab" pass. They are tokens, not Vietnamese syllables: the real-syllable
+ * set (words.ts) is the dictionary's syllables plus these. Lower case, letters only, at most MAX_SYLLABLE_LENGTH.
+ */
+const LOAN = [
+  // internet, phones, social media
+  "web,website,wifi,email,mail,gmail,video,clip,game,app,apps,online,offline,facebook,fb,youtube,tiktok,zalo,instagram,messenger,google,internet,laptop,smartphone,iphone,android,selfie,like,share,comment,follow,story,status,live,stream,chat,inbox,link,file,folder,data,code,server,admin,hacker,vlog,blog,podcast,meme,hashtag,emoji,sticker,icon,mic,camera,flash,pin,sim,usb,tag,post,page,fanpage,group,profile,avatar,account,login,logout,password,update,download,upload,scan",
+  // shopping, transport, services
+  "ship,shipper,grab,taxi,uber,bus,order,sale,voucher,combo,buffet,menu,shop,shopping,mall,store,brand,vip,pro,visa,atm,card,size,set,mode,team,free",
+  // everyday English
+  "ok,okay,hello,hi,bye,sorry,thanks,cool,wow,fan,idol,crush,fashion,style,trend,show,party,club,bar,pub,zero,zoom,zip",
+  // apps, brands, technology
+  "netflix,spotify,shopee,lazada,tiki,airpods,whatsapp,telegram,twitter,linkedin,snapchat,pinterest,bluetooth,wechat,discord,steam,minecraft,pubg,outlook,excel,word,powerpoint,photoshop,canva,capcut,viber,skype,tinder,momo,zalopay,vnpay,mastercard,paypal,bitcoin,crypto,chatgpt,robot,drone,tablet,macbook,windows,linux,nokia,samsung,oppo,xiaomi,vinfast,honda,yamaha,toyota,kfc,lotte,aeon,vincom,apple,microsoft,amazon,tesla,nike,adidas,gucci,iphone,ipad,airbnb",
+  // food and drink
+  "cafe,coffee,pizza,burger,sandwich,hotdog,hamburger,snack,chips,coca,pepsi,cola,soda,whisky,beer,cocktail",
+  // music, sport, clothes
+  "jazz,rock,pop,rap,hiphop,disco,karaoke,gym,yoga,fitness,running,football,golf,tennis,jean,jeans,polo,sweater,jacket,hoodie",
+].flatMap(list);
+
+/** Loan-word tokens for the real-syllable set (loose mode). */
+export const LOAN_SYLLABLES: string[] = LOAN.filter((w) => /^\p{L}+$/u.test(w));
 
 /** Every extra word, expanded and de-duplicated (order does not matter). */
 export const EXTRA_WORDS: string[] = (() => {
