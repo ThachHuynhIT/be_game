@@ -1,12 +1,12 @@
-import { DEFAULT_TURN_SECONDS, MAX_PLAYERS, MAX_WORDS, MIN_PLAYERS, normalizeWord, syllablesOf } from "./board";
+import { DEFAULT_TURN_SECONDS, type DictionaryMode, MAX_PLAYERS, MAX_WORDS, MIN_PLAYERS, dictionaryModeOf, normalizeWord, syllablesOf } from "./board";
 import type { NCWordView } from "./protocol";
-import { hasWord, randomOpeningWord } from "./words";
+import { hasWord, isSyllable, randomOpeningWord } from "./words";
 
 /**
  * Nối Chữ state machine (2–8 players). Pure and timer-free: `now` and `random` are passed in. Players take turns
  * adding a two-syllable word that starts with the last syllable of the previous word; whoever runs out of time (or
  * is kicked) is out, the last one standing wins. A wrong word is refused and changes nothing, the clock keeps
- * running. The game also ends after MAX_WORDS words so it always finishes.
+ * running (how strictly a word is checked: DictionaryMode in board.ts). The game also ends after MAX_WORDS words so it always finishes.
  */
 
 export const TURN_MS = DEFAULT_TURN_SECONDS * 1000;
@@ -34,8 +34,8 @@ export interface NCState {
   logSeq: number;
   recorded?: boolean;
   turnMs?: number;
-  /** Check words against the dictionary (default true; absent in rooms from before the setting existed). */
-  dictionary?: boolean;
+  /** How words are checked (see DictionaryMode). Absent or a boolean in games saved by the first version: read it with `dictionaryModeOf`. */
+  dictionary?: DictionaryMode | boolean;
 }
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -74,7 +74,7 @@ function log(s: NCState, now: number, text: string, tone?: NCState["log"][number
 export function newNCGame(
   players: string[],
   now: number,
-  opts: { turnMs?: number; dictionary?: boolean } = {},
+  opts: { turnMs?: number; dictionary?: DictionaryMode | boolean } = {},
   random: Random = Math.random,
 ): NCState {
   if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) throw new Error(`need ${MIN_PLAYERS}-${MAX_PLAYERS} players`);
@@ -100,7 +100,7 @@ export function newNCGame(
     log: [],
     logSeq: 0,
     turnMs: opts.turnMs ?? TURN_MS,
-    dictionary: opts.dictionary ?? true,
+    dictionary: dictionaryModeOf(opts.dictionary),
   };
   log(s, now, `Từ mở đầu: ${opening}`, "info");
   return s;
@@ -122,7 +122,13 @@ export function playWord(s: NCState, id: string, text: unknown, now: number, nam
   const need = needOf(s);
   if (need !== null && syllablesOf(word)[0] !== need) return fail(`Từ phải bắt đầu bằng "${need}"`);
   if (s.chain.some((w) => w.word === word)) return fail("Từ này đã được dùng");
-  if (s.dictionary !== false && !hasWord(word)) return fail("Từ này không có trong từ điển");
+  const mode = dictionaryModeOf(s.dictionary);
+  if (mode === "strict" && !hasWord(word)) return fail("Từ này không có trong từ điển");
+  if (mode === "loose" && !hasWord(word)) {
+    // Not a dictionary word: still fine if both syllables are real Vietnamese ("đôi mắt"), refused for gibberish.
+    const unknown = syllablesOf(word).find((x) => !isSyllable(x));
+    if (unknown) return fail(`"${unknown}" không phải tiếng Việt`);
+  }
   s.chain.push({ by: id, word, at: now });
   s.counts[id] = (s.counts[id] ?? 0) + 1;
   log(s, now, `${names(id)}: ${word}`, "word");

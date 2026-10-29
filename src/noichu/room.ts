@@ -16,7 +16,7 @@ import {
 } from "../game/room";
 import type { ChatMessage, GameRecord, Reaction } from "../game/protocol";
 import { DEFAULT_RANK_POINTS, checkRankPoints, scoreByRank } from "../game/scoring";
-import { DEFAULT_TURN_SECONDS, MAX_PLAYERS, MIN_PLAYERS, TURN_SECONDS_OPTIONS } from "./board";
+import { DEFAULT_DICTIONARY_MODE, DEFAULT_TURN_SECONDS, DICTIONARY_MODES, MAX_PLAYERS, MIN_PLAYERS, TURN_SECONDS_OPTIONS, dictionaryModeOf } from "./board";
 import { type NCState, type Random, type Result, forfeitPlayer, needOf, newNCGame, nextGameTickAt, playWord, tickGame } from "./game";
 import { CHAIN_VIEW_LIMIT, type NCCommand, type NCRoomSummary, type NCRoomView, type NCSettings } from "./protocol";
 
@@ -53,10 +53,14 @@ export interface NCRoom {
 
 export const DEFAULT_NC_SETTINGS: NCSettings = {
   turnSeconds: DEFAULT_TURN_SECONDS,
-  dictionary: true,
+  dictionary: DEFAULT_DICTIONARY_MODE,
   ...DEFAULT_RANK_POINTS,
 };
-export const ncSettingsOf = (room: NCRoom): NCSettings => ({ ...DEFAULT_NC_SETTINGS, ...room.settings });
+// `dictionary` was a boolean in the first version: normalise it so old saved rooms keep working.
+export const ncSettingsOf = (room: NCRoom): NCSettings => {
+  const s = { ...DEFAULT_NC_SETTINGS, ...room.settings };
+  return { ...s, dictionary: dictionaryModeOf(s.dictionary) };
+};
 
 export function newNCRoom(code: string): NCRoom {
   return { game: "noichu", code, hostId: "", seats: Array.from({ length: MAX_PLAYERS }, () => null), current: null };
@@ -139,8 +143,10 @@ function setSettings(room: NCRoom, host: NCPlayer, msg: Record<string, unknown>)
   if (room.current?.status === "playing") return { ok: false, error: "Đổi luật khi ván đã kết thúc" };
   const next = ncSettingsOf(room);
   if (msg.dictionary !== undefined) {
-    if (typeof msg.dictionary !== "boolean") return { ok: false, error: "Luật từ điển không hợp lệ" };
-    next.dictionary = msg.dictionary;
+    // A boolean is accepted too (what the first client sent): true = strict, false = off.
+    const mode = typeof msg.dictionary === "boolean" ? dictionaryModeOf(msg.dictionary) : msg.dictionary;
+    if (!DICTIONARY_MODES.includes(mode as never)) return { ok: false, error: "Luật từ điển không hợp lệ" };
+    next.dictionary = mode as NCSettings["dictionary"];
   }
   if (msg.turnSeconds !== undefined) {
     if (!TURN_SECONDS_OPTIONS.includes(msg.turnSeconds as number)) return { ok: false, error: "Thời gian lượt không hợp lệ" };
@@ -311,7 +317,7 @@ export function ncView(room: NCRoom, player: NCPlayer | null, now: number): NCRo
           turn: g.turn,
           deadline: g.deadline,
           need: g.status === "playing" ? needOf(g) : null,
-          dictionary: g.dictionary !== false,
+          dictionary: dictionaryModeOf(g.dictionary),
           players: g.players.map((id, seat) => ({
             id,
             seat,

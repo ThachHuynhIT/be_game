@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_WORDS, normalizeWord, syllablesOf } from "../src/noichu/board";
+import { type DictionaryMode, MAX_WORDS, dictionaryModeOf, normalizeWord, syllablesOf } from "../src/noichu/board";
 import { type NCState, forfeitPlayer, needOf, newNCGame, nextGameTickAt, playWord, tickGame } from "../src/noichu/game";
 import { joinNC, ncCommand, ncSettingsOf, ncSummary, ncView, newNCRoom, nextNCTickAt, tickNC } from "../src/noichu/room";
 import { EXTRA_WORDS } from "../src/noichu/extra";
@@ -9,7 +9,7 @@ const names = (id: string) => id;
 const T = 1_000_000;
 
 /** A fresh game with "a" to move (the opening word is deterministic: random() = 0). */
-function game(opts: { turnMs?: number; dictionary?: boolean } = {}, ids = ["a", "b"]): NCState {
+function game(opts: { turnMs?: number; dictionary?: DictionaryMode | boolean } = {}, ids = ["a", "b"]): NCState {
   const s = newNCGame(ids, T, opts, () => 0);
   s.players = ids.slice();
   s.turn = ids[0];
@@ -153,11 +153,40 @@ describe("playing a word", () => {
   });
 
   it("with the dictionary off any two syllables count, but the chain rule still applies", () => {
-    const s = game({ dictionary: false });
+    const s = game({ dictionary: "off" });
     const need = needOf(s)!;
     expect(playWord(s, "a", `${need} qqqqq`, T, names).ok).toBe(true);
     expect(playWord(s, "b", "xyz abc", T, names).ok).toBe(false);
     expect(playWord(s, "b", "qqqqq zzz", T, names).ok).toBe(true);
+  });
+
+  it("loose mode accepts any pair of real Vietnamese syllables but still refuses gibberish", () => {
+    const s = game({ dictionary: "loose" });
+    s.chain = [{ by: null, word: "mở đôi", at: T }];
+    // "đôi mắt" is not a headword, but both syllables are real Vietnamese
+    expect(hasWord("đôi mắt")).toBe(false);
+    expect(playWord(s, "a", "đôi mắt", T, names)).toEqual({ ok: true });
+    // the chain rule and the format still apply, and so does "not used before"
+    expect(playWord(s, "b", "xe hơi", T, names).ok).toBe(false);
+    expect(playWord(s, "b", "mắt qqqq", T, names)).toEqual({ ok: false, error: '"qqqq" không phải tiếng Việt' });
+    expect(playWord(s, "b", "mắt kính", T, names).ok).toBe(true);
+    expect(s.chain.map((w) => w.word)).toEqual(["mở đôi", "đôi mắt", "mắt kính"]);
+    // strict refuses the same word
+    const strict = game({ dictionary: "strict" });
+    strict.chain = [{ by: null, word: "mở đôi", at: T }];
+    expect(playWord(strict, "a", "đôi mắt", T, names)).toEqual({ ok: false, error: "Từ này không có trong từ điển" });
+  });
+
+  it("reads the boolean the first version stored", () => {
+    expect(dictionaryModeOf(true)).toBe("strict");
+    expect(dictionaryModeOf(false)).toBe("off");
+    expect(dictionaryModeOf(undefined)).toBe("strict");
+    expect(dictionaryModeOf("loose")).toBe("loose");
+    expect(dictionaryModeOf("nonsense")).toBe("strict");
+    expect(game({ dictionary: false }).dictionary).toBe("off");
+    const old = game();
+    old.dictionary = false; // a game saved by the first version
+    expect(playWord(old, "a", `${needOf(old)} qqqqq`, T, names).ok).toBe(true);
   });
 
   it("a game from before the dictionary setting existed still checks words", () => {
@@ -258,16 +287,16 @@ describe("room", () => {
 
   it("host settings, start, words, view, scoring", () => {
     const room = room2();
-    expect(ncCommand(room, "token-bbbb", { type: "settings", dictionary: false }, T).ok).toBe(false); // not host
+    expect(ncCommand(room, "token-bbbb", { type: "settings", dictionary: "off" }, T).ok).toBe(false); // not host
     expect(ncCommand(room, "token-aaaa", { type: "settings", turnSeconds: 99 }, T).ok).toBe(false);
     expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: "yes" as never }, T).ok).toBe(false);
-    expect(ncCommand(room, "token-aaaa", { type: "settings", turnSeconds: 15, dictionary: true, first: 3, second: 1 }, T).ok).toBe(true);
+    expect(ncCommand(room, "token-aaaa", { type: "settings", turnSeconds: 15, dictionary: "loose", first: 3, second: 1 }, T).ok).toBe(true);
     expect(ncCommand(room, "token-bbbb", { type: "start" }, T).ok).toBe(false); // not host
     expect(ncCommand(room, "token-aaaa", { type: "start" }, T, () => 0).ok).toBe(true);
     const g = room.current!;
     expect(g.deadline).toBe(T + 15_000);
-    expect(g.dictionary).toBe(true);
-    expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: false }, T).ok).toBe(false); // mid-game
+    expect(g.dictionary).toBe("loose");
+    expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: "off" }, T).ok).toBe(false); // mid-game
     expect(ncCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(false);
 
     const mover = g.turn!;
@@ -300,6 +329,20 @@ describe("room", () => {
     expect(ncCommand(room, "token-aaaa", { type: "start" }, g.deadline! + 1).ok).toBe(true);
   });
 
+  it("accepts the old boolean setting and reads old saved settings", () => {
+    const room = room2();
+    expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: false as never }, T).ok).toBe(true);
+    expect(ncSettingsOf(room).dictionary).toBe("off");
+    expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: true as never }, T).ok).toBe(true);
+    expect(ncSettingsOf(room).dictionary).toBe("strict");
+    expect(ncCommand(room, "token-aaaa", { type: "settings", dictionary: "maybe" as never }, T).ok).toBe(false);
+    room.settings = { ...ncSettingsOf(room), dictionary: false as never }; // saved by the first version
+    expect(ncSettingsOf(room).dictionary).toBe("off");
+    ncCommand(room, "token-aaaa", { type: "start" }, T, () => 0);
+    expect(room.current!.dictionary).toBe("off");
+    expect(ncView(room, room.seats[0], T).current!.dictionary).toBe("off");
+  });
+
   it("needs two players", () => {
     const room = newNCRoom("NC002");
     joinNC(room, "token-aaaa", "An", T, () => "p1", "token-aaaa");
@@ -319,7 +362,7 @@ describe("room", () => {
     const room = room2();
     ncCommand(room, "token-aaaa", { type: "start" }, T, () => 0);
     expect(nextNCTickAt(room, T)).toBeLessThanOrEqual(room.current!.deadline!);
-    expect(ncSettingsOf({ ...room, settings: undefined })).toMatchObject({ turnSeconds: 20, dictionary: true, first: 2, second: 1 });
+    expect(ncSettingsOf({ ...room, settings: undefined })).toMatchObject({ turnSeconds: 20, dictionary: "strict", first: 2, second: 1 });
   });
 
   it("kicking an offline player in a game puts them out", () => {

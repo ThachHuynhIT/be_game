@@ -10,6 +10,8 @@ import { EXTRA_WORDS } from "./extra";
 let words: Set<string> | null = null;
 /** Dictionary words by their first syllable. */
 let byFirst: Map<string, string[]> | null = null;
+/** Every syllable that occurs in the dictionary: the real Vietnamese syllables (loose mode). */
+let syllables: Set<string> | null = null;
 /** Words whose last syllable begins at least MIN_CONTINUATIONS other words: good opening words. */
 let openers: string[] | null = null;
 
@@ -19,6 +21,7 @@ function load() {
   if (words) return;
   words = new Set([...WORDS_TEXT.split("\n"), ...EXTRA_WORDS]);
   const list = [...words];
+  syllables = new Set(list.flatMap((w) => syllablesOf(w)));
   byFirst = new Map();
   for (const w of list) {
     const first = syllablesOf(w)[0];
@@ -32,6 +35,12 @@ function load() {
 export function hasWord(word: string): boolean {
   load();
   return words!.has(word);
+}
+
+/** Whether `syllable` is a real Vietnamese syllable, judged by the dictionary (loose mode). */
+export function isSyllable(syllable: string): boolean {
+  load();
+  return syllables!.has(syllable);
 }
 
 /** Dictionary words that start with `syllable` (do not modify the returned array). */
