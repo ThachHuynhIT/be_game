@@ -28,8 +28,8 @@ import {
  * Cờ Tỷ Phú (Monopoly-style) state machine. Pure and timer-free: `now` and
  * `random` are passed in; `tickGame()` handles turn timeouts, absent players,
  * expired trade offers and the optional time limit.
- * Simplifications vs. the box rules: no auctions (an unbought square stays with
- * the bank), unlimited houses, and building only on your own turn.
+ * Simplifications vs. the box rules: unlimited houses and building only on your own turn. Unbought squares
+ * stay with the bank unless the optional "Đấu giá" rule is on (then they go to auction).
  */
 
 /** Time for each step of a turn (roll, buy, end). */
@@ -48,8 +48,13 @@ export const AUTO_BUY_BELOW = 300;
 /** …and only while more than this is left after buying or building. */
 export const AUTO_KEEP_CASH = 150;
 export const LOG_LIMIT = 150;
+/** Auction ("Đấu giá"): the clock, the extra time a bid buys, the smallest raise (tr) and the opening price as % of the land price. */
+export const AUCTION_MS = 15_000;
+export const AUCTION_EXTEND_MS = 5_000;
+export const AUCTION_MIN_RAISE = 10;
+export const AUCTION_START_PCT = 50;
 
-export type Phase = "roll" | "buy" | "debt" | "end";
+export type Phase = "roll" | "buy" | "debt" | "auction" | "end";
 
 export interface TPPlayerState {
   pos: number;
@@ -65,6 +70,18 @@ export interface Deed {
   /** 0–4 houses, 5 = khách sạn. */
   houses: number;
   mortgaged: boolean;
+}
+
+/** An unbought square put up for auction. The turn player's turn is paused until it closes. */
+export interface Auction {
+  pos: number;
+  /** Opening price; the first bid may equal it. */
+  start: number;
+  /** Current price: `start` while nobody has bid. */
+  bid: number;
+  bidder: string | null;
+  /** Same value as `TPState.deadline` while the phase is "auction". */
+  deadline: number;
 }
 
 export interface Debt {
@@ -134,6 +151,8 @@ export interface TPState {
   doubles: number;
   rollAgain: boolean;
   debt: Debt | null;
+  /** The running auction (phase "auction"); missing on older saved games. */
+  auction?: Auction | null;
   trade: Trade | null;
   /** Pending request to borrow money (one at a time, never together with a trade). */
   loan?: LoanOffer | null;
@@ -178,6 +197,7 @@ export interface TPState {
  * - risingCost / unmortgageFee / landSalePct: price knobs (see PriceRules in board.ts).
  * - jailRent: owners still collect rent while in jail.
  * - doubleRoll: rolling a double gives another roll (three in a row still means jail).
+ * - auction: a square nobody buys (skipped or timed out) is auctioned to everyone still in the game.
  */
 export interface TPRules extends PriceRules {
   buildRule: "even" | "chain";
@@ -190,6 +210,7 @@ export interface TPRules extends PriceRules {
   landSalePct: number;
   jailRent: boolean;
   doubleRoll: boolean;
+  auction: boolean;
 }
 
 export const DEFAULT_TP_RULES: TPRules = {
@@ -203,6 +224,7 @@ export const DEFAULT_TP_RULES: TPRules = {
   landSalePct: 70,
   jailRent: true,
   doubleRoll: true,
+  auction: false,
 };
 /** Games saved before house rules existed keep the old behaviour. */
 const LEGACY_RULES: Partial<TPRules> = { sellLand: false, bankruptTo: "creditor", risingCost: false, landSalePct: 50 };
@@ -535,6 +557,9 @@ function charge(s: TPState, payer: string, amount: number, to: string | null, re
   log(s, now, `${names(payer)} nợ ${money(amount)} ${reason} — cần bán nhà hoặc thế chấp`, "bad");
 }
 
+/** The lowest bid allowed right now. */
+export const auctionMinNext = (a: Auction) => (a.bidder === null ? a.start : a.bid + AUCTION_MIN_RAISE);
+
 /** Money paid to the bank as a tax or fine — goes to the Nghỉ chân pot when that rule is on. */
 function toBank(s: TPState, amount: number) {
   if (typeof s.pot === "number") s.pot += amount;
@@ -613,6 +638,17 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   s.out.push(id);
   if (s.trade && (s.trade.from === id || s.trade.to === id)) s.trade = null;
   if (s.loan && (s.loan.from === id || s.loan.to === id)) s.loan = null;
+  if (s.auction) {
+    if (s.turn === id) {
+      // The player whose turn is paused leaves: the auction is called off.
+      log(s, now, `Phiên đấu giá ${B(s)[s.auction.pos].name} bị huỷ`, "info");
+      s.auction = null;
+    } else if (s.auction.bidder === id) {
+      s.auction.bidder = null;
+      s.auction.bid = s.auction.start;
+      log(s, now, `${names(id)} phá sản — giá ${B(s)[s.auction.pos].name} trở về giá khởi điểm ${money(s.auction.start)}`, "info");
+    }
+  }
   if (s.loans?.some((l) => l.lender === id || l.borrower === id)) {
     s.loans = s.loans.filter((l) => l.lender !== id && l.borrower !== id);
     log(s, now, `Các khoản vay của ${names(id)} được xoá sổ`, "info");
@@ -644,6 +680,7 @@ function endGame(s: TPState, now: number, names: NameOf, byTime = false) {
   s.debt = null;
   s.trade = null;
   s.loan = null;
+  s.auction = null;
   log(s, now, byTime ? `⏰ Hết giờ! ${names(alive[0])} giàu nhất và thắng cuộc` : `🏆 ${names(alive[0])} là tỷ phú cuối cùng!`, "money");
 }
 
@@ -659,6 +696,7 @@ function nextTurn(s: TPState, now: number, names: NameOf) {
   s.rollAgain = false;
   s.dice = null;
   s.debt = null;
+  s.auction = null;
   setPhase(s, "roll", now);
   settleLoans(s, s.turn, now, names);
 }
@@ -679,7 +717,7 @@ function settleLoans(s: TPState, id: string, now: number, names: NameOf) {
 /** After a move is fully resolved (no buy / debt pending). */
 function afterResolve(s: TPState, now: number) {
   if (s.status !== "playing") return;
-  if (s.phase === "buy" || s.phase === "debt") return;
+  if (s.phase === "buy" || s.phase === "debt" || s.phase === "auction") return;
   setPhase(s, s.rollAgain ? "roll" : "end", now);
 }
 
@@ -771,9 +809,73 @@ export function skipBuy(s: TPState, id: string, now: number, names: NameOf): Res
   const bad = myTurn(s, id, "buy");
   if (bad) return bad;
   log(s, now, `${names(id)} không mua ${B(s)[s.ps[id].pos].name}`, "info");
+  if (rulesOf(s).auction) {
+    startAuction(s, s.ps[id].pos, now, names);
+    return OK;
+  }
   s.phase = "end";
   afterResolve(s, now);
   return OK;
+}
+
+// ─── Auction ────────────────────────────────────────────────────────
+
+/** Put `pos` up for auction: opens at AUCTION_START_PCT of its price, everyone still in the game may bid, the turn waits. */
+function startAuction(s: TPState, pos: number, now: number, names: NameOf) {
+  const b = sq(s, pos);
+  const start = Math.ceil((b.price * AUCTION_START_PCT) / 100);
+  // Offers made earlier would move money / land under the auction's feet.
+  if (s.trade || s.loan) {
+    log(s, now, "Các lời mời đổi / vay đang chờ bị huỷ vì có đấu giá", "info");
+    s.trade = null;
+    s.loan = null;
+  }
+  s.phase = "auction";
+  s.phaseAt = now;
+  s.deadline = now + AUCTION_MS;
+  s.auction = { pos, start, bid: start, bidder: null, deadline: s.deadline };
+  log(s, now, `🔨 Đấu giá ${b.name}, khởi điểm ${money(start)} — ai cũng được trả giá`, "buy");
+}
+
+/** Anyone still in the game may raise the price; each bid adds AUCTION_EXTEND_MS (never above AUCTION_MS left). */
+export function bid(s: TPState, id: string, amount: unknown, now: number, names: NameOf): Result {
+  if (s.status !== "playing") return fail("Ván đã kết thúc");
+  const a = s.auction;
+  if (s.phase !== "auction" || !a) return fail("Không có phiên đấu giá nào");
+  if (now >= a.deadline) return fail("Phiên đấu giá đã hết giờ");
+  if (!s.ps[id] || s.ps[id].bankrupt) return fail("Bạn không còn trong ván");
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount)) return fail("Số tiền không hợp lệ");
+  if (a.bidder === id) return fail("Bạn đang dẫn đầu rồi");
+  const min = auctionMinNext(a);
+  if (amount < min) return fail(`Phải trả ít nhất ${money(min)}`);
+  if (amount > s.ps[id].cash) return fail("Không đủ tiền mặt để trả giá");
+  a.bid = amount;
+  a.bidder = id;
+  a.deadline = Math.min(a.deadline + AUCTION_EXTEND_MS, now + AUCTION_MS);
+  s.deadline = a.deadline;
+  log(s, now, `🔨 ${names(id)} trả ${money(amount)} cho ${B(s)[a.pos].name}`, "buy");
+  return OK;
+}
+
+/** Time is up: the highest bidder pays the bank and gets the land; with no (valid) winner the square stays with the bank. Then the turn carries on. */
+function closeAuction(s: TPState, now: number, names: NameOf) {
+  const a = s.auction;
+  if (a) {
+    const b = sq(s, a.pos);
+    const w = a.bidder;
+    if (!w) log(s, now, `Không ai trả giá — ${b.name} vẫn thuộc ngân hàng`, "info");
+    else if (s.ps[w].bankrupt || s.ps[w].cash < a.bid || s.deeds[a.pos]) {
+      log(s, now, `${names(w)} không còn đủ tiền trả ${money(a.bid)} — ${b.name} không được bán`, "bad");
+    } else {
+      // Paid straight to the bank like a normal purchase: it does not feed the Nghỉ chân pot.
+      s.ps[w].cash -= a.bid;
+      s.deeds[a.pos] = { owner: w, houses: 0, mortgaged: false };
+      log(s, now, `🏷️ ${names(w)} thắng đấu giá ${b.name} với ${money(a.bid)}`, "buy");
+    }
+  }
+  s.auction = null;
+  s.phase = "end"; // provisional, afterResolve picks roll / end
+  afterResolve(s, now);
 }
 
 export function endTurn(s: TPState, id: string, now: number, names: NameOf): Result {
@@ -969,6 +1071,7 @@ export function sellLand(s: TPState, id: string, pos: number, now: number, names
 export function mortgage(s: TPState, id: string, pos: number, now: number, names: NameOf): Result {
   const bad = canManage(s, id, pos);
   if (bad) return bad;
+  if (s.phase === "auction") return fail("Đang đấu giá — không thế chấp được");
   const d = s.deeds[pos];
   const b = sq(s, pos);
   if (d.mortgaged) return fail("Đã thế chấp rồi");
@@ -1024,6 +1127,7 @@ const sideText = (s: TPState, side: TradeSide) =>
 
 export function proposeTrade(s: TPState, from: string, raw: { to?: unknown; give?: unknown; get?: unknown }, now: number, names: NameOf): Result {
   if (s.status !== "playing") return fail("Ván đã kết thúc");
+  if (s.phase === "auction") return fail("Đang đấu giá");
   if (s.trade) return fail("Đang có một lời mời đổi khác");
   const to = typeof raw.to === "string" ? raw.to : "";
   if (!s.ps[from] || s.ps[from].bankrupt) return fail("Bạn không còn trong ván");
@@ -1075,6 +1179,7 @@ export function answerTrade(s: TPState, id: string, accept: boolean, now: number
 
 export function proposeLoan(s: TPState, from: string, raw: { to?: unknown; amount?: unknown; rate?: unknown }, now: number, names: NameOf): Result {
   if (s.status !== "playing") return fail("Ván đã kết thúc");
+  if (s.phase === "auction") return fail("Đang đấu giá");
   if (s.trade || s.loan) return fail("Đang có một lời mời khác");
   const to = typeof raw.to === "string" ? raw.to : "";
   if (!s.ps[from] || s.ps[from].bankrupt) return fail("Bạn không còn trong ván");
@@ -1146,6 +1251,9 @@ function autoStep(s: TPState, now: number, names: NameOf, random: Random, playin
     case "end":
       endTurn(s, id, now, names);
       return;
+    case "auction":
+      closeAuction(s, now, names);
+      return;
     case "debt": {
       autoLiquidate(s, id, s.debt!.amount, now, names);
       if (s.ps[id].cash >= s.debt!.amount) payDebt(s, id, now, names, random);
@@ -1187,7 +1295,9 @@ export function tickGame(
   // One step per tick: an offline / auto player's turn plays out a step every ABSENT_MS, so others can follow it.
   if (s.turn) {
     const playing = auto(s.turn);
-    if (now >= (s.deadline ?? Infinity) || ((playing || absent(s.turn)) && now >= s.phaseAt + ABSENT_MS)) {
+    // An auction only ends when its clock runs out: others may still want to bid even if the turn player is away.
+    const quick = s.phase !== "auction" && (playing || absent(s.turn)) && now >= s.phaseAt + ABSENT_MS;
+    if (now >= (s.deadline ?? Infinity) || quick) {
       autoStep(s, now, names, random, playing);
       changed = true;
     }
@@ -1198,7 +1308,7 @@ export function tickGame(
 export function nextGameTickAt(s: TPState, now: number): number | null {
   if (s.status !== "playing") return null;
   // The absent-player check only matters while it is still ahead; afterwards the room's presence timer covers it.
-  const absentAt = s.phaseAt + ABSENT_MS > now ? s.phaseAt + ABSENT_MS : null;
+  const absentAt = s.phase !== "auction" && s.phaseAt + ABSENT_MS > now ? s.phaseAt + ABSENT_MS : null;
   const times = [s.deadline, absentAt, s.trade?.deadline, s.loan?.deadline, s.endsAt].filter((x): x is number => typeof x === "number");
   return times.length ? Math.min(...times) : null;
 }

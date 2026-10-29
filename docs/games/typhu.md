@@ -32,7 +32,7 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 | `darkblue` | Hà Nội, TP. Hồ Chí Minh |
 
 - 4 `air` sân bay (5, 15, 25, 35; giá 200), 2 `util` (12 Điện lực, 28 Nước; giá 150), `tax` (4: 200, 38: 100), `chance` (7, 22, 36), `chest` (2, 17, 33).
-- Không đấu giá: ô không mua thì ở lại với ngân hàng. Nhà không giới hạn số lượng. Chỉ xây/bán/thế chấp **trong lượt mình**.
+- Đấu giá là luật **tuỳ chọn, mặc định tắt** (`auction`, xem "Đấu giá"): tắt thì ô không mua ở lại với ngân hàng. Nhà không giới hạn số lượng. Chỉ xây/bán/thế chấp **trong lượt mình**.
 - Tiền thuê Hà Nội / TP.HCM đã được nâng (50…2200 và 70…2800) vì giá mua quá cao so với tiền thu được.
 
 ### Cỡ bản đồ (`MapSize`, setting `map`)
@@ -47,7 +47,7 @@ Hạ tầng chung (hub, presence, chat, emoji, leaderboard): xem [GUIDE.md](../G
 
 Hệ quả: nhóm màu có thể có 3–4 lô; các ô chuẩn giữ thứ tự tương đối. Lá thẻ `goto` lưu vị trí của **bản đồ chuẩn** và được đổi sang vị trí trên bản đồ lớn bằng cách tìm theo **tên ô** (`applyEffect`), nên không cần dữ liệu thẻ riêng cho từng cỡ. Ván lưu `s.map` (chỉ khi ≠ `"std"`); `view.current.map` và `view.settings.map` báo cho client.
 
-### Lượt (phase `roll` → (`buy` | `debt`) → `end`)
+### Lượt (phase `roll` → (`buy` → `auction` | `debt`) → `end`)
 
 - `rollDice`: 2 xúc xắc (`1 + floor(random()*6)`), đặt `s.dice`, xoá `lastCard`.
   - **Trong tù** (`jail > 0`): đôi → ra tù và đi theo tổng (không được đổ lại). Không đôi: `jail` 1→2→3 rồi hết lượt (`phase = "end"`); lần thứ 3 thất bại (`jail >= 3`) → bắt nộp `JAIL_FINE` = 50 rồi đi theo tổng; thiếu tiền → nợ (`debt.thenMove = tổng`, đi sau khi trả).
@@ -106,9 +106,20 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 
 `netWorth` = tiền + giá đất (đất thế chấp tính `price/2`) + `builtCost`. Dùng để xếp hạng khi hết giờ và hiển thị.
 
+### Đấu giá (`auction`, tuỳ chọn, mặc định tắt)
+
+Bật: người dừng ở **ô chưa có chủ** (đất, sân bay, điện/nước, trên cả ba bản đồ) mà `skip` **hoặc hết giờ phase `buy`** (hoặc offline — mọi đường đều qua `skipBuy`) thì ô đem ra đấu giá. Auto-play có thể vẫn mua thẳng nếu đủ điều kiện (`AUTO_BUY_BELOW`); chỉ đường bỏ qua mới đấu giá. Tắt: hành vi y như cũ.
+
+- `startAuction`: phase `auction`, `s.auction = { pos, start, bid, bidder, deadline }`. `start = ceil(price × AUCTION_START_PCT(50) / 100)`, `bid = start`, `bidder = null`. Đồng hồ dùng chung `s.deadline` (luôn bằng `auction.deadline`) nên `nextGameTickAt` không phải sửa nhiều. **Lượt tạm dừng**: `s.turn` vẫn là người vừa đi. Lời mời trade/vay đang chờ bị **huỷ** (có log) để không đổi tiền/đất giữa phiên.
+- `bid { amount }` (`bid()`): ván đang chạy, phase `auction`, `now < auction.deadline` (hub không tick trước lệnh, nên bid trễ phải tự bị từ chối), người đặt còn trong ván (**bất kỳ ai, kể cả người vừa bỏ qua**), `amount` là số nguyên an toàn, không phải người đang dẫn đầu, `amount ≥ auctionMinNext` (= `start` khi chưa ai trả, sau đó `bid + AUCTION_MIN_RAISE(10)`), `amount ≤ tiền mặt` (**không dùng thế chấp để lấy tiền**). Mỗi bid hợp lệ: `deadline = min(deadline + AUCTION_EXTEND_MS(5 s), now + AUCTION_MS(15 s))`. Lỗi: `"Không có phiên đấu giá nào"`, `"Phiên đấu giá đã hết giờ"`, `"Bạn không còn trong ván"`, `"Số tiền không hợp lệ"`, `"Bạn đang dẫn đầu rồi"`, `"Phải trả ít nhất …"`, `"Không đủ tiền mặt để trả giá"`.
+- `closeAuction` (khi `now ≥ deadline`, qua `autoStep`): bidder còn trong ván, đủ tiền và ô vẫn chưa có chủ → trừ `bid` **trả thẳng cho ngân hàng, không vào quỹ Nghỉ chân** (giống `buySquare`) và tạo deed sạch; ngược lại không bán (ghi log; vd. người thắng đã xây nhà / chuộc đất làm tiền giảm). Không ai trả giá → đất vẫn của ngân hàng. Sau đó `auction = null`, `phase = "end"` rồi `afterResolve` (còn `rollAgain` thì `roll`, không thì `end`); `doubles` giữ nguyên.
+- Trong phiên: `proposeTrade`/`proposeLoan` → `"Đang đấu giá"`, `mortgage` → `"Đang đấu giá — không thế chấp được"`. `build`/`unmortgage`/`sell`/`sellland` vẫn dùng được (chỉ người có lượt), nên tiền của người dẫn đầu có thể giảm trước khi đóng — đã xử lý ở `closeAuction`.
+- `bankrupt()`: người dẫn đầu phá sản/bị kick → `bidder = null`, `bid = start` (giữ deadline); người đang có lượt phá sản → huỷ phiên (log). `endGame`/`nextTurn` đặt `auction = null`.
+- Người vắng / auto-play không tự trả giá và **không** làm phiên đóng sớm (nhánh `ABSENT_MS` bị bỏ qua khi phase `auction`); phiên chỉ đóng khi hết `deadline`. Hết giờ cả ván (`endsAt`) vẫn kết thúc ván, không bán.
+
 ### Trade (đổi đất)
 
-- `trade {to, give: {props, cash}, get: {props, cash}}`: bất kỳ người chơi chưa phá sản, **bất kỳ lúc nào** (không cần lượt), mỗi lúc chỉ một trade trong cả ván. `props` lọc số nguyên duy nhất, tối đa 28; `cash` floor, ≥0. Phải có ít nhất 1 ô đất ở một trong hai bên. Mỗi bên phải sở hữu các ô của mình và đủ tiền.
+- `trade {to, give: {props, cash}, get: {props, cash}}`: bất kỳ người chơi chưa phá sản, **bất kỳ lúc nào** (không cần lượt; trừ lúc đang đấu giá), mỗi lúc chỉ một trade trong cả ván. `props` lọc số nguyên duy nhất, tối đa 28; `cash` floor, ≥0. Phải có ít nhất 1 ô đất ở một trong hai bên. Mỗi bên phải sở hữu các ô của mình và đủ tiền.
 - **Lô có nhà trade được, nhà đi theo đất**; lô thế chấp đi kèm trạng thái thế chấp (không phí).
 - `loan {to, amount, rate}` / `loananswer {accept}`: **vay tiền**. Người vay xin `to` (người cho vay) `amount` (bội của 10tr, ≤ tiền người cho vay) với `rate` 10 hoặc 20 (%). Người cho vay đồng ý thì tiền chuyển ngay và tạo `Loan {lender, borrower, amount, rate, owed, left: 5}`; mỗi lần **người vay bắt đầu lượt** `left` giảm 1, về 0 thì tự trừ `owed` = gốc + lãi (không đủ tiền → thành nợ `debt` với chủ nợ là người cho vay: bán nhà / thế chấp hoặc phá sản). Tối đa 2 khoản vay mỗi người; không có lời mời trade và vay cùng lúc; hết hạn như trade (30 s). Giá trị ròng (`netWorth`) cộng khoản cho vay và trừ khoản đang nợ. Người phá sản thì các khoản vay liên quan bị xoá.
 - `tradeanswer {accept}`: người nhận chấp nhận (kiểm tra lại cả hai bên; sai → huỷ trade và lỗi) hoặc từ chối; người đề nghị gửi `accept: false` để rút. Hết hạn sau `TRADE_MS` = 30 s hoặc ngay khi người nhận offline.
@@ -136,8 +147,9 @@ Thứ tự kiểm tra (thông báo tiếng Việt khớp code): là `prop` → l
 | `landSalePct` | `LAND_SALE_OPTIONS` 50/70/90 (%) | 70 | Giá bán đất | `"Giá bán đất không hợp lệ"` |
 | `jailRent` | boolean | true | Chủ đất ở tù vẫn thu tiền thuê | — |
 | `doubleRoll` | boolean | true | Đổ đôi được đổ tiếp (3 đôi liên tiếp → tù). Tắt: đôi không có tác dụng gì ngoài ra tù | — |
+| `auction` | boolean | **false** | Đấu giá ô không ai mua (xem "Đấu giá"). Server cũ không có field này; client coi thiếu = tắt | — |
 
-`TPRules` trong state = 10 field cuối (`buildRule … doubleRoll`), mặc định `DEFAULT_TP_RULES`. **Luôn đọc qua `rulesOf(s)`**: ván cũ không có `s.rules` dùng `LEGACY_RULES` (`sellLand: false, bankruptTo: "creditor", risingCost: false, landSalePct: 50`) đè lên default; `s.rules` thiếu field nào thì field đó lấy default.
+`TPRules` trong state = 11 field cuối (`buildRule … auction`), mặc định `DEFAULT_TP_RULES`. **Luôn đọc qua `rulesOf(s)`**: ván cũ không có `s.rules` dùng `LEGACY_RULES` (`sellLand: false, bankruptTo: "creditor", risingCost: false, landSalePct: 50`) đè lên default; `s.rules` thiếu field nào thì field đó lấy default.
 
 ## State
 
@@ -148,8 +160,9 @@ interface TPRoom { game: "typhu"; code; hostId; seats: (TPPlayer | null)[6]; cur
 interface TPState {
   players: string[]; ps: Record<id, { pos; cash; jail /* 0 = tự do */; jailCards: ("chance"|"chest")[]; bankrupt }>;
   deeds: Record<pos, { owner; houses /* 0–4, 5 = khách sạn */; mortgaged }>;
-  turn; phase: "roll" | "buy" | "debt" | "end"; phaseAt; deadline; dice; doubles; rollAgain;
+  turn; phase: "roll" | "buy" | "debt" | "auction" | "end"; phaseAt; deadline; dice; doubles; rollAgain;
   debt: { amount; to: id | null; split?; reason; thenMove? } | null;
+  auction?: { pos; start; bid; bidder: id | null; deadline } | null;  // thiếu ở ván cũ
   trade: { from; to; give; get; deadline } | null;
   chance: number[]; chest: number[]; lastCard; out: string[] /* thứ tự phá sản */;
   status: "playing" | "ended"; finished; startedAt; endsAt: number | null; log /* LOG_LIMIT = 150 */; logSeq;
@@ -166,6 +179,9 @@ stateDiagram-v2
   roll --> end: đã giải quyết / ở tù không ra
   buy --> roll: buy|skip (rollAgain)
   buy --> end: buy|skip
+  buy --> auction: skip / hết giờ (luật auction bật)
+  auction --> roll: hết giờ đấu giá (rollAgain)
+  auction --> end: hết giờ đấu giá
   debt --> end: paydebt (roll nếu rollAgain; đi tiếp nếu thenMove)
   debt --> [*]: bankrupt → lượt người kế (roll)
   end --> roll: end → nextTurn
@@ -183,7 +199,8 @@ Cần conn là player; ngoài `start`/`settings`/`kick`/`pick` phải có ván (
 | `kick` | `playerId` | Host, mục tiêu offline | Trong ván → `forfeitPlayer` = phá sản cho **ngân hàng** | như mọi game |
 | `roll` | — | Lượt mình, phase `roll` | Tung & đi | |
 | `buy` | — | phase `buy` | Mua ô đang đứng | `"Không đủ tiền (cần …)"`, `"Ô này không mua được"` |
-| `skip` | — | phase `buy` | Không mua | |
+| `skip` | — | phase `buy` | Không mua (luật `auction` bật → đem ra đấu giá) | |
+| `bid` | `amount` | **Bất kỳ người còn trong ván**, phase `auction` | Trả giá (xem "Đấu giá") | xem "Đấu giá" |
 | `end` | — | phase `end` | Chuyển lượt | |
 | `payjail` / `jailcard` | — | phase `roll`, đang ở tù | Ra tù bằng 50tr / thẻ | `"Bạn không ở trong tù"`, `"Cần 50tr để nộp phạt"`, `"Bạn không có thẻ ra tù"` |
 | `paydebt` | — | phase `debt` | Trả nợ | `"Còn thiếu …tr — hãy bán nhà hoặc thế chấp"` |
@@ -211,6 +228,7 @@ Cần conn là player; ngoài `start`/`settings`/`kick`/`pick` phải có ván (
 | `seats[6]` | `id, name, connected, isHost, inGame (có trong ps, kể cả đã phá sản), kicked, points, games, wins, color (= chỉ số ghế; quân khởi đầu là `DEFAULT_PIECES[color]`), piece ({emoji, color} đang dùng: lựa chọn của người chơi, hoặc quân khởi đầu **không trùng ai**)` |
 | `current.players` | `{id, pos, cash, jail, jailCards (số lượng), bankrupt, netWorth}` |
 | `current.*` | `status, map?, deeds, turn, phase, deadline, dice, rollAgain, debt ({amount, to, reason} — bỏ `split`/`thenMove`), trade, lastCard, finished, endsAt, pot, log` |
+| `current.auction` | `{pos, bid, bidder, minNext, deadline} \| null` (whitelist, không có token; `deadline` = `current.deadline`). **Field tuỳ chọn**: server cũ không gửi |
 | `current.manage` | **Chỉ cho người xem đang trong ván**, mỗi lô của họ: `{build, sell, sellLand: string \| null (lý do không được; null = được), landPrice}` từ `buildBlocker`/`sellBlocker`/`sellLandBlocker`/`landSalePrice` — không xét lượt/phase, UI tự kết hợp với `turn`/`phase` |
 
 Summary: `{code, status, players, spectators, games}`.
@@ -230,6 +248,8 @@ Server giữ **150 dòng cuối** (trước đây 16) và gửi cả mảng tron
 | `STEP_MS` | 30 000 (mặc định; `stepSeconds × 1000` lưu `s.stepMs`) | Deadline mỗi phase `roll`/`buy`/`end` |
 | `DEBT_MS` | 60 000 | Phase `debt` |
 | `TRADE_MS` | 30 000 | Lời mời trade |
+| `AUCTION_MS` / `AUCTION_EXTEND_MS` | 15 000 / 5 000 | Đồng hồ đấu giá; mỗi bid gia hạn thêm (không quá 15 s còn lại) |
+| `AUCTION_MIN_RAISE` / `AUCTION_START_PCT` | 10 / 50 | Mức tăng tối thiểu (tr) / giá khởi điểm theo % giá đất |
 | `ABSENT_MS` | 2 500 | Người tới lượt offline (hoặc đang bật auto-play) được tự đi sau chừng này kể từ `phaseAt` |
 | `AUTO_BUY_BELOW` | 300 | Auto-play chỉ mua ô giá dưới mức này |
 | `AUTO_KEEP_CASH` | 150 | Auto-play chỉ mua khi sau đó còn **hơn** số tiền này |
@@ -239,11 +259,11 @@ Server giữ **150 dòng cuối** (trước đây 16) và gửi cả mảng tron
 `tickGame` (mỗi tick tối đa **một** bước tự động để người khác theo dõi kịp):
 1. Trade hết hạn hoặc người nhận offline → huỷ.
 2. `endsAt` đã qua → `endGame(byTime)`.
-3. Lượt hết deadline, hoặc người tới lượt offline / đang bật auto-play và `now ≥ phaseAt + ABSENT_MS` → `autoStep`: `roll` → tung; `buy` → **không mua** (auto-play: mua nếu giá < `AUTO_BUY_BELOW` và còn > `AUTO_KEEP_CASH`); `end` → chuyển lượt (auto-play **không** tự xây nhà, xây là việc của người chơi); `debt` → `autoLiquidate` rồi trả nợ, không đủ thì phá sản.
+3. Lượt hết deadline, hoặc người tới lượt offline / đang bật auto-play và `now ≥ phaseAt + ABSENT_MS` → `autoStep`: `roll` → tung; `buy` → **không mua** (auto-play: mua nếu giá < `AUTO_BUY_BELOW` và còn > `AUTO_KEEP_CASH`; luật `auction` bật thì bỏ qua = mở đấu giá); `auction` → `closeAuction` (chỉ khi hết `deadline`; nhánh người vắng / auto-play `ABSENT_MS` **không** áp dụng); `end` → chuyển lượt (auto-play **không** tự xây nhà, xây là việc của người chơi); `debt` → `autoLiquidate` rồi trả nợ, không đủ thì phá sản.
 
 **Auto-play (Ctrl+Shift+Y ở client):** lệnh `{ type: "auto", on }` đặt `TPPlayer.auto`; `tickTP` truyền nó vào `tickGame` qua tham số `auto` (khác `absent`: lời mời trade / vay gửi tới người bật auto **không** bị huỷ ngay, vẫn chờ tới hạn). Bật auto gọi `tickTP` ngay để một bước đã đến hạn được đi luôn. `view.auto` chỉ có trong view của chính người đó.
 
-`nextGameTickAt` = min(`deadline`, `phaseAt + ABSENT_MS` nếu còn ở tương lai, `trade.deadline`, `endsAt`). Người `leave` giữa ván vẫn giữ ghế và được tự đi như người offline (người đã phá sản không còn tính là "trong ván", nên ghế của họ có thể bị giải phóng, xem phần lưu ý cuối).
+`nextGameTickAt` = min(`deadline`, `phaseAt + ABSENT_MS` nếu còn ở tương lai và phase ≠ `auction`, `trade.deadline`, `endsAt`). Người `leave` giữa ván vẫn giữ ghế và được tự đi như người offline (người đã phá sản không còn tính là "trong ván", nên ghế của họ có thể bị giải phóng, xem phần lưu ý cuối).
 
 ## Kết thúc ván & tính điểm
 
@@ -252,7 +272,7 @@ Server giữ **150 dòng cuối** (trước đây 16) và gửi cả mảng tron
 
 ## Test
 
-`test/typhu.test.ts` (khoảng 45 test, thêm: bán đất đang thế chấp, giới hạn 3 nhà, chọn quân và random khi trùng, các cỡ bản đồ, mọi lá thẻ trên cả ba bản đồ, chơi trọn ván tự động trên cả ba bản đồ) và `test/fuzz-typhu.test.ts` (random lệnh từ nhiều người chơi trên cả ba bản đồ với mọi tổ hợp luật; kiểm tra tiền/vị trí/nhà/chủ đất, JSON round-trip, lệnh bị từ chối không đổi state, không lộ token trong view; có test hồi quy "chủ nợ phá sản giữa lúc con nợ đang nợ"). Nội dung test gốc: bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
+`test/typhu.test.ts` (khoảng 45 test, thêm: bán đất đang thế chấp, giới hạn 3 nhà, chọn quân và random khi trùng, các cỡ bản đồ, mọi lá thẻ trên cả ba bản đồ, chơi trọn ván tự động trên cả ba bản đồ, nhóm `auction`: mặc định tắt / ván cũ thiếu field, mở đấu giá ở mọi loại ô trên mọi bản đồ, không ai trả giá, ai cũng trả giá được, bid sai không đổi state, gia hạn 5 s trần 15 s, bid sau hạn bị từ chối, người thắng trả ngân hàng một lần (không vào quỹ), không đủ tiền khi đóng, offline/auto không đóng sớm, người dẫn đầu / người có lượt phá sản, chặn trade/vay/thế chấp và huỷ lời mời chờ, view và room) và `test/fuzz-typhu.test.ts` (random lệnh từ nhiều người chơi trên cả ba bản đồ với mọi tổ hợp luật (gồm `auction` và `bid` ngẫu nhiên; `FUZZ_SEEDS` đổi số seed); kiểm tra tiền/vị trí/nhà/chủ đất, JSON round-trip, lệnh bị từ chối không đổi state, không lộ token trong view; có test hồi quy "chủ nợ phá sản giữa lúc con nợ đang nợ"). Nội dung test gốc: bàn cờ & bộ thẻ, đi/mua/thuê, lương Khởi hành, đổ đôi & 3 đôi vào tù, giá nhà tăng dần & hoàn một nửa, thuê đủ nhóm / bảng nhà, sân bay & tiện ích, thế chấp/chuộc 10%, nhà người khác không chặn thế chấp, tù (đôi / lần 3 / nộp / thẻ), thẻ Cơ hội & sinh nhật, nợ → thế chấp → trả / phá sản cho chủ nợ, phá sản về ngân hàng, kết thúc, hết giờ theo netWorth, luật even/chain/needGroup, bán đất 70%, `manage`, các table setting (goSalary, risingCost, unmortgageFee, landSalePct, jailRent, doubleRoll, doubleGo, parkingPot), ván cũ thiếu field, trade (đất+tiền, lô có nhà, từ chối & hết hạn), timer & người vắng, phòng & hub adapter.
 
 Viết test xác định:
 
@@ -271,6 +291,7 @@ Qua room: `joinTP(room, token, name, now, newId, random = Math.random)` (→ `en
 
 ## Lưu ý / bẫy thường gặp
 
+- **Đấu giá và tương thích**: các field mới đều tuỳ chọn (`TPSettings.auction?`, `view.current.auction?`, `state.auction?`). Luật mặc định tắt nên bàn cũ không đổi. **Deploy be_game (cả primary và backup) trước zonenop-game**; client cũ không có UI trả giá, nên đừng bật luật ở bàn còn tab cũ (người đó chỉ thấy phase lạ). Fuzz chạy sâu hơn bằng `FUZZ_SEEDS=200 npx vitest run test/fuzz-typhu.test.ts`.
 - Luôn dùng `rulesOf(s)` (không đọc `s.rules` trực tiếp) và `tpSettingsOf(room)` — phòng/ván cũ trong Redis thiếu field.
 - `board.ts` phải giữ **không phụ thuộc** để chép nguyên sang zonenop-game; đổi giá/helper giá thì chép lại.
 - Luật `even` / `chain` chỉ so các lô **của chính mình** trong nhóm (`myGroup`), nên khi `needGroup = false` có thể xây đều trên các lô mình đang có; với `chain`, "mọi lô" cũng là mọi lô của mình.

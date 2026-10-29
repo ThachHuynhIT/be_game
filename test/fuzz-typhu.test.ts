@@ -5,6 +5,8 @@ import {
   type TPState,
   answerLoan,
   answerTrade,
+  auctionMinNext,
+  bid,
   build,
   buySquare,
   declareBankrupt,
@@ -77,13 +79,27 @@ function check(s: TPState, why: string) {
     if (!s.turn || !s.ps[s.turn] || s.ps[s.turn].bankrupt) fail(`turn ${s.turn}`);
     if (s.players.filter((x) => !s.ps[x].bankrupt).length < 2) fail("playing with <2 active");
     if ((s.phase === "debt") !== !!s.debt) fail(`debt/phase mismatch ${s.phase}`);
+    if ((s.phase === "auction") !== !!s.auction) fail(`auction/phase mismatch ${s.phase}`);
+    if (s.auction) {
+      const a = s.auction;
+      const b = board[a.pos];
+      if (!b || !isOwnable(b) || s.deeds[a.pos]) fail(`auction on ${a.pos}`);
+      if (s.turn && s.ps[s.turn].pos !== a.pos) fail("auction away from the turn player's square");
+      if (a.deadline !== s.deadline) fail("auction deadline differs from the game's");
+      const price = b && isOwnable(b) ? b.price : 0;
+      if (a.start !== Math.ceil(price / 2) || !Number.isInteger(a.bid) || a.bid < a.start) fail(`auction price ${a.bid}`);
+      if (a.bidder === null && a.bid !== a.start) fail("auction price without a bidder");
+      if (a.bidder !== null && (!s.ps[a.bidder] || s.ps[a.bidder].bankrupt)) fail(`auction leader ${a.bidder} is gone`);
+      if (auctionMinNext(a) <= a.bid && a.bidder !== null) fail("minNext");
+      if (s.trade || s.loan) fail("offer during an auction");
+    }
     if (s.debt) {
       if (!(s.debt.amount > 0) || !Number.isInteger(s.debt.amount)) fail("debt amount");
       if (s.debt.to !== null && (!s.ps[s.debt.to] || s.ps[s.debt.to].bankrupt)) fail(`debt creditor ${s.debt.to} is gone`);
     }
     if (s.deadline === null || !Number.isFinite(s.deadline)) fail("no deadline");
   } else {
-    if (s.turn !== null || s.debt || s.trade) fail("ended leftovers");
+    if (s.turn !== null || s.debt || s.trade || s.auction) fail("ended leftovers");
     if (s.finished.length !== s.players.length || new Set(s.finished).size !== s.players.length) fail("finished list");
   }
   for (const l of s.loans ?? []) {
@@ -126,6 +142,7 @@ function pickCfg(r: () => number, map: MapSize): Cfg {
       goSalary: pk([100, 200, 300, 400]),
       unmortgageFee: pk([0, 10, 20, 30]),
       landSalePct: pk([50, 70, 90]),
+      auction: r() < 0.6,
     },
     doubleGo: r() < 0.5,
     pot: r() < 0.5,
@@ -196,6 +213,24 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
         } else if (s.phase === "end") {
           op = "end";
           res = endTurn(s, a, now, names);
+        } else if (s.phase === "auction") {
+          if (r() < 0.2) {
+            // Let the clock run out.
+            op = "auction-close";
+            isCmd = false;
+            now = Math.max(now, s.auction!.deadline) + 1;
+            tickGame(s, now, names, absent, r);
+          } else {
+            op = "bid";
+            const who = r() < 0.85 ? pk(ids) : (garbage() as string);
+            const bigger = r() < 0.1;
+            const amount = r() < 0.9 ? auctionMinNext(s.auction!) + 10 * Math.floor(r() * 6) + (bigger ? 1000 : 0) : garbage();
+            const preBid = s.auction!.bid;
+            const first = s.auction!.bidder === null;
+            res = bid(s, who, amount, now, names);
+            // The first bid may equal the start price; every later one must beat the leader.
+            if (res.ok && ((first ? s.auction!.bid < preBid : s.auction!.bid <= preBid) || s.auction!.bidder !== who || s.auction!.deadline > now + 15_000)) throw new Error("bad bid result");
+          }
         } else {
           const x = r();
           if (x < 0.4) {
@@ -211,7 +246,7 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
           }
         }
       } else {
-        const x = Math.floor(r() * 16);
+        const x = Math.floor(r() * 17);
         switch (x) {
           case 0:
             op = "roll";
@@ -297,6 +332,11 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
             if (sum(s) !== total) throw new Error("loan changed total cash");
             break;
           }
+          case 16: {
+            op = "bid";
+            res = bid(s, actor, r() < 0.9 && s.auction ? auctionMinNext(s.auction) + 10 * Math.floor(r() * 4) : garbage(), now, names);
+            break;
+          }
           case 11:
             op = "paydebt";
             res = payDebt(s, actor, now, names, r);
@@ -345,12 +385,14 @@ function autoPlay(seed: number, map: MapSize, maxTicks: number) {
 }
 
 const MAPS: MapSize[] = ["std", "large", "huge"];
+/** Deeper runs: FUZZ_SEEDS=200 npx vitest run test/fuzz-typhu.test.ts */
+const SEEDS = Number(process.env.FUZZ_SEEDS) > 0 ? Number(process.env.FUZZ_SEEDS) : 120;
 
 describe("fuzz typhu: random commands from random players", () => {
   for (const map of MAPS) {
     it(`map ${map}`, () => {
       let ended = 0;
-      for (let seed = 1; seed <= 120; seed++) if (runGame(seed * 7 + MAPS.indexOf(map), map, 700).ended) ended++;
+      for (let seed = 1; seed <= SEEDS; seed++) if (runGame(seed * 7 + MAPS.indexOf(map), map, 700).ended) ended++;
       expect(ended).toBeGreaterThan(0);
     }, 20_000);
   }
@@ -359,7 +401,7 @@ describe("fuzz typhu: random commands from random players", () => {
 describe("fuzz typhu: pure timeouts auto-play", () => {
   for (const map of MAPS) {
     it(`map ${map}: every tick progresses and timed games end`, () => {
-      for (let seed = 1; seed <= 30; seed++) {
+      for (let seed = 1; seed <= Math.ceil(SEEDS / 4); seed++) {
         const res = autoPlay(seed * 13 + MAPS.indexOf(map), map, 2500);
         if (res.limit > 0) expect(res.ended, `seed ${seed} limit ${res.limit} ticks ${res.ticks}`).toBe(true);
       }
@@ -390,7 +432,7 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
       const pk = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
       const maps = ["std", "large", "huge"];
       const host = tokens[0];
-      tpCommand(room, host, { type: "settings", map: pk(maps) as MapSize, timeLimit: pk([20, 30]), stepSeconds: 15, startCash: pk([1000, 1500]), buildRule: pk(["even", "chain"]) as "even", needGroup: r() < 0.5, bankruptTo: pk(["bank", "creditor"]) as "bank", parkingPot: r() < 0.5, doubleGo: r() < 0.5 }, now, r);
+      tpCommand(room, host, { type: "settings", map: pk(maps) as MapSize, timeLimit: pk([20, 30]), stepSeconds: 15, startCash: pk([1000, 1500]), buildRule: pk(["even", "chain"]) as "even", needGroup: r() < 0.5, auction: r() < 0.7, bankruptTo: pk(["bank", "creditor"]) as "bank", parkingPot: r() < 0.5, doubleGo: r() < 0.5 }, now, r);
       for (const t of tokens) tpCommand(room, t, { type: "pick", emoji: pk(["🛵", "🐃", "🚲", "🚤", "🐉", "🎩", "🚗", "🐘"]), color: pk(["#ef4444", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#f97316"]) }, now, r);
       const emojis = room.seats.filter(Boolean).map((p) => tpView(room, p!, now).seats.find((x) => x?.id === p!.id)!.piece);
       expect(new Set(emojis.map((e) => e.emoji)).size).toBe(emojis.length);
@@ -408,6 +450,7 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
         else if (x < 0.6) msg = { type: pk(["build", "sell", "sellland", "mortgage", "unmortgage"] as const), pos: mine.length && r() < 0.8 ? pk(mine) : Math.floor(r() * 60) - 5 };
         else if (x < 0.7) msg = { type: pk(cmds) };
         else if (x < 0.8) msg = { type: "trade", to: pk(room.seats.filter(Boolean).map((p) => p!.id)), give: { props: mine.filter(() => r() < 0.5), cash: Math.floor(r() * 200) }, get: { props: Object.keys(g.deeds).map(Number).filter(() => r() < 0.2), cash: 0 } };
+        else if (x < 0.85) msg = { type: "bid", amount: (g.auction ? g.auction.bid : 0) + 10 * (1 + Math.floor(r() * 5)) };
         else if (x < 0.9) msg = { type: "tradeanswer", accept: r() < 0.7 };
         else msg = { type: "garbage" } as unknown as TPCommand;
         try {

@@ -2,18 +2,22 @@ import { describe, expect, it } from "vitest";
 import { BOARD, CHANCE, CHEST, GO_SALARY, JAIL_POS, boardOf, groupPositions, jailPos } from "../src/typhu/board";
 import {
   ABSENT_MS,
+  AUCTION_MS,
   LOG_LIMIT,
   STEP_MS,
   type TPState,
   answerLoan,
   answerTrade,
+  bid,
   build,
   buildBlocker,
   buySquare,
   declareBankrupt,
   endTurn,
+  forfeitPlayer,
   mortgage,
   newTPGame,
+  nextGameTickAt,
   payDebt,
   payJail,
   proposeLoan,
@@ -503,6 +507,308 @@ describe("table settings", () => {
     s.ps.a.pos = 38;
     rollDice(s, "a", T, names, dice(1, 2));
     expect(s.ps.a.cash).toBe(1500 + GO_SALARY);
+  });
+});
+
+describe("auction", () => {
+  const PRICE = (BOARD[3] as { price: number }).price; // Bạc Liêu
+  const START = Math.ceil(PRICE / 2);
+  const auctionGame = (players = ["a", "b", "c"], cash = 1500, extra: Partial<NonNullable<TPState["rules"]>> = {}) => {
+    const s = newTPGame(players, T, { startCash: cash, timeLimitMin: 0, rules: { auction: true, ...extra } }, () => 0);
+    s.turn = players[0];
+    return s;
+  };
+  /** "a" lands on Bạc Liêu (3) and skips the purchase: the auction opens at T. */
+  const open = (s: TPState) => {
+    rollDice(s, "a", T, names, dice(1, 2));
+    expect(skipBuy(s, "a", T, names).ok).toBe(true);
+  };
+
+  it("is off by default: skipping leaves the square with the bank, as before", () => {
+    const s = game();
+    expect(s.rules!.auction).toBe(false);
+    rollDice(s, "a", T, names, dice(1, 2));
+    skipBuy(s, "a", T, names);
+    expect(s.phase).toBe("end");
+    expect(s.auction ?? null).toBeNull();
+    expect(s.deeds[3]).toBeUndefined();
+    // Saved games without `rules` or without the field behave the same.
+    const legacy = game();
+    delete legacy.rules;
+    rollDice(legacy, "a", T, names, dice(1, 2));
+    skipBuy(legacy, "a", T, names);
+    expect(legacy.phase).toBe("end");
+    const partial = game();
+    partial.rules = { buildRule: "even", needGroup: true, sellLand: true, bankruptTo: "bank" } as TPState["rules"];
+    rollDice(partial, "a", T, names, dice(1, 2));
+    skipBuy(partial, "a", T, names);
+    expect(partial.phase).toBe("end");
+  });
+
+  it("opens at half the price (rounded up) for every ownable square on every map, turn paused", () => {
+    for (const map of ["std", "large", "huge"] as const) {
+      const board = boardOf(map);
+      board.forEach((b, pos) => {
+        if (!("price" in b)) return;
+        const s = newTPGame(["a", "b"], T, { startCash: 1500, timeLimitMin: 0, map, rules: { auction: true } }, () => 0);
+        s.turn = "a";
+        s.ps.a.pos = pos;
+        s.phase = "buy";
+        expect(skipBuy(s, "a", T + 5, names).ok).toBe(true);
+        expect(s.phase).toBe("auction");
+        expect(s.turn).toBe("a");
+        expect(s.auction).toEqual({ pos, start: Math.ceil(b.price / 2), bid: Math.ceil(b.price / 2), bidder: null, deadline: T + 5 + AUCTION_MS });
+        expect(s.deadline).toBe(s.auction!.deadline);
+      });
+    }
+  });
+
+  it("a timed-out buy phase goes to auction too", () => {
+    const s = auctionGame();
+    rollDice(s, "a", T, names, dice(1, 2));
+    expect(s.phase).toBe("buy");
+    expect(tickGame(s, T + STEP_MS + 1, names, never)).toBe(true);
+    expect(s.phase).toBe("auction");
+    expect(s.auction!.pos).toBe(3);
+  });
+
+  it("with no bids the square stays with the bank, and the turn carries on", () => {
+    const s = auctionGame();
+    open(s);
+    expect(tickGame(s, T + AUCTION_MS - 1, names, never)).toBe(false);
+    expect(s.phase).toBe("auction");
+    const cash = JSON.stringify(Object.values(s.ps).map((p) => p.cash));
+    expect(tickGame(s, T + AUCTION_MS, names, never)).toBe(true);
+    expect(s.auction).toBeNull();
+    expect(s.phase).toBe("end");
+    expect(s.deeds[3]).toBeUndefined();
+    expect(JSON.stringify(Object.values(s.ps).map((p) => p.cash))).toBe(cash);
+    expect(endTurn(s, "a", T + AUCTION_MS, names).ok).toBe(true);
+    expect(s.turn).toBe("b");
+  });
+
+  it("anyone still in the game can bid, including the player who skipped; the first bid may equal the start price", () => {
+    const s = auctionGame();
+    open(s);
+    expect(bid(s, "a", START, T + 1, names).ok).toBe(true); // the skipper
+    expect(bid(s, "b", START + 10, T + 2, names).ok).toBe(true); // not their turn
+    expect(s.auction).toMatchObject({ bid: START + 10, bidder: "b" });
+    expect(bid(s, "ghost", START + 100, T + 3, names).ok).toBe(false);
+    s.ps.c.bankrupt = true;
+    expect(bid(s, "c", START + 100, T + 3, names).ok).toBe(false);
+  });
+
+  it("invalid bids are refused and change nothing", () => {
+    const s = auctionGame();
+    open(s);
+    bid(s, "b", START, T + 1, names);
+    const before = JSON.stringify(s);
+    const bad: [string, unknown][] = [
+      ["c", START + 9], // below the minimum raise
+      ["c", START], // not above the current bid
+      ["c", 5000], // more than the cash
+      ["b", START + 20], // the leader raising themselves
+      ["c", "100"],
+      ["c", null],
+      ["c", NaN],
+      ["c", Infinity],
+      ["c", START + 10.5],
+      ["c", Number.MAX_SAFE_INTEGER + 2],
+      ["c", -50],
+    ];
+    for (const [who, amount] of bad) {
+      expect(bid(s, who, amount, T + 2, names).ok, `${who} ${String(amount)}`).toBe(false);
+      expect(JSON.stringify(s)).toBe(before);
+    }
+    const noAuction = game();
+    expect(bid(noAuction, "a", 100, T, names)).toEqual({ ok: false, error: "Không có phiên đấu giá nào" });
+  });
+
+  it("each bid adds 5 s but never leaves more than 15 s on the clock", () => {
+    const s = auctionGame();
+    open(s);
+    expect(bid(s, "b", START, T + 12_000, names).ok).toBe(true); // 3 s left → 8 s
+    expect(s.auction!.deadline).toBe(T + 20_000 - 0);
+    expect(s.deadline).toBe(s.auction!.deadline);
+    expect(bid(s, "c", START + 10, T + 14_000, names).ok).toBe(true); // 6 s left → 11 s
+    expect(s.deadline).toBe(T + 25_000);
+    // Plenty of time left: the cap is 15 s from the bid.
+    const t = auctionGame();
+    open(t);
+    expect(bid(t, "b", START, T + 1_000, names).ok).toBe(true);
+    expect(t.deadline).toBe(T + 16_000);
+    expect(t.auction!.deadline).toBe(t.deadline);
+  });
+
+  it("a bid at or after the deadline is refused even before the tick closes the auction", () => {
+    const s = auctionGame();
+    open(s);
+    const before = JSON.stringify(s);
+    expect(bid(s, "b", START, T + AUCTION_MS, names).ok).toBe(false);
+    expect(bid(s, "b", START, T + AUCTION_MS + 500, names).ok).toBe(false);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it("the winner pays the bank once, gets a clean deed, and the Nghỉ chân pot is untouched", () => {
+    const s = auctionGame(["a", "b", "c"], 1500, {});
+    s.pot = 40;
+    open(s);
+    bid(s, "b", START, T + 1, names);
+    bid(s, "c", START + 10, T + 2, names);
+    bid(s, "b", START + 30, T + 3, names);
+    const end = s.deadline!;
+    expect(tickGame(s, end, names, never)).toBe(true);
+    expect(s.ps.b.cash).toBe(1500 - START - 30);
+    expect(s.ps.c.cash).toBe(1500);
+    expect(s.ps.a.cash).toBe(1500);
+    expect(s.deeds[3]).toEqual({ owner: "b", houses: 0, mortgaged: false });
+    expect(s.pot).toBe(40);
+    expect(s.auction).toBeNull();
+    expect(s.phase).toBe("end");
+    tickGame(s, end + 1, names, never);
+    expect(s.ps.b.cash).toBe(1500 - START - 30);
+  });
+
+  it("afterwards a double still gives the skipper another roll", () => {
+    // Standing on a skippable square with rollAgain set, as after a double.
+    const t = auctionGame();
+    t.ps.a.pos = 3;
+    t.phase = "buy";
+    t.rollAgain = true;
+    t.doubles = 1;
+    skipBuy(t, "a", T, names);
+    expect(t.phase).toBe("auction");
+    expect(tickGame(t, T + AUCTION_MS, names, never)).toBe(true);
+    expect(t.phase).toBe("roll");
+    expect(t.turn).toBe("a");
+    expect(t.doubles).toBe(1);
+  });
+
+  it("a winner who can no longer pay gets nothing and the square is not sold", () => {
+    const s = auctionGame();
+    open(s);
+    bid(s, "b", START + 100, T + 1, names);
+    s.ps.b.cash = 10; // spent it meanwhile
+    expect(tickGame(s, s.deadline!, names, never)).toBe(true);
+    expect(s.deeds[3]).toBeUndefined();
+    expect(s.ps.b.cash).toBe(10);
+    expect(s.log.at(-1)!.text).toContain("không được bán");
+    expect(s.phase).toBe("end");
+  });
+
+  it("offline or auto-play turn players cannot end an auction early, and nobody bids for them", () => {
+    const s = auctionGame();
+    open(s);
+    const gone = (id: string) => id === "a";
+    expect(tickGame(s, T + ABSENT_MS + 1, names, gone, () => 0, (id) => id === "a")).toBe(false);
+    expect(s.phase).toBe("auction");
+    expect(s.auction!.bidder).toBeNull();
+    expect(nextGameTickAt(s, T + 1)).toBe(s.deadline);
+    expect(tickGame(s, T + AUCTION_MS, names, gone)).toBe(true);
+    expect(s.phase).toBe("end");
+  });
+
+  it("a bankrupt leader resets the price to the start; a bankrupt turn player calls the auction off", () => {
+    const s = auctionGame(["a", "b", "c", "d"]);
+    open(s);
+    bid(s, "b", START + 50, T + 1, names);
+    const deadline = s.deadline;
+    expect(forfeitPlayer(s, "b", T + 2, names).ok).toBe(true);
+    expect(s.auction).toMatchObject({ bid: START, bidder: null });
+    expect(s.deadline).toBe(deadline);
+    expect(s.phase).toBe("auction");
+    expect(forfeitPlayer(s, "a", T + 3, names).ok).toBe(true); // the paused turn's player
+    expect(s.auction).toBeNull();
+    expect(s.turn).toBe("c");
+    expect(s.phase).toBe("roll");
+  });
+
+  it("the game ending during an auction clears it", () => {
+    const s = auctionGame(["a", "b"]);
+    open(s);
+    expect(forfeitPlayer(s, "b", T + 1, names).ok).toBe(true);
+    expect(s.status).toBe("ended");
+    expect(s.auction).toBeNull();
+    const timed = newTPGame(["a", "b"], T, { startCash: 1500, timeLimitMin: 1, rules: { auction: true } }, () => 0);
+    timed.turn = "a";
+    open(timed);
+    tickGame(timed, T + 60_000, names, never);
+    expect(timed.status).toBe("ended");
+    expect(timed.auction).toBeNull();
+    expect(timed.deeds[3]).toBeUndefined();
+  });
+
+  it("blocks new offers and mortgages, and cancels offers already waiting", () => {
+    const s = auctionGame();
+    s.deeds[39] = { owner: "a", houses: 0, mortgaged: false };
+    expect(proposeLoan(s, "b", { to: "c", amount: 100, rate: 10 }, T, names).ok).toBe(true);
+    open(s);
+    expect(s.loan).toBeNull();
+    expect(proposeTrade(s, "b", { to: "c", give: { props: [], cash: 10 }, get: { props: [], cash: 0 } }, T, names)).toEqual({ ok: false, error: "Đang đấu giá" });
+    expect(proposeLoan(s, "b", { to: "c", amount: 100, rate: 10 }, T, names)).toEqual({ ok: false, error: "Đang đấu giá" });
+    const before = JSON.stringify(s);
+    expect(mortgage(s, "a", 39, T, names).ok).toBe(false);
+    expect(JSON.stringify(s)).toBe(before);
+    const trade = auctionGame();
+    trade.deeds[39] = { owner: "b", houses: 0, mortgaged: false };
+    expect(proposeTrade(trade, "a", { to: "b", give: { props: [], cash: 50 }, get: { props: [39], cash: 0 } }, T, names).ok).toBe(true);
+    open(trade);
+    expect(trade.trade).toBeNull();
+  });
+});
+
+describe("auction in a room", () => {
+  const setup = (auction?: boolean) => {
+    let n = 0;
+    const room = newTPRoom("AUCTN");
+    for (const [tok, name] of [["token-aaaa", "An"], ["token-bbbb", "Bình"], ["token-cccc", "Chi"]]) joinTP(room, tok, name, T, () => `p${++n}`, tok);
+    if (auction !== undefined) expect(tpCommand(room, "token-aaaa", { type: "settings", auction }, T).ok).toBe(true);
+    expect(tpCommand(room, "token-aaaa", { type: "start" }, T).ok).toBe(true);
+    return room;
+  };
+
+  it("is off by default and the setting reaches the game and the views", () => {
+    expect(setup().current!.rules!.auction).toBe(false);
+    const room = setup(true);
+    expect(room.current!.rules!.auction).toBe(true);
+    expect(tpView(room, room.seats[0], T).settings.auction).toBe(true);
+    expect(tpCommand(room, "token-aaaa", { type: "settings", auction: false }, T).ok).toBe(false); // frozen mid-game
+    expect(tpCommand(setup(), "token-bbbb", { type: "settings", auction: true }, T).ok).toBe(false); // host only
+  });
+
+  it("bids go through tpCommand and the view carries no token or private data", () => {
+    const room = setup(true);
+    const g = room.current!;
+    g.turn = "p1";
+    g.ps.p1.pos = 3;
+    g.phase = "buy";
+    expect(tpView(room, room.seats[0], T).current!.auction).toBeNull();
+    expect(tpCommand(room, "token-aaaa", { type: "skip" }, T).ok).toBe(true);
+    expect(tpCommand(room, "token-bbbb", { type: "bid", amount: 10 }, T + 1).ok).toBe(false);
+    expect(tpCommand(room, "token-bbbb", { type: "bid", amount: 400 }, T + 1).ok).toBe(true);
+    for (const seat of [...room.seats, null]) {
+      const v = tpView(room, seat, T + 2);
+      expect(v.current!.phase).toBe("auction");
+      expect(v.current!.auction).toEqual({ pos: 3, bid: 400, bidder: "p2", minNext: 410, deadline: g.deadline });
+      expect(JSON.stringify(v)).not.toContain("token-");
+    }
+    expect(tickTP(room, g.deadline!)).toBe(true);
+    expect(g.deeds[3].owner).toBe("p2");
+    expect(JSON.parse(JSON.stringify(g))).toEqual(g);
+  });
+
+  it("a game saved before the rule existed still runs and shows no auction", () => {
+    const room = setup();
+    const g = room.current!;
+    delete g.auction;
+    g.rules = { buildRule: "even", needGroup: true, sellLand: true, bankruptTo: "bank" } as TPState["rules"];
+    expect(tpView(room, room.seats[0], T).current!.auction).toBeNull();
+    expect(tpView(room, room.seats[0], T).settings.auction).toBe(false);
+    g.ps.p1.pos = 3;
+    g.turn = "p1";
+    g.phase = "buy";
+    expect(tpCommand(room, "token-aaaa", { type: "skip" }, T).ok).toBe(true);
+    expect(g.phase).toBe("end");
   });
 });
 
