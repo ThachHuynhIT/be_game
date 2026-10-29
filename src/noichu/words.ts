@@ -1,9 +1,10 @@
 import { syllablesOf } from "./board";
 import { WORDS_TEXT } from "./dict/words";
+import { EXTRA_WORDS } from "./extra";
 
 /**
- * The dictionary (see dict/README.md for its source and licence). Static data, built once per process: the game
- * state never holds it, only chosen words.
+ * The dictionary: the Viet74K list (dict/README.md has its source and licence) plus our own extra phrases
+ * (extra.ts). Static data, built once per process: the game state never holds it, only chosen words.
  */
 
 let words: Set<string> | null = null;
@@ -16,8 +17,8 @@ const MIN_CONTINUATIONS = 8;
 
 function load() {
   if (words) return;
-  const list = WORDS_TEXT.split("\n");
-  words = new Set(list);
+  words = new Set([...WORDS_TEXT.split("\n"), ...EXTRA_WORDS]);
+  const list = [...words];
   byFirst = new Map();
   for (const w of list) {
     const first = syllablesOf(w)[0];

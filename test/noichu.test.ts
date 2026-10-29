@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_WORDS, normalizeWord, syllablesOf } from "../src/noichu/board";
 import { type NCState, forfeitPlayer, needOf, newNCGame, nextGameTickAt, playWord, tickGame } from "../src/noichu/game";
 import { joinNC, ncCommand, ncSettingsOf, ncSummary, ncView, newNCRoom, nextNCTickAt, tickNC } from "../src/noichu/room";
+import { EXTRA_WORDS } from "../src/noichu/extra";
 import { hasWord, wordsStartingWith } from "../src/noichu/words";
 
 const names = (id: string) => id;
@@ -40,6 +41,29 @@ describe("words", () => {
     expect(hasWord("học")).toBe(false);
     expect(wordsStartingWith("học").length).toBeGreaterThan(5);
     for (const w of wordsStartingWith("bàn")) expect(normalizeWord(w)).toBe(w);
+  });
+});
+
+describe("extra words", () => {
+  it("every extra word is a normalised two-syllable word", () => {
+    expect(EXTRA_WORDS.length).toBeGreaterThan(1000); // a floor that catches a broken expansion
+    for (const w of EXTRA_WORDS) expect(normalizeWord(w), w).toBe(w);
+    expect(new Set(EXTRA_WORDS).size).toBe(EXTRA_WORDS.length);
+  });
+
+  it("fills the gaps the Viet74K headword list leaves", () => {
+    for (const w of ["con mèo", "con chó", "cái ghế", "quả cam", "trái tim", "cây cầu", "hoa hồng", "việt nam", "đà nẵng", "trà sữa", "phở bò", "ăn cơm", "chú bác"]) {
+      expect(hasWord(w), w).toBe(true);
+    }
+    expect(hasWord("con bàn")).toBe(false); // classifiers only go with nouns they suit
+    expect(hasWord("chí thì")).toBe(false); // no sentence fragments
+  });
+
+  it("a chain can now run through them: con mèo → mèo …", () => {
+    const s = game();
+    s.chain = [{ by: null, word: "con mèo", at: T }];
+    expect(wordsStartingWith("mèo").length).toBeGreaterThan(0);
+    expect(playWord(s, "a", wordsStartingWith("mèo")[0], T, names).ok).toBe(true);
   });
 });
 

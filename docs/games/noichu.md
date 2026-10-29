@@ -8,7 +8,8 @@ Hạ tầng chung (hub, adapter, store, giao thức WS, chat, emoji, khán giả
 | File | Vai trò |
 |---|---|
 | `src/noichu/board.ts` | Hằng số và chuẩn hoá từ, **không import gì** nên chép nguyên văn sang `zonenop-game/src/lib/noichu/`: `MIN_PLAYERS = 2`, `MAX_PLAYERS = 8`, `TURN_SECONDS_OPTIONS`, `DEFAULT_TURN_SECONDS`, `MAX_WORDS`, `MAX_SYLLABLE_LENGTH`, `syllablesOf(word)`, `normalizeWord(text)` |
-| `src/noichu/words.ts` | Tra từ điển (nạp một lần mỗi tiến trình): `hasWord`, `wordsStartingWith`, `randomOpeningWord` |
+| `src/noichu/words.ts` | Tra từ điển (nạp một lần mỗi tiến trình, gộp `dict/words.ts` với `extra.ts` và khử trùng): `hasWord`, `wordsStartingWith`, `randomOpeningWord` |
+| `src/noichu/extra.ts` | Từ bổ sung do dự án tự soạn (Apache-2.0, **không** nằm trong `dict/`): `EXTRA_WORDS` |
 | `src/noichu/dict/` | Danh sách từ: `words.ts` (sinh ra, **GPL-2.0**), `LICENSE-GPL-2.0.txt`, `README.md` (nguồn, giấy phép, quyết định) |
 | `src/tools/build-noichu-words.ts` | Tạo lại `dict/words.ts` từ Viet74K |
 | `src/noichu/game.ts` | Máy trạng thái thuần `NCState`: `newNCGame`, `playWord`, `needOf`, `forfeitPlayer`, `tickGame`, `nextGameTickAt` |
@@ -52,9 +53,11 @@ Chỉ chủ phòng đổi, và không đổi được khi ván đang chạy. Cà
 
 ## Từ điển và giấy phép
 
-Danh sách từ (48.425 từ ghép 2 tiếng) lấy từ **Viet74K** của Hồ Ngọc Đức, giấy phép **GPL-2.0**, trong khi phần còn lại của be_game theo **Apache-2.0**. Chủ repo đã chấp nhận giữ nó như một file dữ liệu riêng trong `src/noichu/dict/` (xem `dict/README.md`); đây là quyết định về rủi ro pháp lý, không phải ý kiến pháp lý. Muốn bỏ GPL thì thay `dict/words.ts` bằng nguồn khác cùng định dạng.
+Danh sách chính (48.425 từ ghép 2 tiếng) lấy từ **Viet74K** của Hồ Ngọc Đức, giấy phép **GPL-2.0**, trong khi phần còn lại của be_game theo **Apache-2.0**. Chủ repo đã chấp nhận giữ nó như một file dữ liệu riêng trong `src/noichu/dict/` (xem `dict/README.md`); đây là quyết định về rủi ro pháp lý, không phải ý kiến pháp lý. Muốn bỏ GPL thì thay `dict/words.ts` bằng nguồn khác cùng định dạng.
 
-Hạn chế: từ điển không đầy đủ (ví dụ `con mèo` không có), nên có từ đúng bị báo "không có trong từ điển". Chủ phòng có thể tắt `dictionary` cho ván đó.
+**Từ bổ sung** (`extra.ts`, 1.097 từ, trong đó 491 đã có sẵn nên thêm ròng 606 từ): Viet74K là danh sách *mục từ*, nên thiếu nhiều cụm hằng ngày. `extra.ts` vá các nhóm đã biết: loại từ + danh từ hợp nghĩa (`con mèo`, `cái ghế`, `quả cam`, `trái tim`, `cây cầu`, `hoa hồng`), tên tỉnh thành và quốc gia (`đà nẵng`, `việt nam`), món ăn và đồ uống (`trà sữa`, `phở bò`), cụm động từ thường dùng (`ăn cơm`, `chạy bộ`), họ hàng (`chú bác`), một số từ mượn (`ti vi`, `sa lông`). Loại từ chỉ ghép với danh từ hợp (không có `con bàn`), và không đưa vào vế thành ngữ hay mảnh câu. Mục nào không đúng 2 tiếng bị bỏ khi nạp; `test/noichu.test.ts` kiểm tra mọi mục.
+
+**Hạn chế còn lại.** Phần thiếu còn lại chủ yếu là cụm ghép tự do (danh từ + danh từ/tính từ) mà danh sách hữu hạn không phủ hết, ví dụ `đôi mắt`, `giờ học`, `kỳ thi`, `tin nhắn`, `giường ngủ`, `dòng sông`. Trên một bộ 150 từ thử độc lập (không dùng khi soạn `extra.ts`) độ phủ gần như không đổi, khoảng 81%, và một phần số "thiếu" đó là chính các mục thử không phải từ thật. Nên có từ đúng vẫn có thể bị báo "không có trong từ điển"; chủ phòng có thể tắt `dictionary` cho ván đó.
 
 ## Test
 
