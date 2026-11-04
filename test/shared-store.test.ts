@@ -8,7 +8,7 @@ describe("shared store helpers", () => {
     vi.useRealTimers();
   });
   it("lists every game", () => {
-    expect([...GAME_KINDS].sort()).toEqual(["bang", "cangua", "meono", "oanquan", "splendor", "tienlen", "typhu"]);
+    expect([...GAME_KINDS].sort()).toEqual(["bang", "cangua", "meono", "noichu", "oanquan", "splendor", "tienlen", "typhu"]);
   });
   it("exposes the key layout", () => {
     expect(keysFor("typhu").room("ABCDE")).toBe("typhu:room:ABCDE");

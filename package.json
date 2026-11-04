@@ -2,7 +2,7 @@
   "name": "be_game",
   "version": "1.0.0",
   "private": true,
-  "description": "Multiplayer game backend (Tiến Lên, Mèo Nổ, Cờ Tỷ Phú, Đá Quý, Đấu Súng): WebSocket server on Vercel Functions (or any Node host), rooms in Redis",
+  "description": "Multiplayer game backend (Tiến Lên, Mèo Nổ, Cờ Tỷ Phú, Đá Quý, Đấu Súng, Cờ Cá Ngựa, Ô Ăn Quan, Nối Chữ): WebSocket server on Vercel Functions (or any Node host), rooms in Redis",
   "engines": {
     "node": ">=20"
   },

@@ -19,6 +19,7 @@ be_game là backend realtime (Node `http.Server` + `ws`) cho các game online c�
 | Đấu Súng (Bang!) | `bang` | `src/bang/` | 3–8 | `/bang` | `/api/bang/ws` | [games/bang.md](games/bang.md) |
 | Cờ Cá Ngựa | `cangua` | `src/cangua/` | 2–4 | `/co-ca-ngua` | `/api/cangua/ws` | [games/cangua.md](games/cangua.md) |
 | Ô Ăn Quan | `oanquan` | `src/oanquan/` | 2–4 | `/o-an-quan` | `/api/oanquan/ws` | [games/oanquan.md](games/oanquan.md) |
+| Nối Chữ | `noichu` | `src/noichu/` | 2–8 | `/noi-chu` | `/api/noichu/ws` | [games/noichu.md](games/noichu.md) |
 
 Mỗi game có `/rooms` và `/leaderboard` cùng tiền tố (Tiến Lên dùng đường dẫn không tiền tố: `/api/rooms`, `/api/leaderboard`).
 
@@ -50,7 +51,7 @@ flowchart LR
 
 - **Vercel functions** (`api/`): `api/ws.ts`, `api/rooms.ts`, `api/leaderboard.ts`, `api/health.ts`, `api/[game]/[kind].ts`. **Tất cả** chỉ `export default createGameServer()`; việc định tuyến làm trong `app.ts` theo `pathname`. File động `api/[game]/[kind].ts` phục vụ mọi `/api/<game>/<ws|rooms|leaderboard>` của 6 game không phải Tiến Lên.
 - **`src/server/app.ts`**:
-  - Bảng `ROUTES: Record<path, { game: GameKind; kind: "ws" | "rooms" | "leaderboard" }>` — 21 entry (7 game × 3). Path được chuẩn hoá: bỏ `/` cuối.
+  - Bảng `ROUTES: Record<path, { game: GameKind; kind: "ws" | "rooms" | "leaderboard" }>` — 24 entry (8 game × 3). Path được chuẩn hoá: bỏ `/` cuối.
   - HTTP: CORS (`access-control-allow-origin` = origin nếu `isAllowedOrigin`), `OPTIONS` → 204, `/api/health` → `health()`, `rooms` → `listRooms()`, `leaderboard` → `leaderboard()`, `GET` vào path `ws` không upgrade → **426** `{ok:false,error:"Expected a WebSocket connection"}`, `/` hoặc `/api` → `{ok:true, service:"be_game", routes:[...]}`, còn lại 404.
   - Upgrade: path không phải `ws` → `404`; origin không hợp lệ → `403`; đọc `getDeadline()` của `@vercel/functions` (bắt lỗi khi chạy local → `undefined`), rồi `wss.handleUpgrade(...)` → `attachConnection(ws, { deadline, game })`.
   - `WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES })` (16 KB).
@@ -62,7 +63,7 @@ flowchart LR
 ### `RoomStore` (`src/server/store.ts`)
 
 ```ts
-export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang" | "cangua" | "oanquan";
+export type GameKind = "tienlen" | "meono" | "typhu" | "splendor" | "bang" | "cangua" | "oanquan" | "noichu";
 interface RoomStore<S extends CodedRoom> {
   kind: "redis" | "memory";
   create(state): Promise<boolean>;            // false nếu code đã tồn tại
@@ -155,7 +156,7 @@ Lỗi chung từ hub: `"Không tìm thấy phòng"` (code không tồn tại / p
 
 ### Icon và màu người chơi (`look`)
 
-Làm **một lần ở hub**, áp dụng cho cả 7 game (adapter không biết tới nó):
+Làm **một lần ở hub**, áp dụng cho cả 8 game (adapter không biết tới nó):
 - `cleanLook(raw)` (`src/server/hub.ts`) chỉ nhận `color` dạng `#rrggbb` (chuyển chữ thường) và `icon` tối đa 4 ký tự (hoặc rỗng = dùng chữ cái đầu của tên); sai → bỏ qua.
 - `setLook(room, token, look)` lưu `room.looks[token]` (khoá theo **token bí mật**, và dọn các token đã rời phòng) ngay trong cùng `mutate` với `join`/`watch`, hoặc với message `look`.
 - Khi gửi view, hub (`refresh`) thêm `looks: { [tên]: {icon, color} }` — **khoá theo tên**, không bao giờ lộ token — vào mọi view dạng object. Client đọc bằng `useLookOf(name)` / `SeatAvatar`.
@@ -313,7 +314,7 @@ Giá trị thật ở từng môi trường: [`DEPLOYMENT.md` → Biến môi tr
 ## Test
 
 - `vitest` (`npm test`), file trong `test/*.test.ts`, import trực tiếp từ `../src/...`. Hiện 29 file / khoảng 430 test, chạy chừng 35 giây. CI chạy toàn bộ trên mỗi PR và mỗi push vào `main`; **CI đỏ trên `main` chặn deploy máy chính**, nên test phải tất định (không phụ thuộc `Math.random()`/`Date.now()` chưa inject).
-- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`), phòng (`room`, `features`), vào lại ghế (`rejoin`: token cũ, tên trùng, ghế đã giải phóng — cho cả 7 game), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`; `store-cache` — cache sảnh / bảng điểm của store Redis; `shared-store` — `GAME_KINDS`, `keysFor`, bộ đếm lệnh, `deployedCommit` và `/api/health`; `migrate-store` — công cụ chép giữa hai Redis, dùng `ioredis-mock`; `tick-spin` — hub không quay vòng tick khi đối thủ offline).
+- Phân loại: luật thuần (`combos`, `game`, `scoring`, `meono`, `typhu`, `splendor`, `bang`, `cangua`, `oanquan`, `noichu`), phòng (`room`, `features`), vào lại ghế (`rejoin`: token cũ, tên trùng, ghế đã giải phóng — cho cả 8 game), hạ tầng (`hub` — `FakeSocket` + 2 hub dùng chung 1 memory store để giả lập 2 instance và ghi đồng thời, cả test `look`; `origin` — `isAllowedOrigin`; `store-cache` — cache sảnh / bảng điểm của store Redis; `shared-store` — `GAME_KINDS`, `keysFor`, bộ đếm lệnh, `deployedCommit` và `/api/health`; `migrate-store` — công cụ chép giữa hai Redis, dùng `ioredis-mock`; `tick-spin` — hub không quay vòng tick khi đối thủ offline).
 - **Fuzz test** (`test/fuzz-<game>.test.ts`, mỗi game một file; Bang và Ô Ăn Quan còn có thêm test ngẫu nhiên riêng): chơi ngẫu nhiên có seed với 2…N người, gồm cả **lệnh rác** và lệnh bất hợp lệ lấy từ view hiện tại, hết giờ (`tick`), người vắng mặt, kick, rời bàn. Kiểm tra bất biến: không exception, ván luôn kết thúc, bảo toàn bài / quân / tiền, state JSON round-trip bằng nhau, lệnh bị từ chối **không** làm đổi state, view không lộ token hay bài ẩn của người khác. Chạy mặc định vài seed (dưới ~5 s mỗi file); tăng bằng biến môi trường `FUZZ_SEEDS` (Mèo Nổ, Tiến Lên) khi cần soi kỹ. Khi thêm luật mới nên chạy lại fuzz của game đó.
 - **Quy ước**:
   - Thời gian là tham số: dùng hằng `T = 1_000_000` (hoặc `T0`) và truyền `T + n` — không dùng fake timer.
@@ -371,7 +372,7 @@ Repo frontend: `zonenop-game` (không còn là `portfolio`). Danh sách đầy �
 - **Lệnh bị từ chối không được lưu**: với lệnh game, hub gọi `mutate(code, fn, (r) => !r.ok)` — kết quả `ok: false` thì bỏ cả draft, mọi thay đổi lệnh kịp làm trước khi fail đều mất. Muốn một thay đổi được giữ (ví dụ huỷ lời mời không còn hợp lệ) thì trả `ok: true` kèm dòng log (như typhu `answerTrade`).
 - **Result**: `{ ok: true } | { ok: false; error: string }`, thông điệp lỗi **tiếng Việt** hiển thị thẳng cho người chơi. Mỗi game khai báo lại kiểu `Result` riêng (cùng hình dạng với `Result` trong `adapters.ts`).
 - **Phòng cũ trong Redis** (TTL 12 h) có thể thiếu field mới: luôn đọc settings qua `xxxSettingsOf(room)` (`{...DEFAULT, ...room.settings}`), field mới trong state để optional (`?`) và có default khi đọc. Ví dụ: typhu `rulesOf(s)` — ván lưu trước khi có house rules (`s.rules` không có) dùng `LEGACY_RULES` (`sellLand:false, bankruptTo:"creditor", risingCost:false, landSalePct:50`), còn `s.rules` thiếu field thì lấy `DEFAULT_TP_RULES`. Tiến Lên `settingsOf(room)`, `p.points ?? 0`.
-- **Đồng bộ với zonenop-game**: client giữ bản sao để validate/hiển thị. Chép **nguyên văn**: `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts` (hai file sau chỉ khác comment đầu file), `src/game/{cards,combos,rules}.ts` (→ `zonenop-game/src/lib/tienlen/`; các file còn lại vào `zonenop-game/src/lib/<game>/`). Bản **chỉnh tay** (khác import, khai báo lại kiểu nằm trong `game.ts`, field optional cho server cũ): mọi `protocol.ts`; `src/lib/meono/cards.ts` là catalogue UI riêng (tên, hình, mô tả lá), chỉ trùng `CardType` với server. Đổi luật/kiểu ở be_game → sửa bản bên zonenop-game trong cùng đợt.
+- **Đồng bộ với zonenop-game**: client giữ bản sao để validate/hiển thị. Chép **nguyên văn**: `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts`, `src/noichu/board.ts` (hai file sau chỉ khác comment đầu file), `src/game/{cards,combos,rules}.ts` (→ `zonenop-game/src/lib/tienlen/`; các file còn lại vào `zonenop-game/src/lib/<game>/`). Bản **chỉnh tay** (khác import, khai báo lại kiểu nằm trong `game.ts`, field optional cho server cũ): mọi `protocol.ts`; `src/lib/meono/cards.ts` là catalogue UI riêng (tên, hình, mô tả lá), chỉ trùng `CardType` với server. Đổi luật/kiểu ở be_game → sửa bản bên zonenop-game trong cùng đợt.
 - **Bảo mật view**: view là nơi duy nhất quyết định ai thấy gì. Không bao giờ đưa `token` vào view/summary; dữ liệu riêng (bài trên tay, vai trò, lá đang xem) chỉ thêm khi `player` (không phải khán giả) là chủ.
 - **Đổi luật giữa ván**: mọi game chặn `settings` khi ván đang chạy (`"Đổi luật khi ván đã kết thúc"`; Đấu Súng kiểm tra `status !== "ended"`); settings được chép vào state ván lúc `start`.
 - **Mã phòng**: `randomCode()` 5 ký tự từ `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (không I, O, 0, 1); server nhận tối đa 8 ký tự, viết hoa.

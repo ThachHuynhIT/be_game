@@ -112,6 +112,21 @@ import {
   tickOQ,
 } from "../oanquan/room";
 import type { OQCommand } from "../oanquan/protocol";
+import {
+  type NCRoom,
+  findByToken as findNCByToken,
+  isNCActive,
+  joinNC,
+  leaveNC,
+  ncCommand,
+  ncHeartbeat,
+  ncSummary,
+  ncView,
+  newNCRoom,
+  nextNCTickAt,
+  tickNC,
+} from "../noichu/room";
+import type { NCCommand } from "../noichu/protocol";
 import type { CodedRoom, GameKind } from "./store";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -298,6 +313,29 @@ export const oanquanAdapter: GameAdapter<OQRoom> = {
   lastRecord: (room) => room.history?.[room.history.length - 1],
 };
 
+export const noichuAdapter: GameAdapter<NCRoom> = {
+  game: "noichu",
+  newRoom: newNCRoom,
+  join: (room, token, name, now, newId, uid) => joinNC(room, token, name, now, newId, uid),
+  watch: (room, token, name, now) => watchRoom(room, token, name, now),
+  heartbeat: ncHeartbeat,
+  leave: leaveNC,
+  react: (room, token, emoji, now) => react(room, token, emoji, now),
+  command: (room, token, msg, now) => ncCommand(room, token, msg as unknown as NCCommand, now),
+  view(room, token, role, now) {
+    if (role === "player") {
+      const p = findNCByToken(room, token);
+      return p ? ncView(room, p, now) : null;
+    }
+    return findSpectator(room, token) ? ncView(room, null, now) : null;
+  },
+  tick: (room, now) => tickNC(room, now),
+  nextTickAt: nextNCTickAt,
+  summary: ncSummary,
+  isActive: isNCActive,
+  lastRecord: (room) => room.history?.[room.history.length - 1],
+};
+
 export const canguaAdapter: GameAdapter<CNRoom> = {
   game: "cangua",
   newRoom: newCNRoom,
@@ -329,4 +367,5 @@ export const ADAPTERS: Record<GameKind, GameAdapter> = {
   bang: bangAdapter as unknown as GameAdapter,
   cangua: canguaAdapter as unknown as GameAdapter,
   oanquan: oanquanAdapter as unknown as GameAdapter,
+  noichu: noichuAdapter as unknown as GameAdapter,
 };

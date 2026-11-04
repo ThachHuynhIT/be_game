@@ -44,7 +44,7 @@ Update the relevant doc **in the same commit** as the code it describes.
 
 ## 🏛️ Architecture (short)
 
-`api/*.ts` (Vercel) and `src/local.ts` (local/self-host) all serve `createGameServer()` from `src/server/app.ts`, which routes by path (`ROUTES`: 7 games × `ws|rooms|leaderboard`). WebSocket connections go to `attachConnection()` → a `RoomHub` per game (`src/server/hub.ts`) → `RoomStore` (`src/server/store.ts`, Redis CAS + pub/sub, or memory) → the game's `GameAdapter` (`src/server/adapters.ts`) → pure game code in `src/<game>/{room,game}.ts`. `GET /api/health` (same server) returns `ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games` (error path: `ok:false, error`); deploys wait for `commit` to equal the SHA shipped.
+`api/*.ts` (Vercel) and `src/local.ts` (local/self-host) all serve `createGameServer()` from `src/server/app.ts`, which routes by path (`ROUTES`: 8 games × `ws|rooms|leaderboard`). WebSocket connections go to `attachConnection()` → a `RoomHub` per game (`src/server/hub.ts`) → `RoomStore` (`src/server/store.ts`, Redis CAS + pub/sub, or memory) → the game's `GameAdapter` (`src/server/adapters.ts`) → pure game code in `src/<game>/{room,game}.ts`. `GET /api/health` (same server) returns `ok, store, saved, notified, stepsMs, now, region, redisConfigured, redisHost, sharedStore, commit, games` (error path: `ok:false, error`); deploys wait for `commit` to equal the SHA shipped.
 
 | Game | Dir | WS path |
 |---|---|---|
@@ -55,6 +55,7 @@ Update the relevant doc **in the same commit** as the code it describes.
 | Đấu Súng (Bang!) | `src/bang/` | `/api/bang/ws` |
 | Cờ Cá Ngựa | `src/cangua/` | `/api/cangua/ws` |
 | Ô Ăn Quan | `src/oanquan/` | `/api/oanquan/ws` |
+| Nối Chữ | `src/noichu/` | `/api/noichu/ws` |
 
 Vercel Hobby allows 12 functions; there are 5. **Never add files to `api/`** for a new game — add routes in `app.ts` (`api/[game]/[kind].ts` already catches `/api/<game>/<kind>`).
 
@@ -76,7 +77,7 @@ Vercel Hobby allows 12 functions; there are 5. **Never add files to `api/`** for
 
 The zonenop-game repo (frontend) keeps client copies for validation/rendering. Changing any of these means changing the zonenop-game copy in the same batch of work:
 
-- Verbatim copies: `src/game/{cards,combos,rules}.ts` → `zonenop-game/src/lib/tienlen/`; `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts` → `zonenop-game/src/lib/<game>/`.
+- Verbatim copies: `src/game/{cards,combos,rules}.ts` → `zonenop-game/src/lib/tienlen/`; `src/typhu/board.ts`, `src/cangua/board.ts`, `src/splendor/cards.ts`, `src/bang/cards.ts`, `src/oanquan/board.ts`, `src/noichu/board.ts` → `zonenop-game/src/lib/<game>/`.
 - Hand-edited copies: every `src/<game>/protocol.ts` (different imports, re-declared types, optional fields for older servers).
 
 Details: `docs/GUIDE.md` → "Quy ước chung & bẫy thường gặp" and "Thêm một game mới".

@@ -7,6 +7,7 @@ import {
   bangAdapter,
   canguaAdapter,
   meonoAdapter,
+  noichuAdapter,
   oanquanAdapter,
   splendorAdapter,
   tienlenAdapter,
@@ -22,6 +23,7 @@ const ADAPTERS: [string, GameAdapter][] = [
   ["bang", bangAdapter as unknown as GameAdapter],
   ["oanquan", oanquanAdapter as unknown as GameAdapter],
   ["cangua", canguaAdapter as unknown as GameAdapter],
+  ["noichu", noichuAdapter as unknown as GameAdapter],
 ];
 
 type Seat = { id: string; token: string; name: string; wins: number; points?: number; games?: number };

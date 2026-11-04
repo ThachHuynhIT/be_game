@@ -30,7 +30,7 @@ class Sock implements HubSocket {
   }
 }
 
-const GAMES: GameKind[] = ["tienlen", "meono", "typhu", "splendor", "bang", "cangua", "oanquan"];
+const GAMES: GameKind[] = ["tienlen", "meono", "typhu", "splendor", "bang", "cangua", "oanquan", "noichu"];
 
 // Regression: once an offline player was past the 60 s seat grace mid-game, `nextTickAt` kept returning a time
 // in the past, so the hub re-ran `tick` every 100 ms and pushed ~10 views a second to everyone still playing.
