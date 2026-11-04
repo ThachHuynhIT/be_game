@@ -145,6 +145,47 @@ describe("account routes", () => {
     expect((await call("GET", "/api/auth/me", undefined, { token: json.session })).status).toBe(401);
   });
 
+  it("stores per-account UI prefs (GET/PATCH /api/auth/prefs)", async () => {
+    expect((await call("GET", "/api/auth/prefs")).status).toBe(401);
+    expect((await call("PATCH", "/api/auth/prefs", { game: "typhu", prefs: {} })).status).toBe(401);
+    const { json } = await register("PrefUser");
+    const t = json.session;
+    expect(await call("GET", "/api/auth/prefs", undefined, { token: t }).then((r) => [r.status, r.json])).toEqual([200, { ok: true, prefs: {} }]);
+    const p1 = await call("PATCH", "/api/auth/prefs", { game: "typhu", prefs: { view: "minimal", fx: { dice: true } } }, { token: t });
+    expect(p1.status).toBe(200);
+    expect(p1.json).toEqual({ ok: true, prefs: { typhu: { view: "minimal", fx: { dice: true } } } });
+    await call("PATCH", "/api/auth/prefs", { game: "meono", prefs: { sound: false } }, { token: t });
+    const p2 = await call("PATCH", "/api/auth/prefs", { game: "typhu", prefs: { view: "full" } }, { token: t });
+    expect(p2.json.prefs).toEqual({ typhu: { view: "full" }, meono: { sound: false } });
+    expect((await call("GET", "/api/auth/prefs", undefined, { token: t })).json).toEqual({ ok: true, prefs: { typhu: { view: "full" }, meono: { sound: false } } });
+    // Prefs stay out of the public user.
+    expect((await call("GET", "/api/auth/me", undefined, { token: t })).json.user).not.toHaveProperty("prefs");
+    // Another account sees its own (empty) prefs.
+    const other = (await register("PrefOther")).json.session;
+    expect((await call("GET", "/api/auth/prefs", undefined, { token: other })).json.prefs).toEqual({});
+  });
+
+  it("rejects invalid prefs in Vietnamese and other methods with 405", async () => {
+    const t = (await register("PrefBad")).json.session;
+    const bad = async (body: unknown) => {
+      const r = await call("PATCH", "/api/auth/prefs", body, { token: t });
+      expect(r.status).toBe(400);
+      expect(r.json.ok).toBe(false);
+      return r.json.error as string;
+    };
+    expect(await bad({ game: "chess", prefs: {} })).toBe("Game không hợp lệ");
+    expect(await bad({ prefs: {} })).toBe("Game không hợp lệ");
+    expect(await bad({ game: "typhu", prefs: [1] })).toBe("Cài đặt không hợp lệ");
+    expect(await bad({ game: "typhu", prefs: null })).toBe("Cài đặt không hợp lệ");
+    expect(await bad({ game: "typhu", prefs: "x" })).toBe("Cài đặt không hợp lệ");
+    expect(await bad({ game: "typhu" })).toBe("Cài đặt không hợp lệ");
+    expect(await bad({ game: "typhu", prefs: { s: "x".repeat(2000) } })).toBe("Cài đặt quá lớn");
+    expect((await call("PATCH", "/api/auth/prefs", { game: "typhu", prefs: { s: "x".repeat(1990) } }, { token: t })).status).toBe(200);
+    expect((await call("GET", "/api/auth/prefs", undefined, { token: t })).json.prefs.typhu.s).toHaveLength(1990);
+    expect((await call("POST", "/api/auth/prefs", { game: "typhu", prefs: {} }, { token: t })).status).toBe(405);
+    expect((await call("DELETE", "/api/auth/prefs", undefined, { token: t })).status).toBe(405);
+  });
+
   it("patches profile and password", async () => {
     const { json } = await register("Lan");
     const t = json.session;

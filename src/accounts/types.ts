@@ -14,6 +14,9 @@ export interface UserRow {
   lastLoginAt: Date | null;
 }
 
+/** Per-account UI preferences: one opaque JSON object per game id. Never part of PublicUser, leaderboards or admin lists. */
+export type UserPrefs = Record<string, Record<string, unknown>>;
+
 export type UserPatch = Partial<Pick<UserRow, "role" | "disabled" | "username" | "usernameKey" | "icon" | "color" | "passwordHash" | "lastLoginAt">> & { bumpSession?: boolean };
 
 /** Calendar day (YYYY-MM-DD) in Vietnam time (UTC+7); computed in JS so Postgres and pg-mem agree. */
