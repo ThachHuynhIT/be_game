@@ -54,6 +54,11 @@ create index if not exists game_results_game_user on game_results (game, user_id
       }
     },
   },
+  {
+    // Per-account UI preferences, keyed by game id (GET/PATCH /api/auth/prefs). Additive and idempotent.
+    id: 3,
+    sql: "alter table users add column if not exists prefs jsonb not null default '{}'::jsonb",
+  },
 ];
 
 export type Query = (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;

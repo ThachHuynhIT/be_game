@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { allApplied, appliedMigrations, migrate } from "./migrations";
 import type { AccountStore, NewUser } from "./store";
-import { statDays, vnDay, vnDayStart, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserRow } from "./types";
+import { statDays, vnDay, vnDayStart, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserPrefs, type UserRow } from "./types";
 
 const toUser = (r: any): UserRow => ({
   id: r.id,
@@ -17,6 +17,12 @@ const toUser = (r: any): UserRow => ({
   createdAt: new Date(r.created_at),
   lastLoginAt: r.last_login_at ? new Date(r.last_login_at) : null,
 });
+
+/** pg parses jsonb to an object; tolerate a string (other drivers) and anything malformed as {}. */
+const asPrefs = (v: unknown): UserPrefs => {
+  const o = typeof v === "string" ? JSON.parse(v) : v;
+  return o && typeof o === "object" && !Array.isArray(o) ? (o as UserPrefs) : {};
+};
 
 const COLUMNS: Record<string, string> = {
   role: "role",
@@ -76,6 +82,22 @@ class PgAccountStore implements AccountStore {
     // A unique violation on username_key (code 23505) propagates; the service reports it as "taken".
     const { rows } = await this.pool.query(`update users set ${sets.join(", ")} where id = $1 returning *`, params);
     return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  async getPrefs(userId: string): Promise<UserPrefs | null> {
+    if (!isUuid(userId)) return null;
+    const { rows } = await this.pool.query("select prefs from users where id = $1", [userId]);
+    return rows[0] ? asPrefs(rows[0].prefs) : null;
+  }
+
+  async setGamePrefs(userId: string, game: string, prefs: Record<string, unknown>): Promise<UserPrefs | null> {
+    // Read-merge-write in JS: pg-mem has no jsonb `||` / jsonb_set. Signing in revokes other sessions (one device
+    // per account), so racing writers are rare and the worst case is last-write-wins on another game's entry.
+    const current = await this.getPrefs(userId);
+    if (!current) return null;
+    const next = { ...current, [game]: prefs };
+    const { rows } = await this.pool.query("update users set prefs = $2::jsonb where id = $1 returning prefs", [userId, JSON.stringify(next)]);
+    return rows[0] ? asPrefs(rows[0].prefs) : null;
   }
 
   async recordResults(game: string, recordId: string, at: Date, rows: ResultRow[]) {

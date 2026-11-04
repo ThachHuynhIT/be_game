@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isPlayPath, statDays, vnDay, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserRow } from "./types";
+import { isPlayPath, statDays, vnDay, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserPrefs, type UserRow } from "./types";
 
 export interface NewUser {
   usernameKey: string;
@@ -20,6 +20,10 @@ export interface AccountStore {
   userById(id: string): Promise<UserRow | null>;
   /** `bumpSession` increments sessionVersion (invalidates issued tokens). null = no such user. */
   updateUser(id: string, patch: UserPatch): Promise<UserRow | null>;
+  /** All games' prefs ({} when none); null = no such user. */
+  getPrefs(userId: string): Promise<UserPrefs | null>;
+  /** Replaces one game's entry, leaving the others; returns every game's prefs, null = no such user. */
+  setGamePrefs(userId: string, game: string, prefs: Record<string, unknown>): Promise<UserPrefs | null>;
   listUsers(q: string, page: number, pageSize: number): Promise<{ rows: (UserRow & { games: number })[]; total: number }>;
   /** Unknown users are skipped; rows already recorded for (game, recordId, user) are ignored. */
   recordResults(game: string, recordId: string, at: Date, rows: ResultRow[]): Promise<void>;
@@ -37,6 +41,7 @@ class MemoryAccountStore implements AccountStore {
   readonly kind = "memory" as const;
   private users = new Map<string, UserRow>();
   private results = new Map<string, { game: string; recordId: string; userId: string; points: number; won: boolean; day: string }>();
+  private prefs = new Map<string, UserPrefs>();
   private views: { at: Date; day: string; path: string; device: string; userId: string | null }[] = [];
 
   async createUser(u: NewUser) {
@@ -78,6 +83,18 @@ class MemoryAccountStore implements AccountStore {
     for (const [k, v] of Object.entries(fields)) if (v !== undefined) (r as any)[k] = v instanceof Date ? new Date(v) : v;
     if (bumpSession) r.sessionVersion += 1;
     return copy(r);
+  }
+
+  async getPrefs(userId: string) {
+    if (!this.users.has(userId)) return null;
+    return structuredClone(this.prefs.get(userId) ?? {});
+  }
+
+  async setGamePrefs(userId: string, game: string, prefs: Record<string, unknown>) {
+    if (!this.users.has(userId)) return null;
+    const next = { ...(this.prefs.get(userId) ?? {}), [game]: structuredClone(prefs) };
+    this.prefs.set(userId, next);
+    return structuredClone(next);
   }
 
   private gamesOf(userId: string) {

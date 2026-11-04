@@ -1,9 +1,9 @@
-import { getRedis, redisUrl } from "../server/store";
+import { GAME_KINDS, getRedis, redisUrl } from "../server/store";
 import { hashPassword, verifyPassword } from "./password";
 import { type RateLimiter, memoryRateLimiter, redisRateLimiter } from "./rateLimit";
 import { readSession, signSession } from "./session";
 import { type AccountStore, createMemoryAccountStore } from "./store";
-import type { Role, UserRow } from "./types";
+import type { Role, UserPrefs, UserRow } from "./types";
 import { normalizeUsername, validatePassword } from "./username";
 
 export type PublicUser = { id: string; username: string; role: Role; icon: string; color: string };
@@ -22,6 +22,8 @@ const validColor = (v: unknown) => (typeof v === "string" && PROFILE_COLORS.incl
 export const BAD_LOGIN = "Sai tên đăng nhập hoặc mật khẩu";
 export const TOO_MANY = "Thử quá nhiều lần, đợi một lát rồi thử lại";
 const CACHE_MS = 60_000;
+/** Max length of one game's prefs as JSON (`JSON.stringify(prefs).length`). */
+export const MAX_PREFS_LENGTH = 2000;
 
 export const publicUser = (u: UserRow): PublicUser => ({ id: u.id, username: u.username, role: u.role, icon: u.icon, color: u.color });
 
@@ -36,6 +38,10 @@ export interface AccountService {
   forget(uid: string): void;
   logout(user: UserRow): Promise<void>;
   updateMe(user: UserRow, patch: { username?: string; icon?: string; color?: string; password?: string; oldPassword?: string }): Promise<Result<{ user: PublicUser; session?: string }>>;
+  /** Every game's UI prefs for the user ({} when none). */
+  getPrefs(user: UserRow): Promise<Result<{ prefs: UserPrefs }>>;
+  /** Validates and replaces one game's prefs; returns every game's prefs. */
+  setGamePrefs(user: UserRow, game: unknown, prefs: unknown): Promise<Result<{ prefs: UserPrefs }>>;
   adminUpdate(admin: UserRow, id: string, patch: { role?: Role; disabled?: boolean; password?: string }): Promise<Result<{ user: AdminUser }>>;
 }
 
@@ -239,6 +245,20 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       }
       cache.delete(user.id);
       return { ok: true, user: publicUser(next), ...(changingPassword ? { session: issue(next) } : {}) };
+    },
+
+    async getPrefs(user) {
+      const prefs = await store.getPrefs(user.id);
+      return prefs ? { ok: true, prefs } : fail(404, "Không tìm thấy người dùng");
+    },
+
+    async setGamePrefs(user, game, prefs) {
+      if (typeof game !== "string" || !(GAME_KINDS as readonly string[]).includes(game)) return fail(400, "Game không hợp lệ");
+      if (!prefs || typeof prefs !== "object" || Array.isArray(prefs) || Object.getPrototypeOf(prefs) !== Object.prototype) return fail(400, "Cài đặt không hợp lệ");
+      if (JSON.stringify(prefs).length > MAX_PREFS_LENGTH) return fail(400, "Cài đặt quá lớn");
+      if (!(await lim.hit(`prefs:user:${user.id}`, 60, 60))) return fail(429, TOO_MANY);
+      const all = await store.setGamePrefs(user.id, game, prefs as Record<string, unknown>);
+      return all ? { ok: true, prefs: all } : fail(404, "Không tìm thấy người dùng");
     },
 
     async adminUpdate(admin, id, patch) {

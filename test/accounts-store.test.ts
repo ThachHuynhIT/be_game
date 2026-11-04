@@ -40,6 +40,21 @@ describe.each([["memory", async () => createMemoryAccountStore()], ["postgres (p
     for (const [n, t] of [["old", 1000], ["new", 3000], ["mid", 2000]] as const) await s.createUser({ ...base, usernameKey: n, username: n, createdAt: new Date(t) });
     expect((await s.listUsers("", 1, 50)).rows.map((x) => x.username)).toEqual(["new", "mid", "old"]);
   });
+  it("stores UI prefs per game, replacing only that game's entry", async () => {
+    const s = await make();
+    const u = (await s.createUser({ ...base, usernameKey: "pref", username: "Pref" }))!;
+    expect(await s.getPrefs(u.id)).toEqual({});
+    expect(await s.setGamePrefs(u.id, "typhu", { view: "minimal", fx: true })).toEqual({ typhu: { view: "minimal", fx: true } });
+    expect(await s.setGamePrefs(u.id, "meono", { a: [1, 2] })).toEqual({ typhu: { view: "minimal", fx: true }, meono: { a: [1, 2] } });
+    expect(await s.setGamePrefs(u.id, "typhu", { view: "full" })).toEqual({ typhu: { view: "full" }, meono: { a: [1, 2] } });
+    expect(await s.getPrefs(u.id)).toEqual({ typhu: { view: "full" }, meono: { a: [1, 2] } });
+    // Prefs never ride along on user rows (PublicUser, admin lists, leaderboards are built from them).
+    expect(await s.userById(u.id)).not.toHaveProperty("prefs");
+    expect((await s.listUsers("pref", 1, 50)).rows[0]).not.toHaveProperty("prefs");
+    const nobody = "00000000-0000-4000-8000-000000000009";
+    expect(await s.getPrefs(nobody)).toBeNull();
+    expect(await s.setGamePrefs(nobody, "typhu", {})).toBeNull();
+  });
   it("treats % in the search as a literal", async () => {
     const s = await make();
     await s.createUser({ ...base, usernameKey: "abc", username: "abc" });
@@ -205,11 +220,32 @@ describe("migration 2: integrity constraints", () => {
     await q("insert into schema_migrations (id) values (1)");
     await q("insert into game_results (game, record_id, user_id, points, rank, won, at, day) values ('tienlen', 'r1', '00000000-0000-4000-8000-000000000009', 1, 1, true, now(), '2026-10-16')");
     await createPgAccountStore(pool);
-    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2]);
+    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2, 3]);
     expect((await q("select * from game_results")).rows).toHaveLength(0);
     // Lost bookkeeping (row deleted) must not break a second run over existing constraints.
     await q("delete from schema_migrations where id = 2");
     await createPgAccountStore(pool);
-    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2]);
+    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2, 3]);
+  });
+});
+
+describe("migration 3: users.prefs", () => {
+  it("adds prefs with a {} default to an existing v2 database and is safe to re-run", async () => {
+    const db = newDb();
+    const { Pool } = db.adapters.createPg();
+    const pool = new Pool();
+    const q = (sql: string, params?: unknown[]) => pool.query(sql, params as any[]);
+    await q("create table schema_migrations (id int primary key)");
+    for (const stmt of MIGRATIONS[0].sql!.split(";").map((x) => x.trim()).filter(Boolean)) await q(stmt);
+    await MIGRATIONS[1].run!(q);
+    await q("insert into schema_migrations (id) values (1), (2)");
+    await q("insert into users (id, username_key, username, password_hash) values ('00000000-0000-4000-8000-000000000001', 'old', 'Old', 'x')");
+    const s = await createPgAccountStore(pool);
+    expect((await q("select id from schema_migrations order by id")).rows.map((r: any) => Number(r.id))).toEqual([1, 2, 3]);
+    expect(await s.getPrefs("00000000-0000-4000-8000-000000000001")).toEqual({});
+    await s.setGamePrefs("00000000-0000-4000-8000-000000000001", "typhu", { fx: false });
+    await q("delete from schema_migrations where id = 3");
+    const again = await createPgAccountStore(pool);
+    expect(await again.getPrefs("00000000-0000-4000-8000-000000000001")).toEqual({ typhu: { fx: false } });
   });
 });

@@ -164,6 +164,16 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
     return r.ok ? send(res, 200, { ok: true, user: r.user, ...(r.session ? { session: r.session } : {}) }) : err(res, r.status, r.error);
   }
 
+  if (path === "/api/auth/prefs") {
+    if (method !== "GET" && method !== "PATCH") return methodNotAllowed();
+    if (!user) return err(res, 401, NEED_LOGIN);
+    const r = method === "GET" ? await svc.getPrefs(user) : await (async () => {
+      const b = await readJson(req);
+      return svc.setGamePrefs(user, b.game, b.prefs);
+    })();
+    return r.ok ? send(res, 200, { ok: true, prefs: r.prefs }) : err(res, r.status, r.error);
+  }
+
   if (path.startsWith("/api/admin/")) {
     if (!user) return err(res, 401, NEED_LOGIN);
     if (user.role !== "admin") return err(res, 403, "Không có quyền truy cập");
