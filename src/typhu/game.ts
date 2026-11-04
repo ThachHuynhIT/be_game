@@ -52,7 +52,7 @@ export const LOG_LIMIT = 150;
 export const AUCTION_MS = 15_000;
 export const AUCTION_EXTEND_MS = 5_000;
 export const AUCTION_MIN_RAISE = 10;
-export const AUCTION_START_PCT = 50;
+export const AUCTION_START_PCT = 80;
 
 export type Phase = "roll" | "buy" | "debt" | "auction" | "end";
 
@@ -82,6 +82,11 @@ export interface Auction {
   bidder: string | null;
   /** Same value as `TPState.deadline` while the phase is "auction". */
   deadline: number;
+  /** Players who dropped out ("Bỏ cuộc") and may not bid again; missing on older saved games (= nobody). */
+  folded?: string[];
+  /** The player who declined to buy (`floorFor`) may only bid at least `floor` (the list price); missing on older saved games (= no floor). */
+  floor?: number;
+  floorFor?: string;
 }
 
 export interface Debt {
@@ -560,6 +565,9 @@ function charge(s: TPState, payer: string, amount: number, to: string | null, re
 /** The lowest bid allowed right now. */
 export const auctionMinNext = (a: Auction) => (a.bidder === null ? a.start : a.bid + AUCTION_MIN_RAISE);
 
+/** The lowest bid `id` may make right now: the player who declined to buy must pay at least the list price. */
+export const auctionMinFor = (a: Auction, id: string) => (a.floorFor === id && a.floor ? Math.max(auctionMinNext(a), a.floor) : auctionMinNext(a));
+
 /** Money paid to the bank as a tax or fine — goes to the Nghỉ chân pot when that rule is on. */
 function toBank(s: TPState, amount: number) {
   if (typeof s.pot === "number") s.pot += amount;
@@ -668,7 +676,7 @@ function bankrupt(s: TPState, id: string, creditor: string | null, now: number, 
   if (s.turn === id) {
     s.debt = null;
     nextTurn(s, now, names);
-  }
+  } else if (s.auction) settleAuction(s, now, names);
 }
 
 function endGame(s: TPState, now: number, names: NameOf, byTime = false) {
@@ -833,7 +841,8 @@ function startAuction(s: TPState, pos: number, now: number, names: NameOf) {
   s.phase = "auction";
   s.phaseAt = now;
   s.deadline = now + AUCTION_MS;
-  s.auction = { pos, start, bid: start, bidder: null, deadline: s.deadline };
+  // The turn player just declined to buy at the list price: they may still bid, but not below it.
+  s.auction = { pos, start, bid: start, bidder: null, deadline: s.deadline, folded: [], floor: b.price, floorFor: s.turn! };
   log(s, now, `🔨 Đấu giá ${b.name}, khởi điểm ${money(start)} — ai cũng được trả giá`, "buy");
 }
 
@@ -844,17 +853,53 @@ export function bid(s: TPState, id: string, amount: unknown, now: number, names:
   if (s.phase !== "auction" || !a) return fail("Không có phiên đấu giá nào");
   if (now >= a.deadline) return fail("Phiên đấu giá đã hết giờ");
   if (!s.ps[id] || s.ps[id].bankrupt) return fail("Bạn không còn trong ván");
+  if (a.folded?.includes(id)) return fail("Bạn đã bỏ cuộc");
   if (typeof amount !== "number" || !Number.isSafeInteger(amount)) return fail("Số tiền không hợp lệ");
   if (a.bidder === id) return fail("Bạn đang dẫn đầu rồi");
   const min = auctionMinNext(a);
   if (amount < min) return fail(`Phải trả ít nhất ${money(min)}`);
+  if (a.floorFor === id && a.floor && amount < a.floor) return fail(`Bạn đã bỏ qua lượt mua — phải trả ít nhất ${money(a.floor)}`);
   if (amount > s.ps[id].cash) return fail("Không đủ tiền mặt để trả giá");
   a.bid = amount;
   a.bidder = id;
   a.deadline = Math.min(a.deadline + AUCTION_EXTEND_MS, now + AUCTION_MS);
   s.deadline = a.deadline;
   log(s, now, `🔨 ${names(id)} trả ${money(amount)} cho ${B(s)[a.pos].name}`, "buy");
+  settleAuction(s, now, names);
   return OK;
+}
+
+/** "Bỏ cuộc": drop out of this auction for good. The leader can't (their bid stands). */
+export function fold(s: TPState, id: string, now: number, names: NameOf): Result {
+  if (s.status !== "playing") return fail("Ván đã kết thúc");
+  const a = s.auction;
+  if (s.phase !== "auction" || !a) return fail("Không có phiên đấu giá nào");
+  if (now >= a.deadline) return fail("Phiên đấu giá đã hết giờ");
+  if (!s.ps[id] || s.ps[id].bankrupt) return fail("Bạn không còn trong ván");
+  if (a.folded?.includes(id)) return fail("Bạn đã bỏ cuộc rồi");
+  if (a.bidder === id) return fail("Bạn đang dẫn đầu");
+  (a.folded ??= []).push(id);
+  log(s, now, `${names(id)} bỏ cuộc đấu giá ${B(s)[a.pos].name}`, "info");
+  settleAuction(s, now, names);
+  return OK;
+}
+
+/**
+ * Close early when nobody is left to outbid: everyone still in the game (not bankrupt, not folded) is the leader,
+ * or, with no bid yet, nobody is left at all. A lone player who hasn't bid keeps the auction open (bid or let the clock run out).
+ */
+function settleAuction(s: TPState, now: number, names: NameOf) {
+  const a = s.auction;
+  if (s.status !== "playing" || s.phase !== "auction" || !a) return;
+  const folded = a.folded ?? [];
+  const left = s.players.filter((p) => !s.ps[p].bankrupt && !folded.includes(p));
+  if (a.bidder !== null && left.every((p) => p === a.bidder)) {
+    log(s, now, `Không còn ai trả giá — chốt sớm phiên đấu giá ${B(s)[a.pos].name}`, "info");
+    closeAuction(s, now, names);
+  } else if (a.bidder === null && left.length === 0) {
+    log(s, now, `Tất cả đều bỏ cuộc — kết thúc sớm phiên đấu giá ${B(s)[a.pos].name}`, "info");
+    closeAuction(s, now, names);
+  }
 }
 
 /** Time is up: the highest bidder pays the bank and gets the land; with no (valid) winner the square stays with the bank. Then the turn carries on. */

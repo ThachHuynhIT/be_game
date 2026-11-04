@@ -43,6 +43,7 @@ import {
   buySquare,
   declareBankrupt,
   endTurn,
+  fold,
   forfeitPlayer,
   mortgage,
   netWorth,
@@ -375,6 +376,9 @@ export function tpCommand(room: TPRoom, token: string, msg: TPCommand, now: numb
     case "bid":
       res = bid(g, p.id, msg.amount, now, names);
       break;
+    case "fold":
+      res = fold(g, p.id, now, names);
+      break;
     case "end":
       res = endTurn(g, p.id, now, names);
       break;
@@ -559,7 +563,18 @@ export function tpView(room: TPRoom, player: TPPlayer | null, now: number): TPRo
           rollAgain: g.rollAgain,
           debt: g.debt ? { amount: g.debt.amount, to: g.debt.to, reason: g.debt.reason } : null,
           // Whitelisted fields only; `deadline` is the same clock as `current.deadline`.
-          auction: g.auction ? { pos: g.auction.pos, bid: g.auction.bid, bidder: g.auction.bidder, minNext: auctionMinNext(g.auction), deadline: g.auction.deadline } : null,
+          auction: g.auction
+            ? {
+                pos: g.auction.pos,
+                bid: g.auction.bid,
+                bidder: g.auction.bidder,
+                minNext: auctionMinNext(g.auction),
+                deadline: g.auction.deadline,
+                folded: g.auction.folded ?? [],
+                floor: g.auction.floor ?? 0,
+                floorFor: g.auction.floorFor ?? "",
+              }
+            : null,
           trade: g.trade,
           loan: g.loan ?? null,
           loans: g.loans ?? [],

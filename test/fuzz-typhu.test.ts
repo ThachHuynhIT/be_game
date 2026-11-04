@@ -5,9 +5,11 @@ import {
   type TPState,
   answerLoan,
   answerTrade,
+  auctionMinFor,
   auctionMinNext,
   bid,
   build,
+  fold,
   buySquare,
   declareBankrupt,
   endTurn,
@@ -87,11 +89,18 @@ function check(s: TPState, why: string) {
       if (s.turn && s.ps[s.turn].pos !== a.pos) fail("auction away from the turn player's square");
       if (a.deadline !== s.deadline) fail("auction deadline differs from the game's");
       const price = b && isOwnable(b) ? b.price : 0;
-      if (a.start !== Math.ceil(price / 2) || !Number.isInteger(a.bid) || a.bid < a.start) fail(`auction price ${a.bid}`);
+      if (a.start !== Math.ceil((price * 80) / 100) || !Number.isInteger(a.bid) || a.bid < a.start) fail(`auction price ${a.bid}`);
       if (a.bidder === null && a.bid !== a.start) fail("auction price without a bidder");
       if (a.bidder !== null && (!s.ps[a.bidder] || s.ps[a.bidder].bankrupt)) fail(`auction leader ${a.bidder} is gone`);
       if (auctionMinNext(a) <= a.bid && a.bidder !== null) fail("minNext");
       if (s.trade || s.loan) fail("offer during an auction");
+      const folded = a.folded ?? [];
+      if (new Set(folded).size !== folded.length || folded.some((x) => !s.ps[x])) fail("auction folded list");
+      if (a.bidder !== null && folded.includes(a.bidder)) fail("a folded player leads the auction");
+      if (a.floorFor !== s.turn || a.floor !== price) fail("auction floor");
+      // Settled early: nobody left to outbid the leader, or nobody left at all.
+      const left = s.players.filter((x) => !s.ps[x].bankrupt && !folded.includes(x));
+      if (a.bidder !== null ? left.every((x) => x === a.bidder) : left.length === 0) fail("auction should have closed");
     }
     if (s.debt) {
       if (!(s.debt.amount > 0) || !Number.isInteger(s.debt.amount)) fail("debt amount");
@@ -220,16 +229,28 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
             isCmd = false;
             now = Math.max(now, s.auction!.deadline) + 1;
             tickGame(s, now, names, absent, r);
+          } else if (r() < 0.25) {
+            op = "fold";
+            const who = r() < 0.9 ? pk(ids) : (garbage() as string);
+            const wasLeader = s.auction!.bidder === who;
+            res = fold(s, who, now, names);
+            if (res.ok && wasLeader) throw new Error("the leader folded");
           } else {
             op = "bid";
             const who = r() < 0.85 ? pk(ids) : (garbage() as string);
             const bigger = r() < 0.1;
-            const amount = r() < 0.9 ? auctionMinNext(s.auction!) + 10 * Math.floor(r() * 6) + (bigger ? 1000 : 0) : garbage();
+            const amount = r() < 0.9 ? auctionMinFor(s.auction!, who) + 10 * Math.floor(r() * 6) + (bigger ? 1000 : 0) : garbage();
             const preBid = s.auction!.bid;
             const first = s.auction!.bidder === null;
+            const wasFolded = (s.auction!.folded ?? []).includes(who);
+            const floor = s.auction!.floorFor === who ? (s.auction!.floor ?? 0) : 0;
+            const pos = s.auction!.pos;
             res = bid(s, who, amount, now, names);
-            // The first bid may equal the start price; every later one must beat the leader.
-            if (res.ok && ((first ? s.auction!.bid < preBid : s.auction!.bid <= preBid) || s.auction!.bidder !== who || s.auction!.deadline > now + 15_000)) throw new Error("bad bid result");
+            if (res.ok && (wasFolded || (amount as number) < floor)) throw new Error("bid allowed past fold / floor");
+            if (res.ok && !s.auction) {
+              // Closed at once: the bidder was the last one in, and won.
+              if (s.deeds[pos]?.owner !== who) throw new Error("early close without a winner");
+            } else if (res.ok && ((first ? s.auction!.bid < preBid : s.auction!.bid <= preBid) || s.auction!.bidder !== who || s.auction!.deadline > now + 15_000)) throw new Error("bad bid result");
           }
         } else {
           const x = r();
@@ -246,7 +267,7 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
           }
         }
       } else {
-        const x = Math.floor(r() * 17);
+        const x = Math.floor(r() * 18);
         switch (x) {
           case 0:
             op = "roll";
@@ -334,9 +355,13 @@ function runGame(seed: number, map: MapSize, maxOps: number): { ended: boolean }
           }
           case 16: {
             op = "bid";
-            res = bid(s, actor, r() < 0.9 && s.auction ? auctionMinNext(s.auction) + 10 * Math.floor(r() * 4) : garbage(), now, names);
+            res = bid(s, actor, r() < 0.9 && s.auction ? auctionMinFor(s.auction, actor) + 10 * Math.floor(r() * 4) : garbage(), now, names);
             break;
           }
+          case 17:
+            op = "fold";
+            res = fold(s, actor, now, names);
+            break;
           case 11:
             op = "paydebt";
             res = payDebt(s, actor, now, names, r);
@@ -450,7 +475,8 @@ describe("fuzz typhu: room level (join, settings, pick, start, commands, tick) n
         else if (x < 0.6) msg = { type: pk(["build", "sell", "sellland", "mortgage", "unmortgage"] as const), pos: mine.length && r() < 0.8 ? pk(mine) : Math.floor(r() * 60) - 5 };
         else if (x < 0.7) msg = { type: pk(cmds) };
         else if (x < 0.8) msg = { type: "trade", to: pk(room.seats.filter(Boolean).map((p) => p!.id)), give: { props: mine.filter(() => r() < 0.5), cash: Math.floor(r() * 200) }, get: { props: Object.keys(g.deeds).map(Number).filter(() => r() < 0.2), cash: 0 } };
-        else if (x < 0.85) msg = { type: "bid", amount: (g.auction ? g.auction.bid : 0) + 10 * (1 + Math.floor(r() * 5)) };
+        else if (x < 0.83) msg = { type: "bid", amount: (g.auction ? g.auction.bid : 0) + 10 * (1 + Math.floor(r() * 5)) };
+        else if (x < 0.85) msg = { type: "fold" };
         else if (x < 0.9) msg = { type: "tradeanswer", accept: r() < 0.7 };
         else msg = { type: "garbage" } as unknown as TPCommand;
         try {

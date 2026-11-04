@@ -101,8 +101,12 @@ export interface TPGameView {
   dice: [number, number] | null;
   rollAgain: boolean;
   debt: { amount: number; to: string | null; reason: string } | null;
-  /** The running auction (phase "auction"): `minNext` is the lowest bid allowed now, `deadline` the same clock as `deadline` above. */
-  auction?: { pos: number; bid: number; bidder: string | null; minNext: number; deadline: number } | null;
+  /**
+   * The running auction (phase "auction"): `minNext` is the lowest bid allowed now, `deadline` the same clock as `deadline` above.
+   * `folded` players dropped out and can't bid again; `floorFor` (the player who declined to buy) must bid at least `floor`
+   * (the list price), i.e. max(minNext, floor); `floor` 0 / `floorFor` "" = no floor (games saved before it existed).
+   */
+  auction?: { pos: number; bid: number; bidder: string | null; minNext: number; deadline: number; folded: string[]; floor: number; floorFor: string } | null;
   trade: { from: string; to: string; give: TradeSide; get: TradeSide; deadline: number } | null;
   /** Pending request to borrow money, and the loans in force. */
   loan: LoanOffer | null;
@@ -152,6 +156,7 @@ export interface TPRoomSummary {
  *   { type: "loan", to, amount, rate: 10 | 20 }  // ask `to` to lend `amount`; repaid + rate% after 5 of your turns
  *   { type: "loananswer", accept }   // the lender answers; the borrower can withdraw with accept: false
  *   { type: "bid", amount }   // auction rule: raise the price of the square being auctioned (anyone still in the game, cash only)
+ *   { type: "fold" }   // auction rule: drop out of the running auction for good (not while leading)
  *   { type: "tradeanswer", accept }   // the receiver answers; the proposer can withdraw with accept: false
  *   { type: "auto", on }   // your own auto-play: the server plays your turns (buys squares under AUTO_BUY_BELOW, never builds), keeping AUTO_KEEP_CASH
  */
@@ -186,6 +191,7 @@ export type TPCommand =
   | { type: "trade"; to: string; give: TradeSide; get: TradeSide }
   | { type: "loan"; to: string; amount: number; rate: number }
   | { type: "bid"; amount: number }
+  | { type: "fold" }
   | { type: "loananswer"; accept: boolean }
   | { type: "tradeanswer"; accept: boolean }
   | { type: "auto"; on: boolean };

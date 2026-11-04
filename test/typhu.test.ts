@@ -14,6 +14,7 @@ import {
   buySquare,
   declareBankrupt,
   endTurn,
+  fold,
   forfeitPlayer,
   mortgage,
   newTPGame,
@@ -512,7 +513,7 @@ describe("table settings", () => {
 
 describe("auction", () => {
   const PRICE = (BOARD[3] as { price: number }).price; // Bạc Liêu
-  const START = Math.ceil(PRICE / 2);
+  const START = Math.ceil((PRICE * 80) / 100);
   const auctionGame = (players = ["a", "b", "c"], cash = 1500, extra: Partial<NonNullable<TPState["rules"]>> = {}) => {
     const s = newTPGame(players, T, { startCash: cash, timeLimitMin: 0, rules: { auction: true, ...extra } }, () => 0);
     s.turn = players[0];
@@ -545,7 +546,7 @@ describe("auction", () => {
     expect(partial.phase).toBe("end");
   });
 
-  it("opens at half the price (rounded up) for every ownable square on every map, turn paused", () => {
+  it("opens at 80% of the price (rounded up) for every ownable square on every map, turn paused", () => {
     for (const map of ["std", "large", "huge"] as const) {
       const board = boardOf(map);
       board.forEach((b, pos) => {
@@ -557,7 +558,8 @@ describe("auction", () => {
         expect(skipBuy(s, "a", T + 5, names).ok).toBe(true);
         expect(s.phase).toBe("auction");
         expect(s.turn).toBe("a");
-        expect(s.auction).toEqual({ pos, start: Math.ceil(b.price / 2), bid: Math.ceil(b.price / 2), bidder: null, deadline: T + 5 + AUCTION_MS });
+        const start = Math.ceil((b.price * 80) / 100);
+        expect(s.auction).toEqual({ pos, start, bid: start, bidder: null, deadline: T + 5 + AUCTION_MS, folded: [], floor: b.price, floorFor: "a" });
         expect(s.deadline).toBe(s.auction!.deadline);
       });
     }
@@ -590,9 +592,10 @@ describe("auction", () => {
   it("anyone still in the game can bid, including the player who skipped; the first bid may equal the start price", () => {
     const s = auctionGame();
     open(s);
-    expect(bid(s, "a", START, T + 1, names).ok).toBe(true); // the skipper
-    expect(bid(s, "b", START + 10, T + 2, names).ok).toBe(true); // not their turn
-    expect(s.auction).toMatchObject({ bid: START + 10, bidder: "b" });
+    expect(bid(s, "b", START, T + 1, names).ok).toBe(true); // not their turn
+    expect(bid(s, "a", PRICE, T + 2, names).ok).toBe(true); // the skipper, at the list price
+    expect(bid(s, "b", PRICE + 10, T + 2, names).ok).toBe(true);
+    expect(s.auction).toMatchObject({ bid: PRICE + 10, bidder: "b" });
     expect(bid(s, "ghost", START + 100, T + 3, names).ok).toBe(false);
     s.ps.c.bankrupt = true;
     expect(bid(s, "c", START + 100, T + 3, names).ok).toBe(false);
@@ -755,6 +758,113 @@ describe("auction", () => {
     open(trade);
     expect(trade.trade).toBeNull();
   });
+
+  it("the player who declined to buy may bid only at or above the list price", () => {
+    const s = auctionGame();
+    open(s);
+    expect(s.auction).toMatchObject({ floor: PRICE, floorFor: "a" });
+    const before = JSON.stringify(s);
+    expect(bid(s, "a", START, T + 1, names)).toEqual({ ok: false, error: `Bạn đã bỏ qua lượt mua — phải trả ít nhất ${PRICE}tr` });
+    expect(bid(s, "a", PRICE - 1, T + 1, names).ok).toBe(false);
+    expect(JSON.stringify(s)).toBe(before);
+    expect(bid(s, "a", PRICE, T + 1, names).ok).toBe(true);
+    expect(s.auction).toMatchObject({ bid: PRICE, bidder: "a" });
+    // The others only need the usual raise.
+    expect(bid(s, "b", PRICE + 10, T + 2, names).ok).toBe(true);
+    // Above the floor, the normal minimum applies to the decliner too.
+    expect(bid(s, "a", PRICE + 15, T + 3, names).ok).toBe(false);
+    expect(bid(s, "a", PRICE + 20, T + 3, names).ok).toBe(true);
+    // A game saved before fold / floor existed: no floor, nobody folded.
+    const legacy = auctionGame();
+    open(legacy);
+    delete legacy.auction!.floor;
+    delete legacy.auction!.floorFor;
+    delete legacy.auction!.folded;
+    expect(bid(legacy, "a", START, T + 1, names).ok).toBe(true);
+    expect(fold(legacy, "b", T + 2, names).ok).toBe(true);
+    expect(legacy.auction!.folded).toEqual(["b"]);
+  });
+
+  it("fold: errors, and a folded player can't bid again", () => {
+    const s = auctionGame(["a", "b", "c", "d"]);
+    open(s);
+    expect(fold(s, "ghost", T + 1, names)).toEqual({ ok: false, error: "Bạn không còn trong ván" });
+    expect(fold(s, "b", T + 1, names).ok).toBe(true);
+    expect(s.auction!.folded).toEqual(["b"]);
+    expect(s.log.at(-1)!.text).toContain("bỏ cuộc");
+    const before = JSON.stringify(s);
+    expect(fold(s, "b", T + 2, names)).toEqual({ ok: false, error: "Bạn đã bỏ cuộc rồi" });
+    expect(bid(s, "b", START, T + 2, names)).toEqual({ ok: false, error: "Bạn đã bỏ cuộc" });
+    expect(JSON.stringify(s)).toBe(before);
+    expect(bid(s, "c", START, T + 3, names).ok).toBe(true);
+    expect(fold(s, "c", T + 4, names)).toEqual({ ok: false, error: "Bạn đang dẫn đầu" });
+    expect(fold(s, "a", T + AUCTION_MS + 10, names).ok).toBe(false); // clock already out
+    s.ps.d.bankrupt = true;
+    expect(fold(s, "d", T + 5, names)).toEqual({ ok: false, error: "Bạn không còn trong ván" });
+    expect(fold(game(), "a", T, names)).toEqual({ ok: false, error: "Không có phiên đấu giá nào" });
+  });
+
+  it("closes at once when everyone else has folded behind the leader", () => {
+    const s = auctionGame();
+    open(s);
+    expect(bid(s, "b", START, T + 1, names).ok).toBe(true);
+    expect(fold(s, "c", T + 2, names).ok).toBe(true);
+    expect(s.phase).toBe("auction"); // "a" (the decliner) is still in
+    expect(fold(s, "a", T + 3, names).ok).toBe(true);
+    expect(s.auction).toBeNull();
+    expect(s.phase).toBe("end");
+    expect(s.deeds[3]).toEqual({ owner: "b", houses: 0, mortgaged: false });
+    expect(s.ps.b.cash).toBe(1500 - START);
+    expect(s.log.some((l) => l.text.includes("chốt sớm"))).toBe(true);
+  });
+
+  it("a bid made after everyone else folded wins on the spot; a lone player who hasn't bid keeps it open", () => {
+    const s = auctionGame();
+    open(s);
+    expect(fold(s, "a", T + 1, names).ok).toBe(true);
+    expect(fold(s, "c", T + 2, names).ok).toBe(true);
+    expect(s.phase).toBe("auction"); // "b" hasn't bid: bid or let the clock run out
+    expect(bid(s, "b", START, T + 3, names).ok).toBe(true);
+    expect(s.auction).toBeNull();
+    expect(s.deeds[3].owner).toBe("b");
+    expect(s.ps.b.cash).toBe(1500 - START);
+    expect(s.phase).toBe("end");
+  });
+
+  it("everyone folding without a bid leaves the square with the bank", () => {
+    const s = auctionGame();
+    open(s);
+    const cash = JSON.stringify(Object.values(s.ps).map((p) => p.cash));
+    for (const id of ["a", "b", "c"]) expect(fold(s, id, T + 1, names).ok).toBe(true);
+    expect(s.auction).toBeNull();
+    expect(s.phase).toBe("end");
+    expect(s.deeds[3]).toBeUndefined();
+    expect(JSON.stringify(Object.values(s.ps).map((p) => p.cash))).toBe(cash);
+    expect(s.log.some((l) => l.text.includes("bỏ cuộc — kết thúc sớm"))).toBe(true);
+  });
+
+  it("a bankruptcy can settle the auction", () => {
+    // The last rival goes bankrupt: the leader wins at once.
+    const s = auctionGame(["a", "b", "c", "d"]);
+    open(s);
+    bid(s, "b", START, T + 1, names);
+    fold(s, "a", T + 2, names);
+    fold(s, "c", T + 3, names);
+    expect(s.phase).toBe("auction");
+    expect(forfeitPlayer(s, "d", T + 4, names).ok).toBe(true);
+    expect(s.auction).toBeNull();
+    expect(s.deeds[3].owner).toBe("b");
+    // No bid yet, everyone else folded, and the last one in goes bankrupt: unsold.
+    const t = auctionGame(["a", "b", "c", "d"]);
+    open(t);
+    for (const id of ["a", "b", "c"]) fold(t, id, T + 2, names);
+    expect(t.phase).toBe("auction");
+    expect(forfeitPlayer(t, "d", T + 3, names).ok).toBe(true);
+    expect(t.auction).toBeNull();
+    expect(t.deeds[3]).toBeUndefined();
+    expect(t.phase).toBe("end");
+    expect(t.turn).toBe("a");
+  });
 });
 
 describe("auction in a room", () => {
@@ -786,10 +896,12 @@ describe("auction in a room", () => {
     expect(tpCommand(room, "token-aaaa", { type: "skip" }, T).ok).toBe(true);
     expect(tpCommand(room, "token-bbbb", { type: "bid", amount: 10 }, T + 1).ok).toBe(false);
     expect(tpCommand(room, "token-bbbb", { type: "bid", amount: 400 }, T + 1).ok).toBe(true);
+    expect(tpCommand(room, "token-bbbb", { type: "fold" }, T + 1).ok).toBe(false); // leading
+    expect(tpCommand(room, "token-cccc", { type: "fold" }, T + 1).ok).toBe(true);
     for (const seat of [...room.seats, null]) {
       const v = tpView(room, seat, T + 2);
       expect(v.current!.phase).toBe("auction");
-      expect(v.current!.auction).toEqual({ pos: 3, bid: 400, bidder: "p2", minNext: 410, deadline: g.deadline });
+      expect(v.current!.auction).toEqual({ pos: 3, bid: 400, bidder: "p2", minNext: 410, deadline: g.deadline, folded: ["p3"], floor: 60, floorFor: "p1" });
       expect(JSON.stringify(v)).not.toContain("token-");
     }
     expect(tickTP(room, g.deadline!)).toBe(true);
