@@ -54,6 +54,18 @@ describe("sessions", () => {
     expect(readSession(t, "s3cret", now + 31 * 86_400_000)).toBeNull();
     expect(readSession("nope", "s3cret", now)).toBeNull();
   });
+  it("is valid until just before 30 days and expired at exactly 30 days", () => {
+    const DAY = 86_400_000;
+    // now is a whole second, so exp = now/1000 + 30 days; readSession refuses once exp <= the current second.
+    const t = signSession({ uid: "u1", ver: 2 }, "s3cret", now);
+    expect(readSession(t, "s3cret", now + 30 * DAY - 1_000)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(t, "s3cret", now + 30 * DAY - 1)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(t, "s3cret", now + 30 * DAY)).toBeNull();
+    // A token signed partway through a second still lasts the full 30 days from that second.
+    const mid = signSession({ uid: "u1", ver: 2 }, "s3cret", now + 999);
+    expect(readSession(mid, "s3cret", now + 30 * DAY - 1)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(mid, "s3cret", now + 30 * DAY)).toBeNull();
+  });
 });
 describe("usernames", () => {
   it("normalizes spaces and case into one key, keeps the typed form", () => {
