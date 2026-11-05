@@ -41,11 +41,19 @@ for (const e of exceptions) {
       console.error(`audit-exceptions.json: an entry has no "${field}"`);
       process.exit(2);
     }
+  // Compared as a string below, so it must be exactly YYYY-MM-DD and a real date ("2026-12-5" would sort late).
+  const day = new Date(e.expires + "T00:00:00Z");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(e.expires) || Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== e.expires) {
+    console.error(`audit-exceptions.json: ${e.id} has expires ${JSON.stringify(e.expires)}, expected a real date as YYYY-MM-DD`);
+    process.exit(2);
+  }
 }
 
 const problems = [];
 for (const [id, a] of found) {
-  if (SEVERITIES.indexOf(a.severity) < FAIL_AT) continue;
+  // An unknown or missing severity is treated as failing, never skipped silently.
+  const rank = SEVERITIES.indexOf(a.severity);
+  if (rank >= 0 && rank < FAIL_AT) continue;
   const e = byId.get(id);
   if (!e) problems.push(`${a.severity} ${id} in ${a.package}: ${a.title} (not in audit-exceptions.json)`);
   else if (e.expires < today) problems.push(`${a.severity} ${id} in ${a.package}: exception expired on ${e.expires} (owner ${e.owner})`);
