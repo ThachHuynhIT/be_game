@@ -8,7 +8,7 @@ import { assertOriginConfig, isAllowedOrigin, originConfigError } from "../src/s
 const saved = process.env.ALLOWED_ORIGIN;
 const restore = () => (saved === undefined ? delete process.env.ALLOWED_ORIGIN : (process.env.ALLOWED_ORIGIN = saved));
 
-const LIVE = "https://play.fudio101.com, https://zonenop-game.vercel.app, https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app, http://localhost:3000";
+const LIVE = "https://play.fudio101.com, https://zonenop-game.vercel.app, http://localhost:3000";
 const prod = (ALLOWED_ORIGIN?: string): NodeJS.ProcessEnv => ({ NODE_ENV: "production", ...(ALLOWED_ORIGIN === undefined ? {} : { ALLOWED_ORIGIN }) });
 
 describe("isAllowedOrigin", () => {
@@ -33,10 +33,10 @@ describe("isAllowedOrigin", () => {
     expect(isAllowedOrigin("https://be-game.vercel.app", "be-game.vercel.app")).toBe(true);
   });
 
-  it("the live allow-list admits the frontends and its own previews only", () => {
+  it("the live allow-list admits the frontends only (no Vercel previews)", () => {
     process.env.ALLOWED_ORIGIN = LIVE;
     const host = "play-api.fudio101.com";
-    for (const ok of ["https://play.fudio101.com", "https://zonenop-game.vercel.app", "https://zonenop-game-git-dev-thachs-projects-48e5eaf9.vercel.app", "http://localhost:3000"])
+    for (const ok of ["https://play.fudio101.com", "https://zonenop-game.vercel.app", "http://localhost:3000"])
       expect(isAllowedOrigin(ok, host), ok).toBe(true);
     for (const bad of [
       "https://evil.example",
@@ -44,6 +44,8 @@ describe("isAllowedOrigin", () => {
       "https://play.fudio101.com:8443",
       "https://attacker.vercel.app",
       "https://zonenop-game-x-other-team.vercel.app",
+      "https://zonenop-game-git-dev-thachs-projects-48e5eaf9.vercel.app", // previews are not allowed
+      "https://zonenop-game-evil-thachs-projects-48e5eaf9.vercel.app",
       "https://zonenop-game-x-thachs-projects-48e5eaf9.vercel.app.evil.com",
       "null", // sandboxed iframe / file://
       "not a url",
@@ -63,6 +65,8 @@ describe("originConfigError (D2-a: production refuses an unusable allow-list)", 
     ["* inside a list", "https://play.fudio101.com, *"],
     ["every Vercel site", "https://*.vercel.app"],
     ["every Vercel site, upper case", "HTTPS://*.VERCEL.APP"],
+    ["a project-scoped Vercel preview pattern", "https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app"],
+    ["a prefix wildcard under vercel.app", "https://zonenop-game-*.vercel.app"],
     ["a wildcard host", "https://*"],
     ["a wildcard host with a port", "https://*:8443"],
     ["every .app site", "https://*.app"],

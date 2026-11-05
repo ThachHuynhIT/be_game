@@ -551,7 +551,10 @@ const originList = (env: NodeJS.ProcessEnv) =>
 
 /** An origin pattern: scheme://host[:port], `*` wildcards in the host only, no path or trailing slash. */
 const ORIGIN_PATTERN_RE = /^https?:\/\/[a-z0-9*.-]+(:\d{1,5})?$/i;
-/** Hosts anyone can get a subdomain of: a wildcard straight under them admits every site on the platform. */
+/**
+ * Hosts anyone can get a subdomain of. No wildcard is allowed anywhere under them: even a pattern scoped by project and
+ * team name (zonenop-game-*-<team>.vercel.app) matches a project someone else names to fit. List exact origins instead.
+ */
 const SHARED_HOSTS = ["vercel.app"];
 
 /**
@@ -571,7 +574,8 @@ export function originConfigError(env: NodeJS.ProcessEnv = process.env): string 
     // or "https://*vercel.app" would admit sites anyone can create.
     if (host.includes("*") && !/\.[a-z0-9-]+\.[a-z0-9-]+$/.test(host.slice(host.lastIndexOf("*") + 1)))
       return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} has a wildcard without two fixed labels after it (e.g. *.example.com)`;
-    if (SHARED_HOSTS.some((h) => host === `*.${h}`)) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} admits every ${host.slice(2)} site; scope it to your project and team`;
+    const shared = SHARED_HOSTS.find((h) => host.includes("*") && host.endsWith(`.${h}`));
+    if (shared) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} has a wildcard under ${shared}, where anyone can create a matching site; list exact origins`;
   }
   return null;
 }
