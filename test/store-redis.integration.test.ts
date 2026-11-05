@@ -12,8 +12,11 @@ import { type RoomStore, createRedisRoomStore, keysFor, nameKey } from "../src/s
 const URL_ = process.env.REDIS_TEST_URL;
 if (!URL_) throw new Error("REDIS_TEST_URL is not set: npm run test:redis needs a disposable Redis (CI starts redis:7)");
 const HOST = new URL(URL_).hostname;
-if (!["localhost", "127.0.0.1", "[::1]", "::1", "redis"].includes(HOST))
+// Loopback only: "redis" is the production Redis's host name inside compose.selfhost.yml, so it is not allowed.
+if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(HOST))
   throw new Error(`REDIS_TEST_URL must point at a local, disposable Redis (got host ${HOST})`);
+for (const name of ["REDIS_URL", "KV_URL", "UPSTASH_REDIS_URL"])
+  if (process.env[name] && process.env[name] === URL_) throw new Error(`REDIS_TEST_URL is the server's ${name}: use a disposable Redis`);
 
 const RUN = Math.random().toString(36).slice(2, 8).toUpperCase();
 const PREFIX = `it:${RUN}:`;
