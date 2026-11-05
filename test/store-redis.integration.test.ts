@@ -2,11 +2,12 @@
 //   REDIS_TEST_URL=redis://127.0.0.1:6379 npm run test:redis
 // Needs a disposable, local Redis. Every key goes under a per-run prefix (ioredis `keyPrefix`, which also prefixes
 // the KEYS of EVAL) and only those keys are deleted afterwards. Pub/sub channels are not prefixed by ioredis, so
-// room codes carry a per-run tag instead.
+// room codes carry a per-run tag instead. RECORD_SCRIPT builds keys from ARGV, out of keyPrefix's reach: that test
+// writes unprefixed, run-tagged keys and removes exactly those.
 import IORedis, { type Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { GameRecord } from "../src/game/protocol";
-import { type RoomStore, createRedisRoomStore, keysFor } from "../src/server/store";
+import { type RoomStore, createRedisRoomStore, keysFor, nameKey } from "../src/server/store";
 
 const URL_ = process.env.REDIS_TEST_URL;
 if (!URL_) throw new Error("REDIS_TEST_URL is not set: npm run test:redis needs a disposable Redis (CI starts redis:7)");
@@ -37,6 +38,8 @@ const newStore = () => {
 };
 /** Unprefixed: reads TTLs and scores by full key name and cleans up. */
 let admin: Redis;
+/** Removal of the few unprefixed keys a test had to write (see the recordGame test). */
+const unprefixedCleanup: (() => Promise<void>)[] = [];
 const full = (key: string) => PREFIX + key;
 
 /** Polls a condition with a hard deadline (no fixed sleeps). */
@@ -57,6 +60,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const s of stores) (s as unknown as { sub: Redis | null }).sub?.disconnect();
   if (admin) {
+    for (const clean of unprefixedCleanup) await clean();
     const keys: string[] = [];
     for await (const batch of admin.scanStream({ match: `${PREFIX}*`, count: 200 })) keys.push(...(batch as string[]));
     if (keys.length) await admin.del(...keys);
@@ -172,8 +176,15 @@ describe("Redis room store (real Redis)", () => {
   });
 
   it("recordGame runs its Lua (cjson) once per record id", async () => {
-    const s = newStore();
+    // RECORD_SCRIPT builds the player-hash keys from ARGV, not KEYS, so ioredis' keyPrefix cannot reach them:
+    // this test runs unprefixed, with run-tagged names, and removes exactly the keys and members it wrote.
+    const s = createRedisRoomStore<TestRoom>(connect(""));
     const name = `It${RUN}`;
+    const keys = [name, `${name}b`].map(nameKey);
+    unprefixedCleanup.push(async () => {
+      await admin.zrem(K.lbPoints, ...keys);
+      await admin.del(...keys.map(K.lbPlayer), K.record(`rec-${RUN}`));
+    });
     const record: GameRecord = {
       id: `rec-${RUN}`,
       at: 1_700_000_000_000,
@@ -185,8 +196,11 @@ describe("Redis room store (real Redis)", () => {
     };
     await s.recordGame(record);
     await s.recordGame(record); // retried: ignored
-    const board = await newStore().leaderboard(10);
-    expect(board).toContainEqual({ name, points: 3, games: 1, wins: 1, lastPlayed: record.at });
-    expect(board).toContainEqual({ name: `${name}b`, points: -3, games: 1, wins: 0, lastPlayed: record.at });
+    // Read the stored rows directly: the shared points zset may hold other runs' entries above ours.
+    expect(await admin.zscore(K.lbPoints, keys[0])).toBe("3");
+    expect(await admin.zscore(K.lbPoints, keys[1])).toBe("-3");
+    expect(await admin.hgetall(K.lbPlayer(keys[0]))).toEqual({ name, points: "3", games: "1", wins: "1", last: String(record.at) });
+    expect(await admin.hgetall(K.lbPlayer(keys[1]))).toEqual({ name: `${name}b`, points: "-3", games: "1", wins: "0", last: String(record.at) });
+    expect(await admin.exists(K.record(`rec-${RUN}`))).toBe(1);
   });
 });
