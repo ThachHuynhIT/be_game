@@ -124,6 +124,21 @@ describe("review fixes", () => {
   it("rejects zero-width characters in usernames", () => {
     expect(normalizeUsername("lan\u200Banh").ok).toBe(false);
   });
+  it("redis: a bucket left without a TTL heals on its next hit instead of blocking for good", async () => {
+    const redis = new RedisMock();
+    // What the old SET NX EX + INCR pair left behind when the key expired between the two calls.
+    await redis.set("be_game:rl:t:stuck", "7");
+    expect(await redis.ttl("be_game:rl:t:stuck")).toBe(-1);
+    const rl = redisRateLimiter(redis as never);
+    expect(await rl.hit("t:stuck", 3, 900)).toBe(false); // still counted: 8 > 3
+    const ttl = await redis.ttl("be_game:rl:t:stuck");
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(900);
+    // A key that already has its window keeps it (the TTL is not pushed back on every hit).
+    await redis.expire("be_game:rl:t:stuck", 5);
+    await rl.hit("t:stuck", 3, 900);
+    expect(await redis.ttl("be_game:rl:t:stuck")).toBeLessThanOrEqual(5);
+  });
   it("redis bucket always has a TTL; memory limiter resets after the window", async () => {
     const redis = new RedisMock();
     await redisRateLimiter(redis as never).hit("t:1", 3, 900);
