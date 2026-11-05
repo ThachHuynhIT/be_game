@@ -12,4 +12,5 @@ paths:
 - Hub tests: `createRoomHub(createMemoryRoomStore(), xxxAdapter)`, then `hub.createRoom()` / `hub.mutate(code, …)`.
 - Fuzz tests (`fuzz-<game>.test.ts`) check invariants: no exceptions, games always end, cards/money/pieces conserved, JSON round-trip equality, rejected commands leave state unchanged, views never leak tokens or hidden cards. Keep each file under ~5 s by default; deeper runs via `FUZZ_SEEDS` where supported.
 - A bug found by fuzzing gets a focused regression test and a line in `docs/GUIDE.md` → "Lỗi đã bắt bằng fuzz".
+- Redis store changes (Lua scripts, pub/sub, key layout) also need `test/store-redis.integration.test.ts`, run with `REDIS_TEST_URL=redis://127.0.0.1:6379 npm run test:redis` (CI job `redis-integration`). It talks to a real Redis, so it uses real time and polls with a deadline instead of the rules above.
 - Run `npm run typecheck && npm test` before finishing.

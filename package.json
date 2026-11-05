@@ -10,6 +10,7 @@
     "dev": "tsx watch src/local.ts",
     "start": "tsx src/local.ts",
     "test": "vitest run",
+    "test:redis": "vitest run --config vitest.redis.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

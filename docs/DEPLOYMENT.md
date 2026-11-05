@@ -41,7 +41,7 @@ Hệ quả cho backend: **`GET /api/rooms` phải luôn rẻ và luôn có trên
 
 ## Luồng phát hành
 
-1. **Nhánh → PR vào `main`.** CI (`.github/workflows/ci.yml`): `npm run typecheck`, `npm test` (gồm fuzz), kiểm tra hai file compose, build image Docker và gọi thử `/api`. Vercel build **preview** cho nhánh; dùng nó để thử với frontend nếu cần (preview dùng chung Redis dự phòng — cẩn thận khi PR đổi cấu trúc state; **sau khi chuyển sang kho chung thì kho đó cũng là kho của máy chính**, nên preview có thể làm hỏng cả phòng máy chính đang phục vụ).
+1. **Nhánh → PR vào `main`.** CI (`.github/workflows/ci.yml`): `npm run typecheck`, `npm test` (gồm fuzz), `npm run test:redis` trên Redis 7 riêng của job (job `redis-integration`), kiểm tra hai file compose, build image Docker và gọi thử `/api`. Vercel build **preview** cho nhánh; dùng nó để thử với frontend nếu cần (preview dùng chung Redis dự phòng — cẩn thận khi PR đổi cấu trúc state; **sau khi chuyển sang kho chung thì kho đó cũng là kho của máy chính**, nên preview có thể làm hỏng cả phòng máy chính đang phục vụ).
 2. **Merge vào `main`.** Hai việc chạy **song song, độc lập**:
    - Vercel deploy production → máy dự phòng chạy commit mới sau khoảng 1 phút.
    - CI chạy trên `main`; xanh thì workflow **Deploy** đưa đúng commit đó lên máy chính (Tailscale OIDC → SSH → `docker compose up -d --build` → health). Chi tiết từng bước: [`SELF_HOSTING.md` → Luồng deploy](SELF_HOSTING.md#luồng-deploy).
