@@ -1,0 +1,12 @@
+# Prettier is opt-in per file: the code predates it and is not reformatted in bulk (it would rewrite every file
+# and conflict with open branches). Everything is ignored except the files listed below; add a file here when
+# you format it on purpose, in a commit of its own.
+*
+!*/
+!.prettierrc.json
+!eslint.config.mjs
+!audit-exceptions.json
+!scripts/audit-check.mjs
+!.github/dependabot.yml
+!.github/workflows/codeql.yml
+!.github/workflows/audit.yml

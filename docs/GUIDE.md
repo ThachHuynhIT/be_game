@@ -290,6 +290,10 @@ npm run dev        # tsx watch src/local.ts → http://localhost:4000, ws://loca
 npm start          # như trên, không watch
 npm test           # vitest run
 npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
+npm run lint       # ESLint; lỗi cũ nằm trong eslint-suppressions.json, chỉ lỗi mới làm đỏ
+npm run lint:prune # sau khi sửa một lỗi cũ: bỏ suppression thừa khỏi eslint-suppressions.json
+npm run format:check  # Prettier, chỉ các file có trong danh sách cho phép của .prettierignore
+npm run audit:check   # npm audit so với audit-exceptions.json
 ```
 
 `src/local.ts` dùng đúng `createGameServer()`, listen `PORT` (mặc định 4000) / `HOST` (mặc định `0.0.0.0`), log loại store. Không có `REDIS_URL` → store RAM (mất khi tắt process); không có `DATABASE_URL` → tài khoản trong RAM (mất khi tắt, chỉ để dev). Frontend (zonenop-game): đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=http://localhost:4000` (cũng là mặc định).
@@ -313,6 +317,14 @@ npm run typecheck  # tsc --noEmit (bao gồm api/, src/, test/)
 | `VERCEL`, `VERCEL_REGION`, `VERCEL_GIT_COMMIT_SHA` | Vercel tự đặt | Cảnh báo thiếu Redis; trường `region` và `commit` của health (commit cần bật "Automatically expose System Environment Variables" của project Vercel) |
 
 Giá trị thật ở từng môi trường: [`DEPLOYMENT.md` → Biến môi trường](DEPLOYMENT.md#biến-môi-trường-theo-nơi-chạy).
+
+## Kiểm tra chất lượng và bảo mật
+
+- **Lint** (`eslint.config.mjs`): ESLint + `typescript-eslint` mức recommended, không có rule về format. Tham số hoặc biến tên `_x` được coi là cố ý không dùng. Khi lint được đưa vào, 51 lỗi sẵn có trong 23 file được ghi vào `eslint-suppressions.json` (đếm theo file và rule), nên CI chỉ đỏ khi có lỗi **mới**. Sửa một lỗi cũ thì chạy `npm run lint:prune` để baseline nhỏ lại. Chạy trong job `test` của CI.
+- **Prettier** (`.prettierrc.json`, `printWidth` 140): code có từ trước chưa từng được format, mà format toàn bộ sẽ viết lại mọi file và xung đột với các nhánh đang mở. Vì vậy `.prettierignore` bỏ qua tất cả, trừ danh sách file cho phép. Muốn format một file thì thêm nó vào danh sách, trong một commit riêng. `npm run format:check` chạy trong job `test`.
+- **Dependency** (`npm run audit:check`, `scripts/audit-check.mjs`): chạy `npm audit` và đỏ khi có advisory mức moderate trở lên không có trong `audit-exceptions.json`, hoặc có nhưng ngoại lệ đã hết hạn. Mỗi ngoại lệ ghi `id` (GHSA), `package`, `owner`, `reason` và `expires` (YYYY-MM-DD, UTC). Hết hạn thì sửa dependency, hoặc gia hạn có chủ đích. Script chạy trong workflow riêng `Dependency audit` (`.github/workflows/audit.yml`: PR, push `main`, mỗi thứ Hai), **không** nằm trong CI: Deploy chờ CI, nên một advisory mới công bố không được phép chặn deploy. Xanh chỉ có nghĩa "không có advisory nào chưa được xét mà registry npm biết hôm nay".
+- **CodeQL** (`.github/workflows/codeql.yml`): phân tích `javascript-typescript` trên PR, push `main` và mỗi thứ Hai; job chỉ có quyền `contents: read` và `security-events: write`. Repo dùng workflow này nên **không** bật "default setup" của CodeQL (hai cách không chạy cùng nhau được).
+- **Dependabot** (`.github/dependabot.yml`): PR cập nhật npm và GitHub Actions mỗi tuần. Bản minor/patch của dev dependency được gộp thành một PR. PR nào cũng phải qua CI như bình thường, không tự merge.
 
 ## Test
 
