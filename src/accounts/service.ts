@@ -22,6 +22,10 @@ const validColor = (v: unknown) => (typeof v === "string" && PROFILE_COLORS.incl
 export const BAD_LOGIN = "Sai tên đăng nhập hoặc mật khẩu";
 export const TOO_MANY = "Thử quá nhiều lần, đợi một lát rồi thử lại";
 const CACHE_MS = 60_000;
+/** Login attempts allowed per window: per client IP (any names) and per (username, IP) pair. */
+export const LOGIN_PER_IP = 10;
+export const LOGIN_PER_PAIR = 5;
+export const LOGIN_WINDOW_SEC = 900;
 /** Max length of one game's prefs as JSON (`JSON.stringify(prefs).length`). */
 export const MAX_PREFS_LENGTH = 2000;
 
@@ -155,10 +159,11 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
     },
 
     async login(input, ip) {
-      if (!(await lim.hit(`login:ip:${ip}`, 10, 900))) return fail(429, TOO_MANY);
+      if (!(await lim.hit(`login:ip:${ip}`, LOGIN_PER_IP, LOGIN_WINDOW_SEC))) return fail(429, TOO_MANY);
       const name = normalizeUsername(input.username);
-      // Invalid names get no per-user bucket (never key a bucket by a raw request string).
-      if (name.ok && !(await lim.hit(`login:user:${name.key}`, 5, 900))) return fail(429, TOO_MANY);
+      // Per (name, IP), never per name alone: failures from one IP must not lock the owner out from another.
+      // Invalid names get no bucket (never key a bucket by a raw request string); a normalized key has no ':'.
+      if (name.ok && !(await lim.hit(`login:pair:${name.key}:${ip}`, LOGIN_PER_PAIR, LOGIN_WINDOW_SEC))) return fail(429, TOO_MANY);
       const password = typeof input.password === "string" ? input.password : "";
       const found = name.ok ? await store.userByKey(name.key) : null;
       if (!found) {
