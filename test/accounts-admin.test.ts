@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hashPassword } from "../src/accounts/password";
 import { memoryRateLimiter } from "../src/accounts/rateLimit";
-import { RESERVED_NAME, createAccountService } from "../src/accounts/service";
+import { ADMIN_NEEDS_PASSWORD, RESERVED_NAME, createAccountService } from "../src/accounts/service";
 import { createMemoryAccountStore } from "../src/accounts/store";
 import { MAX_PASSWORD, MIN_ADMIN_PASSWORD, MIN_PASSWORD, validatePassword } from "../src/accounts/username";
 
@@ -122,5 +122,22 @@ describe("setting a password follows the role", () => {
     expect((await svc.adminUpdate(me, other.id, { password: pw(MIN_ADMIN_PASSWORD) })).ok).toBe(true);
     expect((await svc.adminUpdate(me, other.id, { role: "user", password: pw(MIN_PASSWORD) })).ok).toBe(true);
     expect(await svc.adminUpdate(me, "00000000-0000-4000-8000-000000000000", { password: pw(MIN_ADMIN_PASSWORD) })).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("promoting to admin needs a new admin-length password in the same request", async () => {
+    const { svc, store } = setup();
+    const mk = async (name: string, role: "user" | "admin") =>
+      (await store.createUser({ usernameKey: name.toLowerCase(), username: name, passwordHash: await hashPassword("1"), role, icon: "", color: "#fbbf24" }))!;
+    const me = await mk("Chu", "admin");
+    const lan = await mk("Lan", "user");
+    expect(await svc.adminUpdate(me, lan.id, { role: "admin" })).toEqual({ ok: false, status: 400, error: ADMIN_NEEDS_PASSWORD });
+    expect((await store.userById(lan.id))!.role).toBe("user");
+    const ok = await svc.adminUpdate(me, lan.id, { role: "admin", password: pw(MIN_ADMIN_PASSWORD) });
+    expect(ok).toMatchObject({ ok: true, user: { role: "admin" } });
+    const after = (await store.userById(lan.id))!;
+    expect(after.sessionVersion).toBeGreaterThan(lan.sessionVersion);
+    // Already admin: "role: admin" alone is a no-op, and demoting needs no password.
+    expect((await svc.adminUpdate(me, lan.id, { role: "admin" })).ok).toBe(true);
+    expect((await svc.adminUpdate(me, lan.id, { role: "user" })).ok).toBe(true);
   });
 });

@@ -46,14 +46,18 @@ async function call(method: string, path: string, body?: unknown, opts: { token?
   return { status: res.status, json, text, headers: res.headers };
 }
 const register = (username: string, password = "matkhau123", ip?: string) => call("POST", "/api/auth/register", { username, password }, { ip });
-/** Registers a normal account, then grants admin by id the way operators do (bootstrap-admin). */
+const ADMIN_PW = "matkhau-admin-123";
+/** Registers a normal account, grants admin by id the way operators do (bootstrap-admin, with a new password), signs in again. */
 async function registerAdmin(username = "Sep") {
   const { json } = await register(username);
   const svc = await getAccountService();
-  const r = await grantAdmin(svc.store, json.user.id, true);
+  const r = await grantAdmin(svc.store, json.user.id, true, ADMIN_PW);
   if (!r.ok) throw new Error(r.error);
   svc.forget(json.user.id);
-  return { ...json, user: { ...json.user, role: "admin" } };
+  // Granting set a new password and signed the old session out.
+  const login = await call("POST", "/api/auth/login", { username, password: ADMIN_PW });
+  if (login.status !== 200) throw new Error("admin login " + login.status);
+  return login.json;
 }
 
 describe("account routes", () => {

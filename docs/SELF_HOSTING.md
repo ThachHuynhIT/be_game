@@ -162,9 +162,15 @@ Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại 
    ```bash
    dc exec -T be_game node_modules/.bin/tsx src/tools/bootstrap-admin.ts <user-id>
    ```
-3. Cấp: chạy lại lệnh trên với `--yes` ở cuối. Hai backend dùng chung Postgres nên chỉ chạy một lần; máy đang chạy thấy quyền mới trong ≤ 60 giây (cache phiên).
+3. Cấp, kèm **mật khẩu mới** cho admin (12–72 ký tự). Mật khẩu đi qua stdin, không nằm trong lệnh (danh sách tiến trình, lịch sử shell):
+   ```bash
+   read -rs PW   # gõ mật khẩu mới, không hiện ra
+   printf '%s' "$PW" | dc exec -T be_game node_modules/.bin/tsx src/tools/bootstrap-admin.ts <user-id> --yes --password-stdin
+   unset PW
+   ```
+   Gửi mật khẩu cho người đó qua kênh riêng. Hai backend dùng chung Postgres nên chỉ chạy một lần; máy đang chạy thấy quyền mới trong ≤ 60 giây (cache phiên).
 
-Công cụ cần `DATABASE_URL` (container đã có), chỉ đổi vai trò của đúng tài khoản đó, không đổi mật khẩu hay phiên, từ chối id không tồn tại và tài khoản đang bị khoá. Admin đặt mật khẩu mới cần ít nhất 12 ký tự. Thu hồi: `/admin` hoặc `PATCH /api/admin/users/<id>` `{role:"user"}`.
+Vì sao phải đổi mật khẩu: server chỉ lưu hash nên không biết mật khẩu cũ dài bao nhiêu, mà admin cần ít nhất 12 ký tự. Công cụ cần `DATABASE_URL` (container đã có), chỉ đổi vai trò và mật khẩu của đúng tài khoản đó, đăng xuất mọi phiên cũ của nó, từ chối id không tồn tại, tài khoản đang bị khoá, và mật khẩu dưới 12 ký tự. Tài khoản đã là admin thì không đổi gì. Trong `/admin`, cấp quyền cũng phải kèm mật khẩu mới (`{role:"admin", password}`; thiếu → 400). Thu hồi: `/admin` hoặc `PATCH /api/admin/users/<id>` `{role:"user"}`.
 
 ### Sau khi máy tắt cứng / bật lại
 

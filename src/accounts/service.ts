@@ -21,6 +21,8 @@ const validColor = (v: unknown) => (typeof v === "string" && PROFILE_COLORS.incl
 
 export const BAD_LOGIN = "Sai tên đăng nhập hoặc mật khẩu";
 export const RESERVED_NAME = "Tên này đã được giữ";
+/** Promoting keeps no old password: the stored hash cannot tell whether it meets the admin minimum. */
+export const ADMIN_NEEDS_PASSWORD = "Cấp quyền admin cần đặt mật khẩu mới (ít nhất 12 ký tự)";
 export const TOO_MANY = "Thử quá nhiều lần, đợi một lát rồi thử lại";
 const CACHE_MS = 60_000;
 /** Max length of one game's prefs as JSON (`JSON.stringify(prefs).length`). */
@@ -270,14 +272,17 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       if (patch.disabled !== undefined) upd.disabled = patch.disabled;
       // Locking revokes every issued token (spec §7): unlocking later must not revive them.
       if (patch.disabled === true) upd.bumpSession = true;
-      if (patch.password !== undefined) {
+      if (patch.password !== undefined || patch.role === "admin") {
         const target = await store.userById(id);
         if (!target) return fail(404, "Không tìm thấy người dùng");
-        // The policy of the role the account ends up with: resetting an admin (or making one) needs an admin-length password.
-        const err = validatePassword(patch.password, patch.role ?? target.role);
-        if (err) return fail(400, err);
-        upd.passwordHash = await hashPassword(patch.password);
-        upd.bumpSession = true;
+        if (patch.role === "admin" && target.role !== "admin" && patch.password === undefined) return fail(400, ADMIN_NEEDS_PASSWORD);
+        if (patch.password !== undefined) {
+          // The policy of the role the account ends up with: resetting an admin (or making one) needs an admin-length password.
+          const err = validatePassword(patch.password, patch.role ?? target.role);
+          if (err) return fail(400, err);
+          upd.passwordHash = await hashPassword(patch.password);
+          upd.bumpSession = true;
+        }
       }
       const next = await store.updateUser(id, upd);
       if (!next) return fail(404, "Không tìm thấy người dùng");
