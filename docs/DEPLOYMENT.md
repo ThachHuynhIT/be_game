@@ -60,7 +60,7 @@ Chỉ `main` được deploy lên máy chính; CI của PR không bao giờ depl
 | `SESSION_SECRET` | trống → secret dev cố định | `openssl rand -base64 32`, trong `.env` (quyền `600`). **Bí mật** | **Giống hệt máy chính**, nếu không token ký ở máy này bị máy kia từ chối. Tạo một lần trên điện thoại rồi chép bằng pipe sang `vercel env add` (không in ra): [`SELF_HOSTING.md`](SELF_HOSTING.md#đặt-bí-mật-an-toàn) |
 | `ADMIN_USERNAMES` | trống | Username admin, cách nhau dấu phẩy; thành admin khi đăng ký **hoặc đăng nhập** | giống máy chính |
 | `ACCOUNTS_MEMORY` | trống | Để trống. `1` = production không có `DATABASE_URL` vẫn chạy tài khoản trong RAM | để trống |
-| `ALLOWED_ORIGIN` | trống → mọi origin | Frontend chính: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`, và `http://localhost:3000`. Giá trị đầy đủ: [`SELF_HOSTING.md`](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu) | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
+| `ALLOWED_ORIGIN` | **bắt buộc ở production** (trống chỉ dùng ở dev, cho mọi origin) | Frontend chính: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`, preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`, và `http://localhost:3000`. Giá trị đầy đủ: [`SELF_HOSTING.md`](SELF_HOSTING.md#cấu-hình-nằm-ở-đâu) | **giống máy chính** (production, preview, development). Đổi một bên thì đổi bên kia, và Vercel cần redeploy mới áp dụng |
 | `GAME_DOMAIN` | — | `play-api.fudio101.com` (bắt buộc; Traefik route theo nó) | — |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | compose đặt `PORT=4000` | không dùng |
 | `BE_GAME_COUNT_COMMANDS` | — | tuỳ chọn (`1` = log số lệnh Redis mỗi 60 giây) | — |
@@ -125,7 +125,7 @@ Hai cột trạng thái: **trước khi chuyển** là hiện tại (máy chính
 
 ## Bảo mật
 
-- `ALLOWED_ORIGIN` chặn trang lạ mở WebSocket từ trình duyệt; client không phải trình duyệt (không gửi `Origin`) luôn được nhận, nên đây không phải xác thực. Không dùng `https://*.vercel.app` (ai cũng tạo được); dùng mẫu theo project + team như ở bảng trên.
+- `ALLOWED_ORIGIN` chặn trang lạ mở WebSocket và gọi route tài khoản từ trình duyệt. Production (image Docker có `NODE_ENV=production`, hoặc Vercel) **từ chối khởi động** nếu danh sách trống, có `*` đơn lẻ, có `https://*.vercel.app`, hoặc một mục không đúng dạng `scheme://host[:port]` (có path hay dấu `/` cuối) — `originConfigError` trong `src/server/hub.ts`. Hai máy phải có danh sách hợp lệ **trước** khi deploy bản có quy tắc này; client không phải trình duyệt (không gửi `Origin`) luôn được nhận, nên đây không phải xác thực. Không dùng `https://*.vercel.app` (ai cũng tạo được); dùng mẫu theo project + team như ở bảng trên.
 - Không có secret nào trong repo: `.env` bị ignore; key deploy, thông tin Tailscale nằm trong environment `self-hosted` của GitHub; Redis Vercel do integration quản lý.
 - Key deploy trên máy chính bị giới hạn (`restrict,from=<dải IP tailnet>`); Tailscale dùng OIDC, không có secret lâu dài.
 - Token người chơi không bao giờ nằm trong view (GUIDE → "Bảo mật view").
@@ -148,7 +148,7 @@ Hai cột trạng thái: **trước khi chuyển** là hiện tại (máy chính
 
 **CI / script**
 - Script deploy chạy với `set -euo pipefail`: `| head` hay `| grep -q` làm lệnh trước nhận SIGPIPE → thoát 141 ngẫu nhiên. Lấy output vào biến rồi so.
-- `compose.selfhost.yml` bắt buộc `GAME_DOMAIN` → mọi `docker compose config` trong CI phải truyền giá trị mẫu.
+- `compose.selfhost.yml` bắt buộc `GAME_DOMAIN` và `ALLOWED_ORIGIN` (cả `docker-compose.yml` bắt buộc `ALLOWED_ORIGIN`) → mọi `docker compose config` trong CI phải truyền giá trị mẫu.
 - **Test dùng `Math.random()` chưa inject sẽ chập chờn trên CI**, và CI đỏ trên `main` chặn deploy máy chính (Vercel vẫn deploy → lệch phiên bản; sau khi chuyển sang kho chung, hai phiên bản cùng ghi chung state phòng, nên đây là việc sửa đầu tiên). Mọi hàm phòng/ván nhận `random`, test truyền RNG có seed.
 
 **Giao thức**

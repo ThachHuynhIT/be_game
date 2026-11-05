@@ -112,7 +112,7 @@ Luồng từ PR tới hai máy, biến môi trường từng nơi, giữ tương
 1. Trên Vercel: **Add New → Project**, import repo `be_game`. Framework Preset để **Other**; không cần Build Command.
 2. Vào **Settings → Functions**, bật **Fluid compute** (project mới được bật sẵn). WebSocket cần Fluid compute.
 3. Vào **Storage / Marketplace**, thêm **Upstash for Redis** (gói Free), chọn region **Singapore**, rồi gắn vào project `be_game`. Vercel tự thêm `REDIS_URL` / `KV_URL`.
-4. (Tuỳ chọn) Đặt biến môi trường `ALLOWED_ORIGIN=https://<domain-frontend>,https://<project>-*-<team-slug>.vercel.app` (frontend zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`) để chỉ trang của bạn (kể cả bản preview) kết nối được. Đừng dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
+4. **Bắt buộc** đặt biến môi trường `ALLOWED_ORIGIN=https://<domain-frontend>,https://<project>-*-<team-slug>.vercel.app` (frontend zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`) để chỉ trang của bạn (kể cả bản preview) kết nối được; thiếu biến này function sẽ lỗi ở mọi request. Đừng dùng `https://*.vercel.app`: ai có tài khoản Vercel cũng tạo được subdomain đó.
 5. Deploy xong, mở `https://<be_game>.vercel.app/api/health`. Kết quả mong đợi: `"ok": true`, `"store": "redis"`, `"region": "sin1"`, và `"commit"` là SHA vừa deploy (cần bật **Automatically expose System Environment Variables** của project; không thì `commit` là `null` và job `vercel` của workflow Deploy báo đỏ).
 6. Ở project **zonenop-game** (Vercel hoặc `.env` của bản tự host), đặt URL này vào `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` (máy dự phòng) — hoặc vào `NEXT_PUBLIC_TIENLEN_SERVER_URL` nếu dùng Vercel làm máy chính — rồi build lại (biến `NEXT_PUBLIC_*` gắn lúc build).
 
@@ -161,7 +161,7 @@ Server → client: `ack {id, ok, error?, code?}` · `state {view}` (mỗi ngư�
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | _(trống = store trong RAM)_ | Redis để lưu phòng, lấy biến đầu tiên có giá trị theo thứ tự này. Trên Vercel là bắt buộc |
-| `ALLOWED_ORIGIN` | _(trống = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*` |
+| `ALLOWED_ORIGIN` | _(bắt buộc ở production; trống chỉ ở dev = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*`. Production từ chối khởi động nếu trống, có `*` đơn lẻ hoặc `https://*.vercel.app` |
 | `DATABASE_URL` | _(trống = tài khoản trong RAM ở dev; production thì "chưa cấu hình", 503)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
 | `SESSION_SECRET` | _(trống)_ | Khoá ký token đăng nhập (`openssl rand -base64 32`). **Bí mật**; production thiếu thì route auth trả 503 |
 | `ADMIN_USERNAMES` | _(trống)_ | Username thành admin khi đăng ký **hoặc đăng nhập** (thêm tên một user đã có thì người đó thành admin ở lần đăng nhập kế tiếp; tên chưa có thì ai đăng ký trước được quyền) |
