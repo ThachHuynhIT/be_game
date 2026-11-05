@@ -567,6 +567,10 @@ export function originConfigError(env: NodeJS.ProcessEnv = process.env): string 
     if (entry === "*") return "ALLOWED_ORIGIN contains a lone *, which admits every site";
     if (!ORIGIN_PATTERN_RE.test(entry)) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} is not scheme://host[:port] (no path, no trailing slash)`;
     const host = entry.replace(/^https?:\/\//i, "").replace(/:\d+$/, "").toLowerCase();
+    // A wildcard must be followed by at least two literal labels (".example.com"): "https://*", "https://*.app"
+    // or "https://*vercel.app" would admit sites anyone can create.
+    if (host.includes("*") && !/\.[a-z0-9-]+\.[a-z0-9-]+$/.test(host.slice(host.lastIndexOf("*") + 1)))
+      return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} has a wildcard without two fixed labels after it (e.g. *.example.com)`;
     if (SHARED_HOSTS.some((h) => host === `*.${h}`)) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} admits every ${host.slice(2)} site; scope it to your project and team`;
   }
   return null;

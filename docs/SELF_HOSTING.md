@@ -99,7 +99,7 @@ chmod 600 .env
 ### `ALLOWED_ORIGIN`
 
 - Danh sách cách nhau dấu phẩy; `*` khớp `[a-z0-9-.]+` (`isAllowedOrigin` trong `src/server/hub.ts`). Request không có `Origin` (client không phải trình duyệt) luôn được nhận.
-- **Bắt buộc.** Production (image Docker có `NODE_ENV=production`, hoặc Vercel) **từ chối khởi động** nếu danh sách trống, có `*` đơn lẻ, có `https://*.vercel.app`, hoặc một mục không đúng dạng `scheme://host[:port]` (có path hay dấu `/` cuối) — `originConfigError` trong `src/server/hub.ts`. Trên máy chính, thiếu biến thì `docker compose` dừng ngay (`${ALLOWED_ORIGIN:?…}`), container cũ vẫn chạy; sai dạng thì container mới thoát và health check của deploy báo đỏ. Trên Vercel, function lỗi ở mọi request, kể cả `/api/health`. Sửa bằng cách điền lại danh sách đã kiểm chứng, không để trống.
+- **Bắt buộc.** Production (image Docker có `NODE_ENV=production`, hoặc Vercel) **từ chối khởi động** nếu danh sách trống, có `*` đơn lẻ, có `https://*.vercel.app`, có dấu `*` mà phía sau không còn ít nhất hai nhãn cố định (như `https://*`, `https://*.app`), hoặc một mục không đúng dạng `scheme://host[:port]` (có path hay dấu `/` cuối) — `originConfigError` trong `src/server/hub.ts`. Trên máy chính, thiếu biến thì `docker compose` dừng ngay (`${ALLOWED_ORIGIN:?…}`), container cũ vẫn chạy; sai dạng thì container mới thoát và health check của deploy báo đỏ. Trên Vercel, function lỗi ở mọi request, kể cả `/api/health`. Sửa bằng cách điền lại danh sách đã kiểm chứng, không để trống.
 - URL preview của zonenop-game có hai dạng, cùng khớp `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app`:
   - từng bản deploy: `zonenop-game-<hash>-thachs-projects-48e5eaf9.vercel.app`
   - link theo nhánh: `zonenop-game-git-<nhánh>-thachs-projects-48e5eaf9.vercel.app`

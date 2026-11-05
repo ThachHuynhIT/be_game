@@ -63,6 +63,11 @@ describe("originConfigError (D2-a: production refuses an unusable allow-list)", 
     ["* inside a list", "https://play.fudio101.com, *"],
     ["every Vercel site", "https://*.vercel.app"],
     ["every Vercel site, upper case", "HTTPS://*.VERCEL.APP"],
+    ["a wildcard host", "https://*"],
+    ["a wildcard host with a port", "https://*:8443"],
+    ["every .app site", "https://*.app"],
+    ["a wildcard glued to a public suffix", "https://*vercel.app"],
+    ["a wildcard as the last label", "https://example.*"],
     ["trailing slash", "https://play.fudio101.com/"],
     ["a path", "https://play.fudio101.com/play"],
     ["no scheme", "play.fudio101.com"],
@@ -76,6 +81,7 @@ describe("originConfigError (D2-a: production refuses an unusable allow-list)", 
     expect(originConfigError(prod(LIVE))).toBeNull();
     expect(originConfigError(prod("http://localhost:3000"))).toBeNull();
     expect(originConfigError(prod("https://*.fudio101.com"))).toBeNull();
+    expect(originConfigError(prod("https://app-*.fudio101.com"))).toBeNull();
   });
 
   it("treats Vercel as production even without NODE_ENV", () => {

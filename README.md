@@ -161,7 +161,7 @@ Server → client: `ack {id, ok, error?, code?}` · `state {view}` (mỗi ngư�
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `REDIS_URL` / `KV_URL` / `UPSTASH_REDIS_URL` | _(trống = store trong RAM)_ | Redis để lưu phòng, lấy biến đầu tiên có giá trị theo thứ tự này. Trên Vercel là bắt buộc |
-| `ALLOWED_ORIGIN` | _(bắt buộc ở production; trống chỉ ở dev = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*`. Production từ chối khởi động nếu trống, có `*` đơn lẻ hoặc `https://*.vercel.app` |
+| `ALLOWED_ORIGIN` | _(bắt buộc ở production; trống chỉ ở dev = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*`. Production từ chối khởi động nếu trống, có `*` đơn lẻ, có `https://*.vercel.app`, hoặc có dấu `*` mà phía sau không còn hai nhãn cố định (như `https://*.app`) |
 | `DATABASE_URL` | _(trống = tài khoản trong RAM ở dev; production thì "chưa cấu hình", 503)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
 | `SESSION_SECRET` | _(trống)_ | Khoá ký token đăng nhập (`openssl rand -base64 32`). **Bí mật**; production thiếu thì route auth trả 503 |
 | `ADMIN_USERNAMES` | _(trống)_ | Username thành admin khi đăng ký **hoặc đăng nhập** (thêm tên một user đã có thì người đó thành admin ở lần đăng nhập kế tiếp; tên chưa có thì ai đăng ký trước được quyền) |
