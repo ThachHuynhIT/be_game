@@ -1,6 +1,6 @@
 import { GAME_KINDS, getRedis, redisUrl } from "../server/store";
 import { hashPassword, verifyPassword } from "./password";
-import { type RateLimiter, memoryRateLimiter, redisRateLimiter } from "./rateLimit";
+import { type RateLimiter, ipBucket, memoryRateLimiter, redisRateLimiter } from "./rateLimit";
 import { readSession, signSession } from "./session";
 import { type AccountStore, createMemoryAccountStore } from "./store";
 import type { Role, UserPrefs, UserRow } from "./types";
@@ -26,6 +26,9 @@ const CACHE_MS = 60_000;
 export const LOGIN_PER_IP = 10;
 export const LOGIN_PER_PAIR = 5;
 export const LOGIN_WINDOW_SEC = 900;
+/** Loose cap per account across all addresses: stops guessing from many IPs; an owner hitting it waits at most an hour. */
+export const LOGIN_PER_ACCOUNT = 50;
+export const LOGIN_ACCOUNT_WINDOW_SEC = 3600;
 /** Max length of one game's prefs as JSON (`JSON.stringify(prefs).length`). */
 export const MAX_PREFS_LENGTH = 2000;
 
@@ -145,7 +148,7 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
     limiter: lim,
 
     async register(input, ip) {
-      if (!(await lim.hit(`reg:ip:${ip}`, 5, 3600))) return fail(429, TOO_MANY);
+      if (!(await lim.hit(`reg:ip:${ipBucket(ip)}`, 5, 3600))) return fail(429, TOO_MANY);
       const name = normalizeUsername(input.username);
       if (!name.ok) return fail(400, name.error);
       const pwErr = validatePassword(input.password);
@@ -158,12 +161,15 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       return { ok: true, session: issue(user), user: publicUser(user) };
     },
 
-    async login(input, ip) {
+    async login(input, rawIp) {
+      const ip = ipBucket(rawIp);
       if (!(await lim.hit(`login:ip:${ip}`, LOGIN_PER_IP, LOGIN_WINDOW_SEC))) return fail(429, TOO_MANY);
       const name = normalizeUsername(input.username);
-      // Per (name, IP), never per name alone: failures from one IP must not lock the owner out from another.
+      // Tight per (name, IP): failures from one IP must not lock the owner out from another.
       // Invalid names get no bucket (never key a bucket by a raw request string); a normalized key has no ':'.
       if (name.ok && !(await lim.hit(`login:pair:${name.key}:${ip}`, LOGIN_PER_PAIR, LOGIN_WINDOW_SEC))) return fail(429, TOO_MANY);
+      // Plus a loose cap per name across all IPs, so guessing spread over many addresses still runs out.
+      if (name.ok && !(await lim.hit(`login:user:${name.key}`, LOGIN_PER_ACCOUNT, LOGIN_ACCOUNT_WINDOW_SEC))) return fail(429, TOO_MANY);
       const password = typeof input.password === "string" ? input.password : "";
       const found = name.ok ? await store.userByKey(name.key) : null;
       if (!found) {
