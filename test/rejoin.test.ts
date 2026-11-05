@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
 import { PRESENCE_TIMEOUT_MS, SEAT_GRACE_MS } from "../src/game/room";
@@ -13,6 +13,7 @@ import {
   tienlenAdapter,
   typhuAdapter,
 } from "../src/server/adapters";
+import { seedMathRandom } from "./helpers/rng";
 
 // A player who loses the connection must come back as themselves, never as a new seat with the same name.
 const ADAPTERS: [string, GameAdapter][] = [
@@ -52,7 +53,12 @@ function setup(adapter: GameAdapter) {
 }
 
 describe.each(ADAPTERS)("%s: reconnecting keeps the player", (_game, adapter) => {
+  let unseed = () => {};
+  afterEach(() => unseed());
+
   it("rejects a kicked account on another device without persisting its changed token", async () => {
+    // `start` deals with Math.random; an unseeded Tiến Lên deal is sometimes an instant win that ends the game.
+    unseed = seedMathRandom(1);
     const store = createMemoryRoomStore();
     const hub = createRoomHub(store, adapter);
     const code = await hub.createRoom();

@@ -6,6 +6,7 @@ import { grantAdmin } from "../src/tools/bootstrap-admin";
 import { createGameServer } from "../src/server/app";
 import { ADAPTERS } from "../src/server/adapters";
 import { getRoomStore, type GameKind } from "../src/server/store";
+import { seedMathRandom } from "./helpers/rng";
 
 let server: Server;
 let base = "";
@@ -81,28 +82,34 @@ describe("account routes", () => {
     const uid = json.user.id;
     const expected: { game: GameKind; code: string }[] = [];
     const now = Date.now();
-    for (const game of Object.keys(ADAPTERS) as GameKind[]) {
-      const adapter = ADAPTERS[game];
-      const store = await getRoomStore(game);
-      const code = `M${game}`;
-      const room = adapter.newRoom(code);
-      let id = 0;
-      for (let i = 0; i < 3; i++) expect(adapter.join(room, `room-token-${i}`, `Player${i}`, now, () => `p${++id}`, i === 0 ? uid : `other-${i}`).ok).toBe(true);
-      expect(adapter.command(room, "room-token-0", { type: "start" }, now).ok).toBe(true);
-      expect(adapter.summary(room, now)).toMatchObject({ status: "playing" });
-      await store.create(room);
-      expected.push({ game, code });
-      const clone = JSON.parse(JSON.stringify(room));
-      clone.code = `K${game}`;
-      clone.seats[0].kicked = true;
-      await store.create(clone);
-      const offline = JSON.parse(JSON.stringify(room));
-      offline.code = `O${game}`;
-      for (const p of offline.seats) if (p) p.lastSeen = now - 60_000;
-      await store.create(offline);
-      const waiting = adapter.newRoom(`W${game}`);
-      adapter.join(waiting, "waiting-token", "RoomOwner", now, () => "waiting", uid);
-      await store.create(waiting);
+    // `start` deals with Math.random; an unseeded Tiến Lên deal is sometimes an instant win that ends the game.
+    const unseed = seedMathRandom(1);
+    try {
+      for (const game of Object.keys(ADAPTERS) as GameKind[]) {
+        const adapter = ADAPTERS[game];
+        const store = await getRoomStore(game);
+        const code = `M${game}`;
+        const room = adapter.newRoom(code);
+        let id = 0;
+        for (let i = 0; i < 3; i++) expect(adapter.join(room, `room-token-${i}`, `Player${i}`, now, () => `p${++id}`, i === 0 ? uid : `other-${i}`).ok).toBe(true);
+        expect(adapter.command(room, "room-token-0", { type: "start" }, now).ok).toBe(true);
+        expect(adapter.summary(room, now)).toMatchObject({ status: "playing" });
+        await store.create(room);
+        expected.push({ game, code });
+        const clone = JSON.parse(JSON.stringify(room));
+        clone.code = `K${game}`;
+        clone.seats[0].kicked = true;
+        await store.create(clone);
+        const offline = JSON.parse(JSON.stringify(room));
+        offline.code = `O${game}`;
+        for (const p of offline.seats) if (p) p.lastSeen = now - 60_000;
+        await store.create(offline);
+        const waiting = adapter.newRoom(`W${game}`);
+        adapter.join(waiting, "waiting-token", "RoomOwner", now, () => "waiting", uid);
+        await store.create(waiting);
+      }
+    } finally {
+      unseed();
     }
     const r = await call("GET", "/api/auth/rooms", undefined, { token: json.session });
     expect(r.status).toBe(200);

@@ -3,16 +3,17 @@ export interface RateLimiter {
   hit(bucket: string, limit: number, windowSec: number): Promise<boolean>;
 }
 
-export function redisRateLimiter(redis: {
-  incr(k: string): Promise<number>;
-  set(k: string, v: string | number, ...args: (string | number)[]): Promise<unknown>;
-}): RateLimiter {
+// One atomic step: count the hit, then give the key its window if it has no TTL. The key is new, or it was left
+// without a TTL by the previous SET NX EX + INCR pair: when the key expired between those two calls, INCR re-created
+// it with no TTL and that bucket stayed blocked for good. Keys left that way heal on their next hit.
+const HIT_SCRIPT = `local n = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return n`;
+
+export function redisRateLimiter(redis: { eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown> }): RateLimiter {
   return {
     async hit(bucket, limit, windowSec) {
-      const key = `be_game:rl:${bucket}`;
-      // Create the key with its TTL atomically (no-op if it exists), then count; a key never lacks a TTL.
-      await redis.set(key, 0, "EX", windowSec, "NX");
-      const n = await redis.incr(key);
+      const n = Number(await redis.eval(HIT_SCRIPT, 1, `be_game:rl:${bucket}`, windowSec));
       return n <= limit;
     },
   };
