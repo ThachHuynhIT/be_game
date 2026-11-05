@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getAccountService, resetAccountServiceForTests } from "../src/accounts/service";
 import type { RoomState } from "../src/game/room";
 import { createGameServer } from "../src/server/app";
@@ -8,6 +8,7 @@ import { attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
 import { accountSession, resetTestSessions } from "./helpers/accounts";
 import { FakeSocket } from "./helpers/fakeSocket";
+import { seedMathRandom } from "./helpers/rng";
 
 beforeEach(() => {
   delete process.env.DATABASE_URL;
@@ -159,6 +160,10 @@ describe("long names and seat ownership", () => {
   });
 
   it("refuses another uid even when its new username equals the seat name", async () => {
+    // `start` deals with Math.random; an unseeded deal is sometimes a "tới trắng" that ends the game at once,
+    // and then the join below is no longer a mid-game takeover (4 of 300 seeds failed this way).
+    const unseed = seedMathRandom(1);
+    onTestFinished(unseed);
     const session = await accountSession("Lan");
     const svc = await getAccountService();
     const store = createMemoryRoomStore<RoomState>();
