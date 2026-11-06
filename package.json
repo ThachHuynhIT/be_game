@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@vercel/functions": "^3.9.9",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "ws": "^8.21.3"
   },
