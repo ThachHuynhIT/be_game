@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 import { accountsConfigError, getAccountService, warnIfAccountsUnconfigured } from "../accounts/service";
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
-import { MAX_MESSAGE_BYTES, attachConnection, isAllowedOrigin } from "./hub";
+import { MAX_MESSAGE_BYTES, assertOriginConfig, attachConnection, isAllowedOrigin } from "./hub";
 import { handleAccountRoute } from "./authRoutes";
 import { type GameKind, getRoomStore, redisUrl } from "./store";
 
@@ -47,6 +47,7 @@ const ROUTES: Record<string, { game: GameKind; kind: "ws" | "rooms" | "leaderboa
 const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
 
 export function createGameServer(): Server {
+  assertOriginConfig();
   warnIfAccountsUnconfigured();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 

@@ -543,18 +543,58 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
   socket.on("error", cleanup);
 }
 
-/**
- * Origin check for the WebSocket upgrade. The web app lives on another origin
- * than this backend, so with ALLOWED_ORIGIN unset every origin is accepted.
- * Set it (comma-separated, `*` wildcards, e.g. "https://my-site.com,https://*.vercel.app")
- * to lock the backend to your frontends.
- */
-export function isAllowedOrigin(origin: string | null | undefined, host: string | null | undefined): boolean {
-  if (!origin) return true; // non-browser clients
-  const allowed = (process.env.ALLOWED_ORIGIN ?? "")
+const originList = (env: NodeJS.ProcessEnv) =>
+  (env.ALLOWED_ORIGIN ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
+/** An origin pattern: scheme://host[:port], `*` wildcards in the host only, no path or trailing slash. */
+const ORIGIN_PATTERN_RE = /^https?:\/\/[a-z0-9*.-]+(:\d{1,5})?$/i;
+/**
+ * Hosts anyone can get a subdomain of. No wildcard is allowed anywhere under them: even a pattern scoped by project and
+ * team name (zonenop-game-*-<team>.vercel.app) matches a project someone else names to fit. List exact origins instead.
+ */
+const SHARED_HOSTS = ["vercel.app"];
+
+/**
+ * Why ALLOWED_ORIGIN is not usable in production, or null when it is (or when this is not production, where an
+ * empty list stays open for local development). Production = NODE_ENV=production (the Docker image) or Vercel.
+ * The message names the bad entry but this variable holds no secrets.
+ */
+export function originConfigError(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.NODE_ENV !== "production" && !env.VERCEL) return null;
+  const list = originList(env);
+  if (list.length === 0) return "ALLOWED_ORIGIN is empty: list the frontend origins, comma-separated";
+  for (const entry of list) {
+    if (entry === "*") return "ALLOWED_ORIGIN contains a lone *, which admits every site";
+    if (!ORIGIN_PATTERN_RE.test(entry)) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} is not scheme://host[:port] (no path, no trailing slash)`;
+    const host = entry.replace(/^https?:\/\//i, "").replace(/:\d+$/, "").toLowerCase();
+    // A wildcard must be followed by at least two literal labels (".example.com"): "https://*", "https://*.app"
+    // or "https://*vercel.app" would admit sites anyone can create.
+    if (host.includes("*") && !/\.[a-z0-9-]+\.[a-z0-9-]+$/.test(host.slice(host.lastIndexOf("*") + 1)))
+      return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} has a wildcard without two fixed labels after it (e.g. *.example.com)`;
+    const shared = SHARED_HOSTS.find((h) => host.includes("*") && host.endsWith(`.${h}`));
+    if (shared) return `ALLOWED_ORIGIN entry ${JSON.stringify(entry)} has a wildcard under ${shared}, where anyone can create a matching site; list exact origins`;
+  }
+  return null;
+}
+
+/** Called when the server is created: production refuses to start with an unusable allow-list (D2-a). */
+export function assertOriginConfig(env: NodeJS.ProcessEnv = process.env): void {
+  const why = originConfigError(env);
+  if (why) throw new Error(`[be_game] refusing to start: ${why}`);
+}
+
+/**
+ * Origin check for the WebSocket upgrade and CORS. Production always has a list (assertOriginConfig); in
+ * development an unset ALLOWED_ORIGIN accepts every origin. Comma-separated, `*` wildcards,
+ * e.g. "https://my-site.com,https://my-app-*-my-team.vercel.app". Requests without Origin (non-browser
+ * clients) and same-host pages are always accepted: this is not authentication.
+ */
+export function isAllowedOrigin(origin: string | null | undefined, host: string | null | undefined): boolean {
+  if (!origin) return true; // non-browser clients
+  const allowed = originList(process.env);
   if (allowed.length === 0 || allowed.includes("*")) return true;
   try {
     if (host && new URL(origin).host === host) return true;

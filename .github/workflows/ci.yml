@@ -58,8 +58,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate compose files
         run: |
-          GAME_DOMAIN=game.example.com docker compose config --quiet
-          GAME_DOMAIN=game.example.com docker compose -f compose.selfhost.yml config --quiet
+          export GAME_DOMAIN=game.example.com ALLOWED_ORIGIN=https://app.example.com
+          docker compose config --quiet
+          docker compose -f compose.selfhost.yml config --quiet
       - uses: docker/setup-buildx-action@v3
       - name: Build image (not pushed)
         uses: docker/build-push-action@v6
@@ -70,9 +71,15 @@ jobs:
           tags: be_game:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Container refuses to start without ALLOWED_ORIGIN
+        run: |
+          if out=$(timeout 30 docker run --rm be_game:ci 2>&1); then
+            echo "container ran without ALLOWED_ORIGIN" >&2; exit 1
+          fi
+          echo "$out" | grep -q "refusing to start: ALLOWED_ORIGIN is empty" || { echo "$out" >&2; exit 1; }
       - name: Container starts and answers
         run: |
-          docker run -d --name be_game -p 4000:4000 be_game:ci
+          docker run -d --name be_game -p 4000:4000 -e ALLOWED_ORIGIN=https://app.example.com be_game:ci
           for i in $(seq 1 20); do
             curl -fsS http://127.0.0.1:4000/api && exit 0
             sleep 1
