@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEVICE_RE, isAllowedOrigin } from "./hub";
+import { ipBucket } from "../accounts/rateLimit";
 import { isPlayPath } from "../accounts/types";
 import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret } from "../accounts/service";
 import { ADAPTERS } from "./adapters";
@@ -212,7 +213,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
 async function track(req: IncomingMessage, res: ServerResponse, svc: AccountService, ip: string) {
   const ua = String(req.headers["user-agent"] ?? "");
   if (BOT_RE.test(ua)) return send(res, 204);
-  if (!(await svc.limiter.hit(`track:ip:${ip}`, 60, 60))) return err(res, 429, TOO_MANY);
+  if (!(await svc.limiter.hit(`track:ip:${ipBucket(ip)}`, 60, 60))) return err(res, 429, TOO_MANY);
   const b = await readJson(req, true);
   const path = normalizeTrackPath(b.path);
   // /play/* rows are written only by WebSocket joins (play devices); a beacon must not forge them.
