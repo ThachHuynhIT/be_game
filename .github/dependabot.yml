@@ -11,6 +11,17 @@ updates:
       dev-minor:
         dependency-type: development
         update-types: [minor, patch]
+    ignore:
+      # The server runs Node 22 (Dockerfile node:22-alpine, CI node 22): its types stay on 22.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint 8 supports TypeScript < 6.1 only (checked 2026-11-06): lift once it supports newer majors.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # ioredis-mock 8 supports ioredis ^5 only, and ioredis runs the Lua CAS scripts in production:
+      # its next major gets its own PR, checked by the redis-integration job.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
