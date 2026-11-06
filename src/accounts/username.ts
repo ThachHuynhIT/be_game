@@ -10,9 +10,18 @@ export function normalizeUsername(raw: string): { ok: true; username: string; ke
   return { ok: true, username, key: nameKey(username) };
 }
 
-export function validatePassword(pw: string): string | null {
+/** Minimum length (code points, NFC) for a newly set password; logging in with an older, shorter one still works. */
+export const MIN_PASSWORD = 8;
+/** Admins setting a new password need a longer one. */
+export const MIN_ADMIN_PASSWORD = 12;
+export const MAX_PASSWORD = 72;
+
+/** Checks a password being set (register, change, admin reset) for an account with `role`; never applied at login. */
+export function validatePassword(pw: string, role: "user" | "admin" = "user"): string | null {
   const len = typeof pw === "string" ? [...pw.normalize("NFC")].length : 0;
-  if (len < 1) return "Mật khẩu không được để trống";
-  if (len > 72) return "Mật khẩu tối đa 72 ký tự";
+  if (len === 0) return "Mật khẩu không được để trống";
+  if (role === "admin" && len < MIN_ADMIN_PASSWORD) return `Mật khẩu admin cần ít nhất ${MIN_ADMIN_PASSWORD} ký tự`;
+  if (len < MIN_PASSWORD) return `Mật khẩu cần ít nhất ${MIN_PASSWORD} ký tự`;
+  if (len > MAX_PASSWORD) return `Mật khẩu tối đa ${MAX_PASSWORD} ký tự`;
   return null;
 }

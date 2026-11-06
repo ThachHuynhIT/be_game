@@ -1,7 +1,8 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { getAccountService, resetAccountServiceForTests } from "../src/accounts/service";
+import { RESERVED_NAME, getAccountService, resetAccountServiceForTests } from "../src/accounts/service";
+import { grantAdmin } from "../src/tools/bootstrap-admin";
 import { createGameServer } from "../src/server/app";
 import { ADAPTERS } from "../src/server/adapters";
 import { getRoomStore, type GameKind } from "../src/server/store";
@@ -46,6 +47,19 @@ async function call(method: string, path: string, body?: unknown, opts: { token?
   return { status: res.status, json, text, headers: res.headers };
 }
 const register = (username: string, password = "matkhau123", ip?: string) => call("POST", "/api/auth/register", { username, password }, { ip });
+const ADMIN_PW = "matkhau-admin-123";
+/** Registers a normal account, grants admin by id the way operators do (bootstrap-admin, with a new password), signs in again. */
+async function registerAdmin(username = "Sep") {
+  const { json } = await register(username);
+  const svc = await getAccountService();
+  const r = await grantAdmin(svc.store, json.user.id, true, ADMIN_PW);
+  if (!r.ok) throw new Error(r.error);
+  svc.forget(json.user.id);
+  // Granting set a new password and signed the old session out.
+  const login = await call("POST", "/api/auth/login", { username, password: ADMIN_PW });
+  if (login.status !== 200) throw new Error("admin login " + login.status);
+  return login.json;
+}
 
 describe("account routes", () => {
   it("skips a room store that never resolves and still returns healthy rooms", async () => {
@@ -128,7 +142,8 @@ describe("account routes", () => {
     expect(dup.json.error).toBe("Tên đăng nhập đã có người dùng");
     expect((await register("ab")).status).toBe(400);
     expect((await register("Minh", "")).status).toBe(400);
-    expect((await register("Minh2", "1")).status).toBe(200);
+    expect((await register("Minh2", "1234567")).status).toBe(400);
+    expect((await register("Minh2", "12345678")).status).toBe(200);
   });
 
   it("login errors are indistinguishable", async () => {
@@ -234,14 +249,27 @@ describe("account routes", () => {
     expect((await call("GET", "/api/auth/me", undefined, { token: minh })).json.user.username).toBe("Minh");
   });
 
+  it("registering an admin-reserved name is refused, and nobody can make themselves admin", async () => {
+    for (const name of ["boss", " BOSS "]) {
+      const r = await register(name);
+      expect(r.status).toBe(400);
+      expect(r.json.error).toBe(RESERVED_NAME);
+    }
+    const lan = (await register("Lan")).json;
+    expect(lan.user.role).toBe("user");
+    expect((await call("PATCH", "/api/auth/me", { role: "admin" }, { token: lan.session })).status).toBe(200);
+    expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).json.user.role).toBe("user");
+    expect((await call("GET", "/api/admin/stats?days=7", undefined, { token: lan.session })).status).toBe(403);
+  });
+
   it("an admin may rename to an admin-reserved name", async () => {
-    const boss = (await register("boss")).json.session;
+    const boss = (await registerAdmin()).session;
     expect((await call("PATCH", "/api/auth/me", { username: "BOSS" }, { token: boss })).status).toBe(200);
   });
 
   it("admin gate and stats", async () => {
     const lan = (await register("Lan")).json;
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     expect(boss.user.role).toBe("admin");
     expect((await call("GET", "/api/admin/stats?days=7", undefined, { token: lan.session })).status).toBe(403);
     expect((await call("GET", "/api/admin/stats?days=7")).status).toBe(401);
@@ -256,7 +284,7 @@ describe("account routes", () => {
 
   it("admin disables users immediately and cannot demote self", async () => {
     const lan = (await register("Lan")).json;
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     // warm the cache
     expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).status).toBe(200);
     const r = await call("PATCH", `/api/admin/users/${lan.user.id}`, { disabled: true }, { token: boss.session });
@@ -272,7 +300,7 @@ describe("account routes", () => {
   });
 
   it("tracks page views", async () => {
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     const stats = async () => (await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session })).json.totals.views;
     expect((await call("POST", "/api/track", { path: "/?x=1#h", device: "abcdefghijklmnop" })).status).toBe(204);
     expect(await stats()).toBe(1);
@@ -315,7 +343,7 @@ describe("account routes", () => {
   });
 
   it("accepts a text/plain beacon body on /api/track", async () => {
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     const res = await fetch(base + "/api/track", {
       method: "POST",
       headers: { "content-type": "text/plain;charset=UTF-8", "x-forwarded-for": "7.7.7.7" },
@@ -425,12 +453,12 @@ describe("account routes", () => {
     } finally {
       delete process.env.ALLOWED_ORIGIN;
     }
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     expect((await call("PATCH", "/api/admin/users/%E0%A4%A", { disabled: true }, { token: boss.session })).status).toBe(404);
   });
 
   it("refuses tracked paths under /play/ (reserved for WebSocket joins)", async () => {
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     const r = await call("POST", "/api/track", { path: "/play/tienlen", device: "abcdefghijklmnop" });
     expect(r.status).toBe(400);
     expect((await call("POST", "/api/track", { path: "/play/x?y=1", device: "abcdefghijklmnop" })).status).toBe(400);
@@ -440,7 +468,7 @@ describe("account routes", () => {
   });
 
   it("strips control characters from tracked paths", async () => {
-    const boss = (await register("boss")).json;
+    const boss = await registerAdmin();
     expect((await call("POST", "/api/track", { path: "/a\u0000b\n", device: "abcdefghijklmnop" })).status).toBe(204);
     const stats = await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session });
     expect(stats.json.topPages[0].path).toBe("/ab");
