@@ -7,6 +7,5 @@
 !eslint.config.mjs
 !audit-exceptions.json
 !scripts/audit-check.mjs
-!.github/dependabot.yml
 !.github/workflows/codeql.yml
 !.github/workflows/audit.yml
