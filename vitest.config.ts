@@ -5,5 +5,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     exclude: [...configDefaults.exclude, "test/**/*.integration.test.ts"],
+    // Seeds Math.random before every test (see the file).
+    setupFiles: ["test/setup.ts"],
   },
 });
