@@ -87,6 +87,7 @@ npm install
 npm run dev          # tsx watch: http://localhost:4000 , ws://localhost:4000/api/ws
 npm start            # như trên, không watch
 npm test             # vitest run
+npm run test:redis   # test Redis thật, cần REDIS_TEST_URL (docs/GUIDE.md)
 npm run typecheck    # tsc --noEmit
 ```
 
