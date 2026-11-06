@@ -1,0 +1,18 @@
+# Weekly dependency update PRs. Each must pass CI like any other PR; nothing merges on its own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch updates of dev tools come as one PR; majors and runtime deps stay separate.
+      dev-minor:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

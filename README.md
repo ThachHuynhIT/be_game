@@ -89,6 +89,9 @@ npm start            # như trên, không watch
 npm test             # vitest run
 npm run test:redis   # test Redis thật, cần REDIS_TEST_URL (docs/GUIDE.md)
 npm run typecheck    # tsc --noEmit
+npm run lint         # ESLint (lỗi cũ trong baseline, docs/GUIDE.md)
+npm run format:check # Prettier, chỉ file đã opt-in
+npm run audit:check  # npm audit so với audit-exceptions.json
 ```
 
 Không có Redis thì dùng store trong RAM. Mẫu biến môi trường: `.env.example`.

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "GHSA-5gmw-xhrv-c9v3",
+    "package": "tinypool",
+    "owner": "ThachHuynhIT",
+    "reason": "Dev only (vitest 3 worker pool, never shipped in the image or on Vercel). Fixed only in vitest 4+/5, a major upgrade to do in its own PR.",
+    "expires": "2026-12-05"
+  },
+  {
+    "id": "GHSA-85c8-ppgw-ccpr",
+    "package": "tinypool",
+    "owner": "ThachHuynhIT",
+    "reason": "Dev only (vitest 3 worker pool). Same vitest major upgrade as GHSA-5gmw-xhrv-c9v3.",
+    "expires": "2026-12-05"
+  },
+  {
+    "id": "GHSA-82fw-gwwq-j7x9",
+    "package": "vitest",
+    "owner": "ThachHuynhIT",
+    "reason": "Dev only (@vitest/mocker in vitest 3; tests run locally and in CI on trusted code). Needs the vitest major upgrade.",
+    "expires": "2026-12-05"
+  },
+  {
+    "id": "GHSA-qxg6-89mg-rqv8",
+    "package": "@vitest/mocker",
+    "owner": "ThachHuynhIT",
+    "reason": "Dev only (vitest 3 mocker). Needs the vitest major upgrade.",
+    "expires": "2026-12-05"
+  },
+  {
+    "id": "GHSA-g3hv-75wg-m249",
+    "package": "minimatch",
+    "owner": "ThachHuynhIT",
+    "reason": "Dev only, pulled in by eslint 10 and typescript-eslint 8 (they require minimatch ^10; the fix is 11.0.1). Only this repo's own config globs reach it.",
+    "expires": "2026-12-05"
+  }
+]
