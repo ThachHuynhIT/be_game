@@ -20,6 +20,9 @@ const validIcon = (v: unknown) => (typeof v === "string" && (v === "" || PROFILE
 const validColor = (v: unknown) => (typeof v === "string" && PROFILE_COLORS.includes(v) ? v : DEFAULT_COLOR);
 
 export const BAD_LOGIN = "Sai tên đăng nhập hoặc mật khẩu";
+export const RESERVED_NAME = "Tên này đã được giữ";
+/** Promoting keeps no old password: the stored hash cannot tell whether it meets the admin minimum. */
+export const ADMIN_NEEDS_PASSWORD = "Cấp quyền admin cần đặt mật khẩu mới (ít nhất 12 ký tự)";
 export const TOO_MANY = "Thử quá nhiều lần, đợi một lát rồi thử lại";
 const CACHE_MS = 60_000;
 /** Login attempts allowed per window: per client IP (any names) and per (username, IP) pair. */
@@ -94,7 +97,11 @@ export function warnIfAccountsUnconfigured(env: NodeJS.ProcessEnv = process.env)
   console.error(`[be_game] ACCOUNTS UNCONFIGURED (${why}): sign-in, admin, tracking and joining games are refused until it is set.`);
 }
 
-const adminKeys = () =>
+/**
+ * Usernames reserved for admins (ADMIN_USERNAMES): nobody may register or rename to them, only an admin may rename to one.
+ * Being listed grants nothing: admin is granted by user id with `src/tools/bootstrap-admin.ts`.
+ */
+const reservedKeys = () =>
   new Set(
     (process.env.ADMIN_USERNAMES ?? "")
       .split(",")
@@ -133,10 +140,6 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
     if (!secret) throw new Error("SESSION_SECRET is not configured");
     return signSession({ uid: u.id, ver: u.sessionVersion }, secret, now());
   };
-  const promote = async (u: UserRow): Promise<UserRow> => {
-    if (u.role === "user" && adminKeys().has(u.usernameKey)) return (await store.updateUser(u.id, { role: "admin" })) ?? u;
-    return u;
-  };
   const adminUser = async (u: UserRow): Promise<AdminUser> => {
     const found = await store.listUsers(u.username, 1, 50);
     const games = found.rows.find((r) => r.id === u.id)?.games ?? 0;
@@ -151,12 +154,12 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       if (!(await lim.hit(`reg:ip:${ipBucket(ip)}`, 5, 3600))) return fail(429, TOO_MANY);
       const name = normalizeUsername(input.username);
       if (!name.ok) return fail(400, name.error);
+      if (reservedKeys().has(name.key)) return fail(400, RESERVED_NAME);
       const pwErr = validatePassword(input.password);
       if (pwErr) return fail(400, pwErr);
       const hash = await hashPassword(input.password);
       let user = await store.createUser({ usernameKey: name.key, username: name.username, passwordHash: hash, role: "user", icon: validIcon(input.icon), color: validColor(input.color) });
       if (!user) return fail(409, "Tên đăng nhập đã có người dùng");
-      user = await promote(user);
       user = (await store.updateUser(user.id, { lastLoginAt: new Date(now()) })) ?? user;
       return { ok: true, session: issue(user), user: publicUser(user) };
     },
@@ -182,10 +185,9 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
         return fail(401, BAD_LOGIN);
       }
       if (!(await verifyPassword(password, found.passwordHash)) || found.disabled) return fail(401, BAD_LOGIN);
-      const promoted = await promote(found);
-      // Signing in revokes every other session: one account, one device.
-      const user = await store.updateUser(promoted.id, { lastLoginAt: new Date(now()), bumpSession: true });
-      cache.delete(promoted.id);
+      // Signing in revokes every other session: one account, one device. The stored role is kept as is.
+      const user = await store.updateUser(found.id, { lastLoginAt: new Date(now()), bumpSession: true });
+      cache.delete(found.id);
       if (!user) return fail(500, "Không thể cập nhật phiên đăng nhập");
       return { ok: true, session: issue(user), user: publicUser(user) };
     },
@@ -224,7 +226,7 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       if (patch.username !== undefined) {
         const n = normalizeUsername(patch.username as string);
         if (!n.ok) return fail(400, n.error);
-        if (user.role !== "admin" && adminKeys().has(n.key)) return fail(400, "Tên này đã được giữ");
+        if (user.role !== "admin" && reservedKeys().has(n.key)) return fail(400, RESERVED_NAME);
         const other = await store.userByKey(n.key);
         if (other && other.id !== user.id) return fail(409, "Tên đăng nhập đã có người dùng");
         upd.username = n.username;
@@ -240,7 +242,7 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       }
       const changingPassword = patch.password !== undefined;
       if (changingPassword) {
-        const err = validatePassword(patch.password as string);
+        const err = validatePassword(patch.password as string, user.role);
         if (err) return fail(400, err);
         if (typeof patch.oldPassword !== "string" || !(await verifyPassword(patch.oldPassword, user.passwordHash))) return fail(400, "Mật khẩu cũ không đúng");
         upd.passwordHash = await hashPassword(patch.password as string);
@@ -281,11 +283,17 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       if (patch.disabled !== undefined) upd.disabled = patch.disabled;
       // Locking revokes every issued token (spec §7): unlocking later must not revive them.
       if (patch.disabled === true) upd.bumpSession = true;
-      if (patch.password !== undefined) {
-        const err = validatePassword(patch.password);
-        if (err) return fail(400, err);
-        upd.passwordHash = await hashPassword(patch.password);
-        upd.bumpSession = true;
+      if (patch.password !== undefined || patch.role === "admin") {
+        const target = await store.userById(id);
+        if (!target) return fail(404, "Không tìm thấy người dùng");
+        if (patch.role === "admin" && target.role !== "admin" && patch.password === undefined) return fail(400, ADMIN_NEEDS_PASSWORD);
+        if (patch.password !== undefined) {
+          // The policy of the role the account ends up with: resetting an admin (or making one) needs an admin-length password.
+          const err = validatePassword(patch.password, patch.role ?? target.role);
+          if (err) return fail(400, err);
+          upd.passwordHash = await hashPassword(patch.password);
+          upd.bumpSession = true;
+        }
       }
       const next = await store.updateUser(id, upd);
       if (!next) return fail(404, "Không tìm thấy người dùng");
@@ -320,7 +328,8 @@ export function pruneViewsIfDue(store: AccountStore, now: number = Date.now()): 
   return true;
 }
 
-async function build(): Promise<AccountService> {
+/** Postgres store if DATABASE_URL is set, else a memory store. Also used by `src/tools/bootstrap-admin.ts`. */
+export async function openAccountStore(): Promise<AccountStore> {
   let store: AccountStore;
   const url = process.env.DATABASE_URL;
   if (url) {
@@ -339,6 +348,11 @@ async function build(): Promise<AccountService> {
   } else {
     store = createMemoryAccountStore();
   }
+  return store;
+}
+
+async function build(): Promise<AccountService> {
+  const store = await openAccountStore();
   let limiter: RateLimiter;
   const redis = redisUrl() ? await getRedis().catch(() => null) : null;
   limiter = redis ? redisRateLimiter(redis as any) : memoryRateLimiter();
