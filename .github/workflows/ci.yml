@@ -60,7 +60,7 @@ jobs:
         run: |
           GAME_DOMAIN=game.example.com docker compose config --quiet
           GAME_DOMAIN=game.example.com docker compose -f compose.selfhost.yml config --quiet
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build image (not pushed)
         uses: docker/build-push-action@v6
         with:
