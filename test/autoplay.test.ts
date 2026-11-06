@@ -3,6 +3,7 @@ import type { RoomState } from "../src/game/room";
 import { type HubSocket, attachConnection, createRoomHub } from "../src/server/hub";
 import { createMemoryRoomStore } from "../src/server/store";
 import { accountSession } from "./helpers/accounts";
+import { seedMathRandom } from "./helpers/rng";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Listener = (arg?: any) => void;
@@ -29,6 +30,9 @@ class Sock implements HubSocket {
 describe("auto-play for an offline opponent (Tiến Lên, through the hub)", () => {
   it("plays the offline player's turn right away once they are offline, not at the turn deadline", async () => {
     const sessions = [await accountSession("Anh"), await accountSession("Binh")];
+    // `start` deals with Math.random; an unseeded deal is sometimes a "tới trắng" that ends the game at once
+    // (endedAt 0, about 1 run in 8 locally). Seed 1 deals a normal game.
+    const unseed = seedMathRandom(1);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     try {
       const store = createMemoryRoomStore<RoomState>();
@@ -74,6 +78,7 @@ describe("auto-play for an offline opponent (Tiến Lên, through the hub)", () 
       expect(maxHeldByB).toBeLessThanOrEqual(2);
     } finally {
       vi.useRealTimers();
+      unseed();
     }
   });
 });

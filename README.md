@@ -87,7 +87,11 @@ npm install
 npm run dev          # tsx watch: http://localhost:4000 , ws://localhost:4000/api/ws
 npm start            # như trên, không watch
 npm test             # vitest run
+npm run test:redis   # test Redis thật, cần REDIS_TEST_URL (docs/GUIDE.md)
 npm run typecheck    # tsc --noEmit
+npm run lint         # ESLint (lỗi cũ trong baseline, docs/GUIDE.md)
+npm run format:check # Prettier, chỉ file đã opt-in
+npm run audit:check  # npm audit so với audit-exceptions.json
 ```
 
 Không có Redis thì dùng store trong RAM. Mẫu biến môi trường: `.env.example`.
@@ -164,7 +168,7 @@ Server → client: `ack {id, ok, error?, code?}` · `state {view}` (mỗi ngư�
 | `ALLOWED_ORIGIN` | _(bắt buộc ở production; trống chỉ ở dev = cho phép tất cả)_ | Danh sách origin được phép kết nối, ngăn cách bằng dấu phẩy, hỗ trợ `*`. Production từ chối khởi động nếu trống, có `*` đơn lẻ, có dấu `*` dưới `vercel.app` (kể cả mẫu theo project + team), hoặc có dấu `*` mà phía sau không còn hai nhãn cố định (như `https://*.app`) |
 | `DATABASE_URL` | _(trống = tài khoản trong RAM ở dev; production thì "chưa cấu hình", 503)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
 | `SESSION_SECRET` | _(trống)_ | Khoá ký token đăng nhập (`openssl rand -base64 32`). **Bí mật**; production thiếu thì route auth trả 503 |
-| `ADMIN_USERNAMES` | _(trống)_ | Username thành admin khi đăng ký **hoặc đăng nhập** (thêm tên một user đã có thì người đó thành admin ở lần đăng nhập kế tiếp; tên chưa có thì ai đăng ký trước được quyền) |
+| `ADMIN_USERNAMES` | _(trống)_ | Username **giữ chỗ** cho admin: không ai đăng ký hay đổi sang được (admin thì được). **Không** cấp quyền: admin được cấp theo id tài khoản bằng `tsx src/tools/bootstrap-admin.ts <user-id> --yes --password-stdin` (kèm mật khẩu mới 12+ ký tự qua stdin; docs/SELF_HOSTING.md) |
 | `ACCOUNTS_MEMORY` | _(trống)_ | `1` = cho production chạy tài khoản trong RAM khi không có `DATABASE_URL` (mất khi restart). Bình thường để trống |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Cổng và địa chỉ lắng nghe khi chạy local |
 | `BE_GAME_COUNT_COMMANDS` | _(trống)_ | `1` = log số lệnh Redis mỗi 60 giây (đo trước khi chuyển sang Upstash; xem `docs/SELF_HOSTING.md`) |

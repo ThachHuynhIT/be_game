@@ -54,6 +54,18 @@ describe("sessions", () => {
     expect(readSession(t, "s3cret", now + 31 * 86_400_000)).toBeNull();
     expect(readSession("nope", "s3cret", now)).toBeNull();
   });
+  it("is valid until just before 30 days and expired at exactly 30 days", () => {
+    const DAY = 86_400_000;
+    // now is a whole second, so exp = now/1000 + 30 days; readSession refuses once exp <= the current second.
+    const t = signSession({ uid: "u1", ver: 2 }, "s3cret", now);
+    expect(readSession(t, "s3cret", now + 30 * DAY - 1_000)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(t, "s3cret", now + 30 * DAY - 1)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(t, "s3cret", now + 30 * DAY)).toBeNull();
+    // A token signed partway through a second still lasts the full 30 days from that second.
+    const mid = signSession({ uid: "u1", ver: 2 }, "s3cret", now + 999);
+    expect(readSession(mid, "s3cret", now + 30 * DAY - 1)).toEqual({ uid: "u1", ver: 2 });
+    expect(readSession(mid, "s3cret", now + 30 * DAY)).toBeNull();
+  });
 });
 describe("usernames", () => {
   it("normalizes spaces and case into one key, keeps the typed form", () => {
@@ -63,7 +75,8 @@ describe("usernames", () => {
   it("rejects bad lengths and characters", () => {
     for (const bad of ["ab", "x".repeat(21), "a<b>", "lan!", ""]) expect(normalizeUsername(bad).ok).toBe(false);
     expect(validatePassword("")).not.toBeNull();
-    expect(validatePassword("1")).toBeNull();
+    expect(validatePassword("1")).not.toBeNull();
+    expect(validatePassword("1234567")).not.toBeNull();
     expect(validatePassword("12345678")).toBeNull();
     expect(validatePassword("x".repeat(73))).not.toBeNull();
   });
@@ -111,6 +124,21 @@ describe("review fixes", () => {
   });
   it("rejects zero-width characters in usernames", () => {
     expect(normalizeUsername("lan\u200Banh").ok).toBe(false);
+  });
+  it("redis: a bucket left without a TTL heals on its next hit instead of blocking for good", async () => {
+    const redis = new RedisMock();
+    // What the old SET NX EX + INCR pair left behind when the key expired between the two calls.
+    await redis.set("be_game:rl:t:stuck", "7");
+    expect(await redis.ttl("be_game:rl:t:stuck")).toBe(-1);
+    const rl = redisRateLimiter(redis as never);
+    expect(await rl.hit("t:stuck", 3, 900)).toBe(false); // still counted: 8 > 3
+    const ttl = await redis.ttl("be_game:rl:t:stuck");
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(900);
+    // A key that already has its window keeps it (the TTL is not pushed back on every hit).
+    await redis.expire("be_game:rl:t:stuck", 5);
+    await rl.hit("t:stuck", 3, 900);
+    expect(await redis.ttl("be_game:rl:t:stuck")).toBeLessThanOrEqual(5);
   });
   it("redis bucket always has a TTL; memory limiter resets after the window", async () => {
     const redis = new RedisMock();

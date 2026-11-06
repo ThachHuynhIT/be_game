@@ -1,0 +1,25 @@
+name: Dependency audit
+
+# Kept out of the CI workflow on purpose: Deploy waits for CI, and a newly published advisory must not block a
+# deploy overnight. A red run here means: fix the dependency or add a reviewed entry to audit-exceptions.json.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:check

@@ -47,7 +47,7 @@ flowchart LR
 | Server `~/apps/be_game/.env` | `REDIS_URL` | **Hiện để trống** = Redis cục bộ trong compose (`redis://redis:6379`). Chỉ sau khi chuyển sang kho chung mới là URL Upstash của máy dự phòng (`rediss://default:<password>@<host>.upstash.io:6379`); khi đó là **bí mật**: chỉ nằm trong file này (quyền `600`), không commit, không in ra, không đưa vào GitHub secret | zonenop |
 | Server `~/apps/be_game/.env` | `DATABASE_URL` | Chuỗi Neon **pooled** (`postgres://<user>:<password>@<host>/<db>?sslmode=require`). **Bí mật** (quyền `600`, không commit/in/GitHub secret). **Để trống** thì (image chạy `NODE_ENV=production`) tài khoản **chưa cấu hình**: đăng nhập và vào bàn bị từ chối, `/api/health` báo `accounts: "unconfigured"`, log có dòng `ACCOUNTS UNCONFIGURED`. Chỉ khi đặt thêm `ACCOUNTS_MEMORY=1` mới chạy tài khoản trong RAM (mất khi restart, mỗi máy một danh sách) ([đặt an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
 | Server `~/apps/be_game/.env` | `SESSION_SECRET` | Khoá ký phiên, `openssl rand -base64 32`. **Bí mật**; production thiếu thì `/api/auth/*`, `/api/admin/*`, `/api/track` trả 503. Dùng giá trị **giống hệt** Vercel `be-game` (cách chép an toàn: [Đặt bí mật an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
-| Server `~/apps/be_game/.env` | `ADMIN_USERNAMES` | Username admin, cách nhau dấu phẩy. Thành admin khi đăng ký **hoặc đăng nhập** (user đã có thành admin ở lần đăng nhập kế tiếp); tên chưa có thì ai đăng ký trước được quyền: đăng ký tài khoản của mình trước | zonenop |
+| Server `~/apps/be_game/.env` | `ADMIN_USERNAMES` | Username giữ chỗ cho admin, cách nhau dấu phẩy: không ai đăng ký hay đổi sang được. **Không** cấp quyền: xem [Cấp quyền admin](#cấp-quyền-admin) | zonenop |
 | Server `~/apps/be_game/.env` | `BE_GAME_COUNT_COMMANDS` | Tuỳ chọn: `1` = log số lệnh Redis mỗi 60 giây (xem [Đếm lệnh Redis](#đếm-lệnh-redis-upstash)) | zonenop |
 | Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`; cộng `http://localhost:3000` (mẫu preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app` đã bỏ ngày 2026-11-06) (các origin của site portfolio cũ đã bỏ ngày 2026-10-16). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
@@ -71,7 +71,7 @@ flowchart LR
 ```bash
 read -rs -p "DATABASE_URL: " v; echo; printf 'DATABASE_URL=%s\n' "$v" >> .env; unset v
 printf 'SESSION_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
-printf 'ADMIN_USERNAMES=%s\n' "<username-của-bạn>" >> .env
+printf 'ADMIN_USERNAMES=%s\n' "<tên-giữ-chỗ>" >> .env
 chmod 600 .env
 ```
 
@@ -150,6 +150,25 @@ Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại 
 **Quay lại bản trước**: revert commit trên `main` (deploy tự chạy), hoặc chạy Deploy bằng tay sau khi `main` đã trỏ về bản tốt. Quay hẳn về Vercel: đổi `NEXT_PUBLIC_TIENLEN_SERVER_URL` của zonenop-game về `https://be-game-omega.vercel.app` rồi build lại zonenop-game.
 
 **Sao lưu**: khi `REDIS_URL` trống, phòng và bảng xếp hạng nằm trong `./data/redis` (bind mount, AOF bật); sau khi chuyển sang kho chung (chưa làm) dữ liệu mới nằm ở Upstash, `./data/redis` chỉ còn dữ liệu lúc chuyển (giữ để quay lại). Chủ máy sao lưu `/home`, nên thư mục này được backup; Docker named volume thì không. Thư mục do uid 999 (redis) sở hữu, đọc bằng `docker exec be_game-redis-1 …`.
+
+### Cấp quyền admin
+
+Đăng ký hay đăng nhập không bao giờ cấp quyền admin. Admin đã có cấp cho người khác trong `/admin`; **admin đầu tiên** (hoặc khi không còn admin nào đăng nhập được) cấp theo id tài khoản:
+
+1. Người cần quyền đăng ký tài khoản bình thường trên trang game, rồi gửi bạn `user.id` của mình (trường `user.id` trong phản hồi `GET /api/auth/me` khi đã đăng nhập). Xác minh đúng người qua kênh riêng trước khi cấp.
+2. Xem trước (không đổi gì), kiểm tra tên in ra đúng người:
+   ```bash
+   dc exec -T be_game node_modules/.bin/tsx src/tools/bootstrap-admin.ts <user-id>
+   ```
+3. Cấp, kèm **mật khẩu mới** cho admin (12–72 ký tự). Mật khẩu đi qua stdin, không nằm trong lệnh (danh sách tiến trình, lịch sử shell):
+   ```bash
+   read -rs PW   # gõ mật khẩu mới, không hiện ra
+   printf '%s' "$PW" | dc exec -T be_game node_modules/.bin/tsx src/tools/bootstrap-admin.ts <user-id> --yes --password-stdin
+   unset PW
+   ```
+   Gửi mật khẩu cho người đó qua kênh riêng. Hai backend dùng chung Postgres nên chỉ chạy một lần; máy đang chạy thấy quyền mới trong ≤ 60 giây (cache phiên).
+
+Vì sao phải đổi mật khẩu: server chỉ lưu hash nên không biết mật khẩu cũ dài bao nhiêu, mà admin cần ít nhất 12 ký tự. Công cụ cần `DATABASE_URL` (container đã có), chỉ đổi vai trò và mật khẩu của đúng tài khoản đó, đăng xuất mọi phiên cũ của nó, từ chối id không tồn tại, tài khoản đang bị khoá, và mật khẩu dưới 12 ký tự. Tài khoản đã là admin thì không đổi gì. Trong `/admin`, cấp quyền cũng phải kèm mật khẩu mới (`{role:"admin", password}`; thiếu → 400). Thu hồi: `/admin` hoặc `PATCH /api/admin/users/<id>` `{role:"user"}`.
 
 ### Sau khi máy tắt cứng / bật lại
 

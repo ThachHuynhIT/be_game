@@ -10,22 +10,33 @@
     "dev": "tsx watch src/local.ts",
     "start": "tsx src/local.ts",
     "test": "vitest run",
+    "lint": "eslint . --pass-on-unpruned-suppressions",
+    "lint:prune": "eslint . --prune-suppressions",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "audit:check": "node scripts/audit-check.mjs",
+    "test:redis": "vitest run --config vitest.redis.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@vercel/functions": "^3.9.9",
     "ioredis": "^5.11.1",
     "pg": "^8.23.1",
-    "ws": "^8.21.3"
+    "ws": "^8.22.1"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
     "ioredis-mock": "^8.13.1",
     "pg-mem": "^3.0.14",
+    "prettier": "^3.9.10",
     "tsx": "^4.19.0",
     "typescript": "^5",
-    "vitest": "^3.2.7"
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
   }
 }
