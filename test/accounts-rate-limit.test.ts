@@ -73,7 +73,8 @@ describe("login rate limit", () => {
     expect(await svc.login({ username: "Minh", password: PW }, "9.9.9.9")).not.toMatchObject({ status: 429 });
     at(LOGIN_ACCOUNT_WINDOW_SEC * 1000);
     expect((await svc.login(right, "9.9.9.9")).ok).toBe(true);
-  });
+    // 50+ real scrypt verifications: about 3 s locally, over the 5 s default on CI runners.
+  }, 30_000);
 
   it("rotating IPv6 addresses inside one /64 shares one bucket", async () => {
     const { svc } = await setup();
