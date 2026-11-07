@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DEVICE_RE, isAllowedOrigin } from "./hub";
 import { ipBucket } from "../accounts/rateLimit";
 import { isPlayPath } from "../accounts/types";
-import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret } from "../accounts/service";
+import { parseAdminUsersOptions } from "../accounts/adminUsersQuery";
+import { ACCOUNTS_UNCONFIGURED, type AccountService, TOO_MANY, accountsConfigError, getAccountService, publicUser, sessionSecret, toAdminUser } from "../accounts/service";
 import { ADAPTERS } from "./adapters";
 import { getRoomStore, type GameKind } from "./store";
 
@@ -189,8 +190,10 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, path: string)
       if (method !== "GET") return methodNotAllowed();
       const q = (url.searchParams.get("q") ?? "").slice(0, 50);
       const page = Math.max(1, Math.min(10_000, Math.floor(Number(url.searchParams.get("page") ?? "1")) || 1));
-      const { rows, total } = await svc.store.listUsers(q, page, 50);
-      const users = rows.map((u) => ({ id: u.id, username: u.username, role: u.role, disabled: u.disabled, createdAt: u.createdAt.toISOString(), lastLoginAt: u.lastLoginAt?.toISOString() ?? null, games: u.games }));
+      const parsed = parseAdminUsersOptions(url.searchParams, process.env.OWNER_USERNAME);
+      if (!parsed.ok) return err(res, 400, parsed.error);
+      const { rows, total } = await svc.store.listUsers(q, page, 50, parsed.options);
+      const users = rows.map((u) => toAdminUser(u, u.games));
       return send(res, 200, { users, total, page, pageSize: 50 });
     }
     const m = /^\/api\/admin\/users\/([^/]+)$/.exec(path);

@@ -1,6 +1,6 @@
 # Self-hosted behind the host's Traefik + Cloudflare Tunnel (no published ports, no Caddy): be_game + Redis.
 #   docker compose -f compose.selfhost.yml up -d --build      → https://${GAME_DOMAIN}
-# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN and ALLOWED_ORIGIN (required), REDIS_URL, DATABASE_URL, SESSION_SECRET, ADMIN_USERNAMES, ACCOUNTS_MEMORY and BE_GAME_COUNT_COMMANDS (optional).
+# Deployed by .github/workflows/deploy.yml. .env next to this file: GAME_DOMAIN and ALLOWED_ORIGIN (required), REDIS_URL, DATABASE_URL, SESSION_SECRET, ADMIN_USERNAMES, OWNER_USERNAME, ACCOUNTS_MEMORY and BE_GAME_COUNT_COMMANDS (optional).
 #
 # be_game joins the external `traefik_network` (Traefik routes GAME_DOMAIN to it via the labels below);
 # Redis stays on the project's own network and is reachable only by be_game.
@@ -30,6 +30,8 @@ services:
       ACCOUNTS_MEMORY: ${ACCOUNTS_MEMORY:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
       ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
+      # Listed one by one: a variable only in .env never reaches the container. Unset = no owner protection.
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
       # Commit being deployed (exported by .github/workflows/deploy.yml); /api/health reports it.
       BUILD_COMMIT: ${BUILD_COMMIT:-}
     depends_on:

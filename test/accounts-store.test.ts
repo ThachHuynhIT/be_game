@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createMemoryAccountStore, type AccountStore } from "../src/accounts/store";
 import { createPgAccountStore } from "../src/accounts/pg";
 import { MIGRATIONS, migrate } from "../src/accounts/migrations";
+import { DEFAULT_ADMIN_USERS_OPTIONS, type AdminUsersOptions } from "../src/accounts/adminUsersQuery";
 
 async function pgStore(): Promise<AccountStore> {
   const db = newDb();
@@ -59,6 +60,73 @@ describe.each([["memory", async () => createMemoryAccountStore()], ["postgres (p
     const s = await make();
     await s.createUser({ ...base, usernameKey: "abc", username: "abc" });
     expect((await s.listUsers("%", 1, 50)).total).toBe(0);
+  });
+
+  describe("admin list filters and sorts before paging", () => {
+    const opts = (o: Partial<AdminUsersOptions>): AdminUsersOptions => ({ ...DEFAULT_ADMIN_USERS_OPTIONS, ...o });
+    /** u00..u59: created in order, every third an admin, every fifth locked, u07 logged in late, u55 with the most games. */
+    async function seed(s: AccountStore) {
+      const ids: Record<string, string> = {};
+      for (let i = 0; i < 60; i++) {
+        const n = `u${String(i).padStart(2, "0")}`;
+        const u = (await s.createUser({ ...base, usernameKey: n, username: n, role: i % 3 === 0 ? "admin" : "user", createdAt: new Date(1000 + i) }))!;
+        ids[n] = u.id;
+        if (i % 5 === 0) await s.updateUser(u.id, { disabled: true });
+        if (i === 7 || i === 9) await s.updateUser(u.id, { lastLoginAt: new Date(i === 7 ? 9000 : 8000) });
+      }
+      await s.recordResults("tienlen", "g1", new Date(5000), [{ usernameKey: "u55", points: 1, rank: 1 }, { usernameKey: "u03", points: 0, rank: 2 }]);
+      await s.recordResults("tienlen", "g2", new Date(5001), [{ usernameKey: "u55", points: 1, rank: 1 }]);
+      return ids;
+    }
+
+    it("keeps the three-argument call as all users, newest first", async () => {
+      const s = await make();
+      await seed(s);
+      const r = await s.listUsers("", 1, 50);
+      expect(r.total).toBe(60);
+      expect(r.rows[0].username).toBe("u59");
+      expect((await s.listUsers("", 1, 50, DEFAULT_ADMIN_USERS_OPTIONS)).rows.map((x) => x.id)).toEqual(r.rows.map((x) => x.id));
+    });
+
+    it("filters before paging and reports the matching total", async () => {
+      const s = await make();
+      await seed(s);
+      const admins = await s.listUsers("", 1, 5, opts({ filter: "admin" }));
+      expect(admins.total).toBe(20);
+      expect(admins.rows.every((r) => r.role === "admin")).toBe(true);
+      expect((await s.listUsers("", 4, 5, opts({ filter: "admin" }))).rows.map((r) => r.username)).toEqual(["u12", "u09", "u06", "u03", "u00"]);
+      const locked = await s.listUsers("u1", 1, 50, opts({ filter: "disabled" }));
+      expect(locked.rows.map((r) => r.username)).toEqual(["u15", "u10"]);
+      expect(locked.total).toBe(2);
+      expect((await s.listUsers("", 1, 50, opts({ filter: "owner", ownerKey: "u42" }))).rows.map((r) => r.username)).toEqual(["u42"]);
+      expect((await s.listUsers("", 1, 50, opts({ filter: "owner", ownerKey: null }))).total).toBe(0);
+    });
+
+    it("sorts by games across pages, not within one page", async () => {
+      const s = await make();
+      await seed(s);
+      const top = await s.listUsers("", 1, 3, opts({ sort: "games", order: "desc" }));
+      expect(top.rows.map((r) => r.games)).toEqual([2, 1, 0]);
+      expect(top.rows.slice(0, 2).map((r) => r.username)).toEqual(["u55", "u03"]);
+      const last = await s.listUsers("", 20, 3, opts({ sort: "games", order: "asc" }));
+      expect(last.rows.slice(1).map((r) => r.username)).toEqual(["u03", "u55"]);
+      // Ties (58 users with no games) follow id order, the same on every page.
+      const zeros = (await s.listUsers("", 1, 60, opts({ sort: "games", order: "asc" }))).rows.slice(0, 58).map((r) => r.id);
+      expect(zeros).toEqual([...zeros].sort());
+    });
+
+    it("sorts by last login with never-logged-in users last in both directions", async () => {
+      const s = await make();
+      await seed(s);
+      const desc = await s.listUsers("", 1, 3, opts({ sort: "lastLoginAt", order: "desc" }));
+      expect(desc.rows.slice(0, 2).map((r) => r.username)).toEqual(["u07", "u09"]);
+      expect(desc.rows[2].lastLoginAt).toBeNull();
+      const asc = await s.listUsers("", 1, 3, opts({ sort: "lastLoginAt", order: "asc" }));
+      expect(asc.rows.slice(0, 2).map((r) => r.username)).toEqual(["u09", "u07"]);
+      expect(asc.rows[2].lastLoginAt).toBeNull();
+      const lastPage = await s.listUsers("", 20, 3, opts({ sort: "lastLoginAt", order: "desc" }));
+      expect(lastPage.rows.every((r) => r.lastLoginAt === null)).toBe(true);
+    });
   });
 });
 

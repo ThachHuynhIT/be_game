@@ -169,6 +169,7 @@ Server → client: `ack {id, ok, error?, code?}` · `state {view}` (mỗi ngư�
 | `DATABASE_URL` | _(trống = tài khoản trong RAM ở dev; production thì "chưa cấu hình", 503)_ | Postgres (Neon) cho tài khoản, kết quả ván, lượt xem. **Bí mật** |
 | `SESSION_SECRET` | _(trống)_ | Khoá ký token đăng nhập (`openssl rand -base64 32`). **Bí mật**; production thiếu thì route auth trả 503 |
 | `ADMIN_USERNAMES` | _(trống)_ | Username **giữ chỗ** cho admin: không ai đăng ký hay đổi sang được (admin thì được). **Không** cấp quyền: admin được cấp theo id tài khoản bằng `tsx src/tools/bootstrap-admin.ts <user-id> --yes --password-stdin` (kèm mật khẩu mới 12+ ký tự qua stdin; docs/SELF_HOSTING.md) |
+| `OWNER_USERNAME` | _(trống)_ | Username của **chủ sở hữu** (admin đầu tiên): admin khác không đổi quyền, khoá hay đặt mật khẩu cho tài khoản này (403); chủ sở hữu vẫn tự đổi mật khẩu. Tên này cũng bị giữ chỗ như `ADMIN_USERNAMES`. **Không** cấp quyền. Trống = không bảo vệ (một cảnh báo lúc khởi động). Đặt giống nhau ở cả hai backend; docs/GUIDE.md → "Tài khoản và theo dõi" |
 | `ACCOUNTS_MEMORY` | _(trống)_ | `1` = cho production chạy tài khoản trong RAM khi không có `DATABASE_URL` (mất khi restart). Bình thường để trống |
 | `PORT` / `HOST` | `4000` / `0.0.0.0` | Cổng và địa chỉ lắng nghe khi chạy local |
 | `BE_GAME_COUNT_COMMANDS` | _(trống)_ | `1` = log số lệnh Redis mỗi 60 giây (đo trước khi chuyển sang Upstash; xem `docs/SELF_HOSTING.md`) |

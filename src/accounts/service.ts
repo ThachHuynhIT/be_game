@@ -4,10 +4,17 @@ import { type RateLimiter, ipBucket, memoryRateLimiter, redisRateLimiter } from 
 import { readSession, signSession } from "./session";
 import { type AccountStore, createMemoryAccountStore } from "./store";
 import type { Role, UserPrefs, UserRow } from "./types";
+import { isOwnerUsername, ownerKey, ownerUpdateProblem } from "./owner";
 import { normalizeUsername, validatePassword } from "./username";
 
 export type PublicUser = { id: string; username: string; role: Role; icon: string; color: string };
-export type AdminUser = { id: string; username: string; role: Role; disabled: boolean; createdAt: string; lastLoginAt: string | null; games: number };
+/** `isOwner`: the account named by OWNER_USERNAME (`./owner.ts`), so the admin UI can hide the actions refused for it. */
+export type AdminUser = { id: string; username: string; role: Role; disabled: boolean; createdAt: string; lastLoginAt: string | null; games: number; isOwner: boolean };
+
+/** The admin-list shape of a user row (GET /api/admin/users and every admin PATCH answer). */
+export function toAdminUser(u: UserRow, games: number): AdminUser {
+  return { id: u.id, username: u.username, role: u.role, disabled: u.disabled, createdAt: u.createdAt.toISOString(), lastLoginAt: u.lastLoginAt?.toISOString() ?? null, games, isOwner: isOwnerUsername(u.username, process.env.OWNER_USERNAME) };
+}
 export type Result<T> = ({ ok: true } & T) | { ok: false; status: number; error: string };
 
 // Copied from zonenop-game src/components/games/gameClient.ts.
@@ -98,16 +105,22 @@ export function warnIfAccountsUnconfigured(env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
- * Usernames reserved for admins (ADMIN_USERNAMES): nobody may register or rename to them, only an admin may rename to one.
- * Being listed grants nothing: admin is granted by user id with `src/tools/bootstrap-admin.ts`.
+ * Usernames reserved for admins (ADMIN_USERNAMES, plus the owner's OWNER_USERNAME): nobody may register or rename to
+ * them, only an admin may rename to one. Being listed grants nothing: admin is granted by user id with
+ * `src/tools/bootstrap-admin.ts`. Reserving the owner's name keeps a user from taking it, and with it the owner's
+ * protection, after the owner renames.
  */
-const reservedKeys = () =>
-  new Set(
+const reservedKeys = () => {
+  const keys = new Set(
     (process.env.ADMIN_USERNAMES ?? "")
       .split(",")
       .map((s) => normalizeUsername(s))
       .flatMap((r) => (r.ok ? [r.key] : [])),
   );
+  const owner = ownerKey(process.env.OWNER_USERNAME);
+  if (owner) keys.add(owner);
+  return keys;
+};
 
 /** Rate limiter that fails open: a Redis outage must not lock everyone out. Logs at most once a minute. */
 function failOpen(inner: RateLimiter): RateLimiter {
@@ -142,8 +155,7 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
   };
   const adminUser = async (u: UserRow): Promise<AdminUser> => {
     const found = await store.listUsers(u.username, 1, 50);
-    const games = found.rows.find((r) => r.id === u.id)?.games ?? 0;
-    return { id: u.id, username: u.username, role: u.role, disabled: u.disabled, createdAt: u.createdAt.toISOString(), lastLoginAt: u.lastLoginAt?.toISOString() ?? null, games };
+    return toAdminUser(u, found.rows.find((r) => r.id === u.id)?.games ?? 0);
   };
 
   const svc: AccountService = {
@@ -278,22 +290,23 @@ export function createAccountService(store: AccountStore, limiter: RateLimiter, 
       if (id === admin.id && ((patch.role !== undefined && patch.role !== "admin") || patch.disabled === true)) return fail(400, "Không thể tự hạ quyền hoặc tự khoá chính mình");
       if (patch.role !== undefined && patch.role !== "user" && patch.role !== "admin") return fail(400, "Vai trò không hợp lệ");
       if (patch.disabled !== undefined && typeof patch.disabled !== "boolean") return fail(400, "Giá trị khoá không hợp lệ");
+      const target = await store.userById(id);
+      if (!target) return fail(404, "Không tìm thấy người dùng");
+      // Checked before anything is hashed or written: a refused patch changes nothing, not even its allowed fields.
+      const ownerErr = ownerUpdateProblem(admin.id, target, patch, process.env.OWNER_USERNAME);
+      if (ownerErr) return fail(403, ownerErr);
+      if (patch.role === "admin" && target.role !== "admin" && patch.password === undefined) return fail(400, ADMIN_NEEDS_PASSWORD);
       const upd: Parameters<AccountStore["updateUser"]>[1] = {};
       if (patch.role !== undefined) upd.role = patch.role;
       if (patch.disabled !== undefined) upd.disabled = patch.disabled;
       // Locking revokes every issued token (spec §7): unlocking later must not revive them.
       if (patch.disabled === true) upd.bumpSession = true;
-      if (patch.password !== undefined || patch.role === "admin") {
-        const target = await store.userById(id);
-        if (!target) return fail(404, "Không tìm thấy người dùng");
-        if (patch.role === "admin" && target.role !== "admin" && patch.password === undefined) return fail(400, ADMIN_NEEDS_PASSWORD);
-        if (patch.password !== undefined) {
-          // The policy of the role the account ends up with: resetting an admin (or making one) needs an admin-length password.
-          const err = validatePassword(patch.password, patch.role ?? target.role);
-          if (err) return fail(400, err);
-          upd.passwordHash = await hashPassword(patch.password);
-          upd.bumpSession = true;
-        }
+      if (patch.password !== undefined) {
+        // The policy of the role the account ends up with: resetting an admin (or making one) needs an admin-length password.
+        const err = validatePassword(patch.password, patch.role ?? target.role);
+        if (err) return fail(400, err);
+        upd.passwordHash = await hashPassword(patch.password);
+        upd.bumpSession = true;
       }
       const next = await store.updateUser(id, upd);
       if (!next) return fail(404, "Không tìm thấy người dùng");

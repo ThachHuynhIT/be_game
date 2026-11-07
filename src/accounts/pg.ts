@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { allApplied, appliedMigrations, migrate } from "./migrations";
+import { DEFAULT_ADMIN_USERS_OPTIONS, type AdminUsersOptions, normalizeAdminSearch } from "./adminUsersQuery";
 import type { AccountStore, NewUser } from "./store";
 import { statDays, vnDay, vnDayStart, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserPrefs, type UserRow } from "./types";
 
@@ -207,24 +208,32 @@ class PgAccountStore implements AccountStore {
     return r.rowCount ?? 0;
   }
 
-  async listUsers(q: string, page: number, pageSize: number) {
+  async listUsers(q: string, page: number, pageSize: number, options: AdminUsersOptions = DEFAULT_ADMIN_USERS_OPTIONS) {
+    if (options.filter === "owner" && options.ownerKey === null) return { rows: [], total: 0 };
     // Escape LIKE wildcards (Postgres default escape is backslash). pg-mem ignores backslash escapes for `_`.
-    const like = `%${q.toLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
-    const total = await this.pool.query("select count(*) as n from users where username_key like $1", [like]);
-    const { rows } = await this.pool.query("select * from users where username_key like $1 order by created_at desc, id limit $2 offset $3", [
-      like,
-      pageSize,
-      (Math.max(1, page) - 1) * pageSize,
-    ]);
-    // Separate grouped query (rather than a correlated subquery) keeps the SQL simple for pg-mem.
-    const games = new Map<string, number>();
-    if (rows.length) {
-      const ids = rows.map((r) => r.id);
-      const marks = ids.map((_, i) => `$${i + 1}`).join(", ");
-      const counts = await this.pool.query(`select user_id, count(*) as n from game_results where user_id in (${marks}) group by user_id`, ids);
-      for (const c of counts.rows) games.set(c.user_id, Number(c.n));
-    }
-    return { rows: rows.map((r) => ({ ...toUser(r), games: games.get(r.id) ?? 0 })), total: Number(total.rows[0].n) };
+    const params: unknown[] = [`%${normalizeAdminSearch(q).replace(/[\\%_]/g, "\\$&")}%`];
+    const where = ["u.username_key like $1"];
+    if (options.filter === "admin") where.push("u.role = 'admin'");
+    if (options.filter === "disabled") where.push("u.disabled = true");
+    if (options.filter === "owner") where.push(`u.username_key = $${params.push(options.ownerKey)}`);
+    const cond = where.join(" and ");
+    const total = await this.pool.query(`select count(*) as n from users u where ${cond}`, params);
+    // Only allow-listed SQL below: the sort key and direction come from AdminUsersOptions, never from the request.
+    const dir = options.order === "asc" ? "asc" : "desc";
+    const order =
+      options.sort === "games"
+        ? `games ${dir}, u.id`
+        : options.sort === "lastLoginAt"
+          ? `case when u.last_login_at is null then 1 else 0 end, u.last_login_at ${dir}, u.id`
+          : `u.created_at ${dir}, u.id`;
+    // Games are counted for every candidate before LIMIT, so sorting by games is global, not per page.
+    const { rows } = await this.pool.query(
+      `select u.*, coalesce(g.n, 0) as games from users u
+       left join (select user_id, count(*) as n from game_results group by user_id) g on g.user_id = u.id
+       where ${cond} order by ${order} limit $${params.length + 1} offset $${params.length + 2}`,
+      [...params, pageSize, (Math.max(1, page) - 1) * pageSize],
+    );
+    return { rows: rows.map((r) => ({ ...toUser(r), games: Number(r.games) })), total: Number(total.rows[0].n) };
   }
 }
 

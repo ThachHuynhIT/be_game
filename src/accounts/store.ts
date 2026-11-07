@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_ADMIN_USERS_OPTIONS, type AdminUsersOptions, compareAdminUsers, matchesAdminUser, normalizeAdminSearch } from "./adminUsersQuery";
 import { isPlayPath, statDays, vnDay, type AdminStats, type LeaderRow, type ResultRow, type Role, type UserPatch, type UserPrefs, type UserRow } from "./types";
 
 export interface NewUser {
@@ -24,7 +25,8 @@ export interface AccountStore {
   getPrefs(userId: string): Promise<UserPrefs | null>;
   /** Replaces one game's entry, leaving the others; returns every game's prefs, null = no such user. */
   setGamePrefs(userId: string, game: string, prefs: Record<string, unknown>): Promise<UserPrefs | null>;
-  listUsers(q: string, page: number, pageSize: number): Promise<{ rows: (UserRow & { games: number })[]; total: number }>;
+  /** Search, filter and sort (`options`, default all users newest first) apply before paging; `total` counts the matches. */
+  listUsers(q: string, page: number, pageSize: number, options?: AdminUsersOptions): Promise<{ rows: (UserRow & { games: number })[]; total: number }>;
   /** Unknown users are skipped; rows already recorded for (game, recordId, user) are ignored. */
   recordResults(game: string, recordId: string, at: Date, rows: ResultRow[]): Promise<void>;
   /** ORDER BY points DESC, wins DESC, name. */
@@ -205,11 +207,14 @@ class MemoryAccountStore implements AccountStore {
     return before - this.views.length;
   }
 
-  async listUsers(q: string, page: number, pageSize: number) {
-    const needle = q.toLowerCase();
-    const all = [...this.users.values()].filter((r) => r.usernameKey.includes(needle)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? -1 : 1));
+  async listUsers(q: string, page: number, pageSize: number, options: AdminUsersOptions = DEFAULT_ADMIN_USERS_OPTIONS) {
+    const needle = normalizeAdminSearch(q);
+    const all = [...this.users.values()]
+      .filter((r) => matchesAdminUser(r, needle, options))
+      .map((r) => ({ ...copy(r), games: this.gamesOf(r.id) }))
+      .sort((a, b) => compareAdminUsers(a, b, options));
     const start = (Math.max(1, page) - 1) * pageSize;
-    return { rows: all.slice(start, start + pageSize).map((r) => ({ ...copy(r), games: this.gamesOf(r.id) })), total: all.length };
+    return { rows: all.slice(start, start + pageSize), total: all.length };
   }
 }
 
