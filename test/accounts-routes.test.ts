@@ -299,6 +299,159 @@ describe("account routes", () => {
     expect((await call("PATCH", "/api/admin/users/00000000-0000-4000-8000-000000000000", { disabled: true }, { token: boss.session })).status).toBe(404);
   });
 
+  describe("owner (OWNER_USERNAME)", () => {
+    afterEach(() => void delete process.env.OWNER_USERNAME);
+    const snapshot = async (id: string) => {
+      const u = await (await getAccountService()).store.userById(id);
+      return { hash: u?.passwordHash, role: u?.role, disabled: u?.disabled, ver: u?.sessionVersion };
+    };
+    /** The owner registers first (the name is reserved once OWNER_USERNAME is set), then another admin. */
+    async function setup() {
+      const chu = await registerAdmin("Chu Nha");
+      process.env.OWNER_USERNAME = " chu  NHA ";
+      const boss = await registerAdmin("Sep");
+      return { chu, boss };
+    }
+
+    it("another admin cannot change the owner's role, lock them or set their password; nothing changes", async () => {
+      const { chu, boss } = await setup();
+      const before = await snapshot(chu.user.id);
+      const cases: [unknown, string][] = [
+        [{ role: "user" }, "Không thể đổi quyền của chủ sở hữu"],
+        [{ role: "admin" }, "Không thể đổi quyền của chủ sở hữu"],
+        [{ disabled: true }, "Không thể khoá chủ sở hữu"],
+        [{ password: "mat-khau-moi-dai-du" }, "Không thể đặt mật khẩu cho chủ sở hữu"],
+        [{ password: "1" }, "Không thể đặt mật khẩu cho chủ sở hữu"],
+        [{ role: "user", disabled: true, password: "mat-khau-moi-dai-du" }, "Không thể đổi quyền của chủ sở hữu"],
+      ];
+      for (const [body, error] of cases) {
+        const r = await call("PATCH", `/api/admin/users/${chu.user.id}`, body, { token: boss.session });
+        expect(r.status, JSON.stringify(body)).toBe(403);
+        expect(r.json).toEqual({ ok: false, error });
+      }
+      expect(await snapshot(chu.user.id)).toEqual(before);
+      expect((await call("GET", "/api/auth/me", undefined, { token: chu.session })).status).toBe(200);
+      // Unlocking is allowed (only locking is guarded).
+      const unlock = await call("PATCH", `/api/admin/users/${chu.user.id}`, { disabled: false }, { token: boss.session });
+      expect(unlock.status).toBe(200);
+      expect(unlock.json.user.isOwner).toBe(true);
+    });
+
+    it("flags the owner in the list and in PATCH responses, and nobody else", async () => {
+      const { chu, boss } = await setup();
+      const list = await call("GET", "/api/admin/users", undefined, { token: boss.session });
+      const flags = Object.fromEntries(list.json.users.map((u: { username: string; isOwner: boolean }) => [u.username, u.isOwner]));
+      expect(flags).toEqual({ "Chu Nha": true, Sep: false });
+      const lan = (await register("Lan")).json;
+      const r = await call("PATCH", `/api/admin/users/${lan.user.id}`, { disabled: true }, { token: boss.session });
+      expect(r.json.user.isOwner).toBe(false);
+      expect((await call("GET", "/api/auth/me", undefined, { token: chu.session })).json.user).not.toHaveProperty("isOwner");
+    });
+
+    it("the owner still changes their own password, through the admin route or PATCH me", async () => {
+      const { chu } = await setup();
+      const self = await call("PATCH", `/api/admin/users/${chu.user.id}`, { password: "mat-khau-chu-moi-1" }, { token: chu.session });
+      expect(self.status).toBe(200);
+      const login = await call("POST", "/api/auth/login", { username: "Chu Nha", password: "mat-khau-chu-moi-1" });
+      expect(login.status).toBe(200);
+      const me = await call("PATCH", "/api/auth/me", { password: "mat-khau-chu-moi-2", oldPassword: "mat-khau-chu-moi-1" }, { token: login.json.session });
+      expect(me.status).toBe(200);
+      expect((await call("POST", "/api/auth/login", { username: "Chu Nha", password: "mat-khau-chu-moi-2" })).status).toBe(200);
+    });
+
+    it("reserves the owner's name: nobody registers it, a non-admin cannot rename to it, it grants no role", async () => {
+      process.env.OWNER_USERNAME = "Chu Nha";
+      for (const name of ["Chu Nha", " CHU  nha "]) {
+        const r = await register(name);
+        expect(r.status).toBe(400);
+        expect(r.json.error).toBe(RESERVED_NAME);
+      }
+      const lan = (await register("Lan")).json;
+      const rename = await call("PATCH", "/api/auth/me", { username: "chu nha" }, { token: lan.session });
+      expect(rename.status).toBe(400);
+      expect(rename.json.error).toBe(RESERVED_NAME);
+      expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).json.user).toMatchObject({ username: "Lan", role: "user" });
+      // An admin may still rename to the free owner name (documented limit).
+      const boss = await registerAdmin("Sep");
+      expect((await call("PATCH", "/api/auth/me", { username: "Chu Nha" }, { token: boss.session })).status).toBe(200);
+    });
+
+    it("the user list takes filter, sort and order, and rejects anything else", async () => {
+      const { boss } = await setup();
+      const lan = (await register("Lan")).json;
+      await call("PATCH", `/api/admin/users/${lan.user.id}`, { disabled: true }, { token: boss.session });
+      const get = (qs: string) => call("GET", `/api/admin/users?${qs}`, undefined, { token: boss.session });
+      const names = async (qs: string) => (await get(qs)).json.users.map((u: { username: string }) => u.username);
+      expect(await names("filter=owner")).toEqual(["Chu Nha"]);
+      expect(await names("filter=admin&sort=createdAt&order=asc")).toEqual(["Chu Nha", "Sep"]);
+      expect(await names("filter=disabled")).toEqual(["Lan"]);
+      expect(await names("q=CHU&filter=admin")).toEqual(["Chu Nha"]);
+      const r = await get("filter=disabled&page=1");
+      expect(r.json).toMatchObject({ total: 1, page: 1, pageSize: 50 });
+      for (const bad of ["filter=everyone", "sort=username", "sort=created_at%20desc%3B", "order=sideways"]) {
+        const b = await get(bad);
+        expect(b.status, bad).toBe(400);
+        expect(b.json).toEqual({ ok: false, error: "Bộ lọc hoặc sắp xếp không hợp lệ" });
+      }
+      expect((await call("GET", "/api/admin/users?filter=owner")).status).toBe(401);
+      // Lan's session was revoked by the lock; a signed-in non-admin gets 403 (tested in "admin gate and stats").
+      expect((await call("GET", "/api/admin/users?filter=owner", undefined, { token: lan.session })).status).toBe(401);
+    });
+
+    it("with OWNER_USERNAME unset there is no owner protection", async () => {
+      const chu = await registerAdmin("Chu Nha");
+      const boss = await registerAdmin("Sep");
+      const r = await call("PATCH", `/api/admin/users/${chu.user.id}`, { disabled: true }, { token: boss.session });
+      expect(r.status).toBe(200);
+      expect(r.json.user.isOwner).toBe(false);
+    });
+  });
+
+  describe("admin password reset refuses a one-character password", () => {
+    const snapshot = async (id: string) => {
+      const u = await (await getAccountService()).store.userById(id);
+      return { hash: u?.passwordHash, role: u?.role, disabled: u?.disabled, ver: u?.sessionVersion };
+    };
+
+    it("for a user target, with nothing changed", async () => {
+      const boss = await registerAdmin();
+      const lan = (await register("Lan")).json;
+      const before = await snapshot(lan.user.id);
+      const r = await call("PATCH", `/api/admin/users/${lan.user.id}`, { password: "1" }, { token: boss.session });
+      expect(r.status).toBe(400);
+      expect(r.json).toEqual({ ok: false, error: "Mật khẩu cần ít nhất 8 ký tự" });
+      expect(await snapshot(lan.user.id)).toEqual(before);
+      expect((await call("GET", "/api/auth/me", undefined, { token: lan.session })).status).toBe(200);
+      expect((await call("POST", "/api/auth/login", { username: "Lan", password: "1" })).status).toBe(401);
+      expect((await call("POST", "/api/auth/login", { username: "Lan", password: "matkhau123" })).status).toBe(200);
+    });
+
+    it("for an admin target, and when promoting", async () => {
+      const boss = await registerAdmin();
+      const other = await registerAdmin("Pho");
+      const before = await snapshot(other.user.id);
+      const r = await call("PATCH", `/api/admin/users/${other.user.id}`, { password: "1" }, { token: boss.session });
+      expect(r.status).toBe(400);
+      expect(r.json).toEqual({ ok: false, error: "Mật khẩu admin cần ít nhất 12 ký tự" });
+      expect(await snapshot(other.user.id)).toEqual(before);
+      const lan = (await register("Lan")).json;
+      const promote = await call("PATCH", `/api/admin/users/${lan.user.id}`, { role: "admin", password: "1" }, { token: boss.session });
+      expect(promote.status).toBe(400);
+      expect((await snapshot(lan.user.id)).role).toBe("user");
+    });
+
+    it("for non-string passwords", async () => {
+      const boss = await registerAdmin();
+      const lan = (await register("Lan")).json;
+      const before = await snapshot(lan.user.id);
+      for (const password of [1, null, ["12345678"], { a: 1 }]) {
+        const r = await call("PATCH", `/api/admin/users/${lan.user.id}`, { password }, { token: boss.session });
+        expect(r.status, JSON.stringify(password)).toBe(400);
+      }
+      expect(await snapshot(lan.user.id)).toEqual(before);
+    });
+  });
+
   it("tracks page views", async () => {
     const boss = await registerAdmin();
     const stats = async () => (await call("GET", "/api/admin/stats?days=7", undefined, { token: boss.session })).json.totals.views;

@@ -48,6 +48,7 @@ flowchart LR
 | Server `~/apps/be_game/.env` | `DATABASE_URL` | Chuỗi Neon **pooled** (`postgres://<user>:<password>@<host>/<db>?sslmode=require`). **Bí mật** (quyền `600`, không commit/in/GitHub secret). **Để trống** thì (image chạy `NODE_ENV=production`) tài khoản **chưa cấu hình**: đăng nhập và vào bàn bị từ chối, `/api/health` báo `accounts: "unconfigured"`, log có dòng `ACCOUNTS UNCONFIGURED`. Chỉ khi đặt thêm `ACCOUNTS_MEMORY=1` mới chạy tài khoản trong RAM (mất khi restart, mỗi máy một danh sách) ([đặt an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
 | Server `~/apps/be_game/.env` | `SESSION_SECRET` | Khoá ký phiên, `openssl rand -base64 32`. **Bí mật**; production thiếu thì `/api/auth/*`, `/api/admin/*`, `/api/track` trả 503. Dùng giá trị **giống hệt** Vercel `be-game` (cách chép an toàn: [Đặt bí mật an toàn](#đặt-bí-mật-an-toàn)) | zonenop |
 | Server `~/apps/be_game/.env` | `ADMIN_USERNAMES` | Username giữ chỗ cho admin, cách nhau dấu phẩy: không ai đăng ký hay đổi sang được. **Không** cấp quyền: xem [Cấp quyền admin](#cấp-quyền-admin) | zonenop |
+| Server `~/apps/be_game/.env` | `OWNER_USERNAME` | Username của chủ sở hữu (admin đầu tiên): admin khác không đổi quyền, khoá hay đặt mật khẩu được. Giống hệt Vercel `be-game`. `compose.selfhost.yml` phải có dòng `OWNER_USERNAME: ${OWNER_USERNAME:-}` (compose chỉ chuyển vào container các biến được liệt kê). Trống = không bảo vệ. Xem [Chủ sở hữu](#chủ-sở-hữu) | zonenop |
 | Server `~/apps/be_game/.env` | `BE_GAME_COUNT_COMMANDS` | Tuỳ chọn: `1` = log số lệnh Redis mỗi 60 giây (xem [Đếm lệnh Redis](#đếm-lệnh-redis-upstash)) | zonenop |
 | Server `~/apps/be_game/.env` | `ALLOWED_ORIGIN` | Frontend hiện tại là zonenop-game: `https://play.fudio101.com`, `https://zonenop-game.vercel.app`; cộng `http://localhost:3000` (mẫu preview `https://zonenop-game-*-thachs-projects-48e5eaf9.vercel.app` đã bỏ ngày 2026-11-06) (các origin của site portfolio cũ đã bỏ ngày 2026-10-16). Viết đủ ở một dòng, cách nhau dấu phẩy | zonenop |
 | GitHub env `self-hosted` (secret) | `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE` | Trusted credential (workload identity federation) của Tailscale; `TS_AUDIENCE` = `api.tailscale.com/<client ID>` | chủ máy tạo, zonenop đặt |
@@ -60,7 +61,7 @@ flowchart LR
 | zonenop-game tự host (`~/apps/zonenop-game`) | — | Frontend ở `https://play.fudio101.com`, gọi be_game qua `https://play-api.fudio101.com`; hai hostname cùng tunnel và Traefik của chủ máy | zonenop |
 | zonenop-game (`~/apps/zonenop-game/.env` và/hoặc Vercel project `zonenop-game`) | `NEXT_PUBLIC_TIENLEN_SERVER_URL` | `https://play-api.fudio101.com`. Gắn vào bundle **lúc build** (build arg của Docker, hoặc build Vercel): đổi thì phải build lại | zonenop |
 | Vercel project `be-game` | `ALLOWED_ORIGIN` | Giống hệt server chính (kể cả `https://play.fudio101.com`). Đọc lúc chạy nhưng Vercel chỉ áp dụng env mới cho bản deploy mới: đổi xong phải redeploy production | zonenop |
-| zonenop-game (như trên) | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | `https://be-game-omega.vercel.app`: máy dự phòng. Máy chính không trả lời thì sảnh và bàn mới dùng máy này; phòng đã có vẫn gắn với máy tạo ra nó (`docs/GAMES_GUIDE.md` §1.2 của repo zonenop-game) | zonenop |
+| zonenop-game (như trên) | `NEXT_PUBLIC_TIENLEN_FALLBACK_URL` | **Hiện không đặt** ở cả bản tự host lẫn bản Vercel (kiểm bundle ngày 2026-11-08), nên frontend chưa chuyển sang máy dự phòng. Khi đặt (ví dụ `https://be-game-omega.vercel.app`): máy chính không trả lời thì sảnh và bàn mới dùng máy đó; phòng đã có vẫn gắn với máy tạo ra nó (`docs/GAMES_GUIDE.md` §1.2 của repo zonenop-game) | zonenop |
 | Tailscale admin | `tag:ci` + ACL | `tag:ci` chỉ được vào `vsmart-zangyapro:22` | chủ máy |
 | Traefik, cloudflared | `traefik_network`, entrypoint `web`, tunnel | Hạ tầng public | chủ máy |
 
@@ -169,6 +170,16 @@ Lệnh này không xoá file đã bị xoá khỏi repo; ưu tiên chạy lại 
    Gửi mật khẩu cho người đó qua kênh riêng. Hai backend dùng chung Postgres nên chỉ chạy một lần; máy đang chạy thấy quyền mới trong ≤ 60 giây (cache phiên).
 
 Vì sao phải đổi mật khẩu: server chỉ lưu hash nên không biết mật khẩu cũ dài bao nhiêu, mà admin cần ít nhất 12 ký tự. Công cụ cần `DATABASE_URL` (container đã có), chỉ đổi vai trò và mật khẩu của đúng tài khoản đó, đăng xuất mọi phiên cũ của nó, từ chối id không tồn tại, tài khoản đang bị khoá, và mật khẩu dưới 12 ký tự. Tài khoản đã là admin thì không đổi gì. Trong `/admin`, cấp quyền cũng phải kèm mật khẩu mới (`{role:"admin", password}`; thiếu → 400). Thu hồi: `/admin` hoặc `PATCH /api/admin/users/<id>` `{role:"user"}`.
+
+### Chủ sở hữu
+
+`OWNER_USERNAME` đặt tên tài khoản chủ sở hữu (admin đầu tiên). Admin khác không đổi quyền, không khoá, không đặt mật khẩu cho tài khoản đó (403, `docs/GUIDE.md` → "Tài khoản và theo dõi"). Biến **không** cấp quyền: tài khoản phải được cấp admin trước (mục trên).
+
+1. Đặt cùng một giá trị ở `~/apps/be_game/.env` (`printf 'OWNER_USERNAME=%s\n' "<tên-chủ-sở-hữu>" >> .env`, sửa dòng cũ nếu đã có) và ở Vercel `be-game` (Production), rồi redeploy Vercel. Kiểm tra `compose.selfhost.yml` có dòng `OWNER_USERNAME: ${OWNER_USERNAME:-}`; thiếu dòng này thì biến trong `.env` không vào container.
+2. Áp dụng ở máy chính: `dc up -d be_game` (hoặc đợi lần deploy sau).
+3. Kiểm tra trên **cả hai** backend: đăng nhập `/admin`, dòng của chủ sở hữu có nhãn chủ sở hữu (`isOwner: true` trong `GET /api/admin/users`), và một admin khác bấm khoá thì bị từ chối 403. Log khởi động không còn dòng `OWNER_USERNAME is not set`.
+
+Chủ sở hữu đổi tên thì đổi `OWNER_USERNAME` theo ở cả hai nơi ngay, vì bảo vệ đi theo tên hiện tại.
 
 ### Sau khi máy tắt cứng / bật lại
 

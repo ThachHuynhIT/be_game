@@ -1,6 +1,7 @@
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
+import { warnIfOwnerUnconfigured } from "../accounts/owner";
 import { accountsConfigError, getAccountService, warnIfAccountsUnconfigured } from "../accounts/service";
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
@@ -49,6 +50,7 @@ const SOCKET_SERVERS = new WeakMap<Server, WebSocketServer>();
 export function createGameServer(): Server {
   assertOriginConfig();
   warnIfAccountsUnconfigured();
+  warnIfOwnerUnconfigured();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 
   const server = createServer(async (req, res) => {
