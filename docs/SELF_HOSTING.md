@@ -30,7 +30,7 @@ flowchart LR
 
 - Traffic public đi **Cloudflare Tunnel → Traefik → be_game**. Không cổng nào của be_game hay Redis được publish ra host.
 - GitHub vào máy bằng Tailscale: runner gia nhập tailnet của chủ máy như một node tạm gắn `tag:ci`, rồi SSH vào.
-- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: frontend zonenop-game tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). **Hiện tại (16/10/2026) chưa chuyển sang kho chung** (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)): máy chính dùng Redis trong compose (`/api/health` báo `redisHost: "redis"`, `sharedStore: false`), máy dự phòng dùng Upstash, nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash và thiết kế là máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng. **Việc này chưa được chạy thử đầu-cuối** (buổi diễn tập failover thật, spec §7.3, chưa làm), nên chưa được coi là đã kiểm chứng; diễn tập là điều kiện bắt buộc trước khi chuyển (xem [Điều kiện trước khi chuyển](#điều-kiện-trước-khi-chuyển)).
+- Bản trên Vercel (`be-game-omega.vercel.app`, tự deploy từ `main`) là **máy dự phòng**: frontend zonenop-game tự chuyển sảnh và bàn mới sang đó khi `play-api.fudio101.com` không trả lời (thử `GET /api/rooms`, timeout 3 giây). **Hiện tại (16/10/2026) chưa chuyển sang kho chung** (xem [Chuyển sang / quay lại kho chung](#chuyển-sang--quay-lại-kho-chung)): máy chính dùng Redis trong compose (`/api/health` báo `sharedStore: false`), máy dự phòng dùng Upstash, nên phòng không chuyển qua lại, ván đang chơi trên máy chính chờ máy chính sống lại. Sau khi chuyển, hai máy dùng chung một Upstash và thiết kế là máy chính sập thì client tự vào lại đúng phòng đó trên máy dự phòng. **Việc này chưa được chạy thử đầu-cuối** (buổi diễn tập failover thật, spec §7.3, chưa làm), nên chưa được coi là đã kiểm chứng; diễn tập là điều kiện bắt buộc trước khi chuyển (xem [Điều kiện trước khi chuyển](#điều-kiện-trước-khi-chuyển)).
 
 ## Máy chủ `vsmart-zangyapro`
 
@@ -186,7 +186,7 @@ Chủ sở hữu đổi tên thì đổi `OWNER_USERNAME` theo ở cả hai nơi
 1. `dc ps` (be_game đã lên, `restart: unless-stopped`), `/api/health` trong container và public cùng trả `"ok":true`.
 2. `cat REVISION` khớp commit trên Vercel (không thì xem [Luồng phát hành](DEPLOYMENT.md#luồng-phát-hành)).
 3. **Đồng hồ**: so `now` của `play-api.fudio101.com/api/health` với `be-game-omega.vercel.app/api/health` (gọi cùng lúc, ví dụ `curl -s A & curl -s B & wait`): lệch ≤ ~2 giây. Máy vừa tắt cứng có thể giờ sai tới khi đồng bộ NTP; khi dùng kho chung, đồng hồ lệch làm sai hạn chót lượt, `lastSeen` và điểm chỉ mục sảnh (do máy này ghi, máy kia so với giờ của mình). Lệch thì báo chủ máy sửa NTP, và trong lúc đó cân nhắc quay lại Redis cục bộ.
-4. Nếu đang ở kho chung: `redisHost` của hai máy vẫn giống nhau.
+4. Nếu đang ở kho chung: `redisId` của hai máy vẫn giống nhau.
 
 ## Chuyển sang / quay lại kho chung
 
@@ -239,7 +239,7 @@ Chỉ chuyển khi **tất cả** những điều dưới đây đúng. Chưa m�
    ```
 
 6. `docker compose -f compose.selfhost.yml up -d be_game`
-7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải **cùng `redisHost`**. `sharedStore: true` chỉ có nghĩa "máy này dùng Redis ở xa" (Vercel luôn báo `true`), nên không dùng nó để biết hai máy có chung kho hay không: so `redisHost`. Bảng xếp hạng có cả điểm cũ của máy chính.
+7. Kiểm tra: `curl https://play-api.fudio101.com/api/health` và `https://be-game-omega.vercel.app/api/health` phải **cùng `redisId`**. `sharedStore: true` chỉ có nghĩa "máy này dùng Redis ở xa" (Vercel luôn báo `true`), nên không dùng nó để biết hai máy có chung kho hay không: so `redisId`. Bảng xếp hạng có cả điểm cũ của máy chính.
    - **Đồng hồ**: lấy trường `now` (epoch ms) của hai `/api/health` (gọi cùng lúc, ví dụ `curl -s A & curl -s B & wait`; hai giá trị phải chênh ≤ ~2000 ms, đã gồm độ trễ mạng). Lệch hơn thì sửa NTP của điện thoại (báo chủ máy) trước khi cho chạy. Lý do: hạn chót lượt chơi, `lastSeen` và điểm của chỉ mục sảnh do máy này ghi nhưng máy kia so sánh với giờ của mình; đồng hồ lệch làm bàn bị coi là hết hạn hoặc đã rời sớm/muộn, và sảnh dọn nhầm phòng.
 
 ### Quay lại Redis cục bộ

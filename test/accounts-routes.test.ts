@@ -61,6 +61,12 @@ async function registerAdmin(username = "Sep") {
   return login.json;
 }
 
+/** A new room stays out of the lobby until its first save (the creator joining); fixtures are saved once to be listed. */
+async function listed<S extends { code: string }>(store: { create(s: S): Promise<boolean>; save(s: S, v: number): Promise<boolean> }, room: S) {
+  await store.create(room);
+  await store.save(room, 1);
+}
+
 describe("account routes", () => {
   it("skips a room store that never resolves and still returns healthy rooms", async () => {
     const { json } = await register("HungStore");
@@ -94,19 +100,19 @@ describe("account routes", () => {
         for (let i = 0; i < 3; i++) expect(adapter.join(room, `room-token-${i}`, `Player${i}`, now, () => `p${++id}`, i === 0 ? uid : `other-${i}`).ok).toBe(true);
         expect(adapter.command(room, "room-token-0", { type: "start" }, now).ok).toBe(true);
         expect(adapter.summary(room, now)).toMatchObject({ status: "playing" });
-        await store.create(room);
+        await listed(store, room);
         expected.push({ game, code });
         const clone = JSON.parse(JSON.stringify(room));
         clone.code = `K${game}`;
         clone.seats[0].kicked = true;
-        await store.create(clone);
+        await listed(store, clone);
         const offline = JSON.parse(JSON.stringify(room));
         offline.code = `O${game}`;
         for (const p of offline.seats) if (p) p.lastSeen = now - 60_000;
-        await store.create(offline);
+        await listed(store, offline);
         const waiting = adapter.newRoom(`W${game}`);
         adapter.join(waiting, "waiting-token", "RoomOwner", now, () => "waiting", uid);
-        await store.create(waiting);
+        await listed(store, waiting);
       }
     } finally {
       unseed();

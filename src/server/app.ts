@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { getDeadline } from "@vercel/functions";
 import { WebSocketServer } from "ws";
@@ -6,7 +7,7 @@ import { accountsConfigError, getAccountService, warnIfAccountsUnconfigured } fr
 import { newRoom, randomCode } from "../game/room";
 import { ADAPTERS } from "./adapters";
 import { MAX_MESSAGE_BYTES, assertOriginConfig, attachConnection, isAllowedOrigin } from "./hub";
-import { handleAccountRoute } from "./authRoutes";
+import { clientIp, handleAccountRoute } from "./authRoutes";
 import { type GameKind, getRoomStore, redisUrl } from "./store";
 
 /**
@@ -84,7 +85,7 @@ export function createGameServer(): Server {
     } catch {
       deadline = undefined;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => attachConnection(ws, { deadline, game: route.game }));
+    wss.handleUpgrade(req, socket, head, (ws) => attachConnection(ws, { deadline, game: route.game, ip: clientIp(req) }));
   });
 
   SOCKET_SERVERS.set(server, wss);
@@ -165,24 +166,50 @@ async function leaderboard(game: GameKind, req: IncomingMessage, res: ServerResp
 /** Commit this process runs: set by the self-hosted deploy (BUILD_COMMIT) or by Vercel; null when unknown (local dev). */
 export const deployedCommit = (env: NodeJS.ProcessEnv = process.env): string | null => env.BUILD_COMMIT || env.VERCEL_GIT_COMMIT_SHA || null;
 
-/** create → load → subscribe → save → pub/sub round trip, with timings. `now` (epoch ms) lets an operator compare the clocks of two backends sharing a store. Never returns secrets. */
+/** Short, stable id of a Redis host: two backends share a store when their ids match, without publishing the host name. */
+export const redisIdOf = (host: string | null): string | null => (host ? createHash("sha256").update(host).digest("hex").slice(0, 12) : null);
+
+/** `/api/health` is public: every call within this window shares one store probe, so polling it cannot multiply Redis writes. */
+export const HEALTH_CACHE_MS = 10_000;
+type Probe = { status: number; body: Record<string, unknown> };
+let lastProbe: { at: number; result: Promise<Probe> } | null = null;
+
+/** Test hook: forget the shared probe. */
+export const resetHealthCache = () => {
+  lastProbe = null;
+};
+
+/**
+ * Store probe shared for HEALTH_CACHE_MS; everything else (`commit`, `accounts`, `now`…) is read per response, so the
+ * deploy sees a new commit at once and `now` still lets an operator compare two backends' clocks. Never returns secrets
+ * or the Redis host.
+ */
 async function health(res: ServerResponse) {
+  const at = Date.now();
+  if (!lastProbe || at - lastProbe.at >= HEALTH_CACHE_MS) lastProbe = { at, result: probe() };
+  const url = redisUrl();
+  const host = url ? new URL(url).hostname : null;
+  const info = {
+    region: process.env.VERCEL_REGION ?? "local",
+    redisConfigured: !!url,
+    redisId: redisIdOf(host),
+    sharedStore: isSharedStoreHost(host),
+    // The deploy workflow waits for this to equal the commit it shipped (old container / old Vercel build = mismatch).
+    commit: deployedCommit(),
+    games: Object.keys(ADAPTERS),
+    accounts: await accountsKind(),
+  };
+  const { status, body } = await lastProbe.result;
+  json(res, status, { ...body, now: Date.now(), ...info });
+}
+
+/** create → load → subscribe → save → pub/sub round trip on a throwaway room, with timings. */
+async function probe(): Promise<Probe> {
   const stepsMs: Record<string, number> = {};
   let start = Date.now();
   const mark = (name: string) => {
     stepsMs[name] = Date.now() - start;
     start = Date.now();
-  };
-  const url = redisUrl();
-  const info = {
-    region: process.env.VERCEL_REGION ?? "local",
-    redisConfigured: !!url,
-    redisHost: url ? new URL(url).hostname : null,
-    sharedStore: isSharedStoreHost(url ? new URL(url).hostname : null),
-    // The deploy workflow waits for this to equal the commit it shipped (old container / old Vercel build = mismatch).
-    commit: deployedCommit(),
-    games: Object.keys(ADAPTERS),
-    accounts: await accountsKind(),
   };
   try {
     const store = await withTimeout(getRoomStore("tienlen"), 5000, "connect");
@@ -208,9 +235,11 @@ async function health(res: ServerResponse) {
     mark("save");
     await withTimeout(got, 3000, "pubsub").catch(() => {});
     mark("pubsub");
-    json(res, 200, { ok: saved && notified, store: store.kind, saved, notified, stepsMs, now: Date.now(), ...info });
+    // The throwaway room must not take a lobby slot for 12 h (the save above listed it).
+    await withTimeout(store.remove(code), 5000, "remove").catch(() => {});
+    return { status: 200, body: { ok: saved && notified, store: store.kind, saved, notified, stepsMs } };
   } catch (err) {
-    json(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs, now: Date.now(), ...info });
+    return { status: 500, body: { ok: false, error: err instanceof Error ? err.message : String(err), stepsMs } };
   }
 }
 

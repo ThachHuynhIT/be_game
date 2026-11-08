@@ -7,7 +7,7 @@
 import IORedis, { type Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { GameRecord } from "../src/game/protocol";
-import { type RoomStore, createRedisRoomStore, keysFor, nameKey } from "../src/server/store";
+import { NEW_ROOM_TTL_SECONDS, type RoomStore, createRedisRoomStore, keysFor, nameKey } from "../src/server/store";
 
 const URL_ = process.env.REDIS_TEST_URL;
 if (!URL_) throw new Error("REDIS_TEST_URL is not set: npm run test:redis needs a disposable Redis (CI starts redis:7)");
@@ -73,17 +73,29 @@ afterAll(async () => {
 });
 
 describe("Redis room store (real Redis)", () => {
-  it("create stores version 1 with the room TTL and an index entry, and refuses a taken code", async () => {
+  it("create stores version 1 with the short new-room TTL and no index entry, and refuses a taken code", async () => {
     const s = newStore();
     const code = newCode();
-    const before = Date.now();
     expect(await s.create({ code })).toBe(true);
     expect(await s.create({ code, by: "again" })).toBe(false);
     expect(await s.load(code)).toEqual({ state: { code }, version: 1 });
     const ttl = await admin.ttl(full(K.room(code)));
-    expect(ttl).toBeGreaterThan(ROOM_TTL_SECONDS - 10);
-    expect(ttl).toBeLessThanOrEqual(ROOM_TTL_SECONDS);
+    expect(ttl).toBeGreaterThan(NEW_ROOM_TTL_SECONDS - 10);
+    expect(ttl).toBeLessThanOrEqual(NEW_ROOM_TTL_SECONDS);
+    expect(await admin.zscore(full(K.index), code)).toBeNull();
+  });
+
+  it("the first save gives a new room the full TTL and lists it; remove deletes both", async () => {
+    const s = newStore();
+    const code = newCode();
+    const before = Date.now();
+    await s.create({ code });
+    expect(await s.save({ code, by: "joined" }, 1)).toBe(true);
+    expect(await admin.ttl(full(K.room(code)))).toBeGreaterThan(ROOM_TTL_SECONDS - 10);
     expect(Number(await admin.zscore(full(K.index), code))).toBeGreaterThanOrEqual(before);
+    await s.remove(code);
+    expect(await s.load(code)).toBeNull();
+    expect(await admin.zscore(full(K.index), code)).toBeNull();
   });
 
   it("CAS: of two connections saving the same version, exactly one wins, 20 rounds out of 20", async () => {
