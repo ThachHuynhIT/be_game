@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { CHAT_COOLDOWN_MS, EMOJI_COOLDOWN_MS, type GameRecord } from "../game/protocol";
 import { type SocialRoom, cleanName, randomCode, sendChat } from "../game/room";
 import { ADAPTERS, type GameAdapter, type Result, tienlenAdapter } from "./adapters";
+import type { RateLimiter } from "../accounts/rateLimit";
 import { ACCOUNTS_UNCONFIGURED, type AccountService, accountsConfigError, getAccountService } from "../accounts/service";
 import { type CodedRoom, type GameKind, type RoomStore, getRoomStore, nameKey } from "./store";
 
@@ -31,6 +32,10 @@ export interface AttachOptions {
   /** Defaults to the process-wide hub for `game` (Tiến Lên if omitted). */
   hub?: RoomHub;
   game?: GameKind;
+  /** Client IP (`clientIp(req)`), the bucket for the room-create limit. */
+  ip?: string;
+  /** Limiter for room creation; defaults to the account service's (Redis when configured). */
+  limiter?: RateLimiter;
 }
 
 export const MAX_MESSAGE_BYTES = 16 * 1024;
@@ -38,6 +43,10 @@ export const MAX_MESSAGE_BYTES = 16 * 1024;
 const RECONNECT_LEAD_MS = 25_000;
 /** Messages allowed per connection per second before it is dropped. */
 const MAX_MESSAGES_PER_SECOND = 20;
+/** Rooms one client IP may create per window (shared by every socket and both backends' Redis limiter). */
+export const ROOM_CREATES_PER_IP = 20;
+export const ROOM_CREATE_WINDOW_SEC = 10 * 60;
+export const ROOM_CREATE_LIMITED = "Bạn tạo phòng quá nhanh, thử lại sau ít phút";
 
 type Ack = { ok: true; code?: string } | { ok: false; error: string };
 type OutMessage = ({ type: "ack"; id: number } & Ack) | { type: "state"; view: unknown } | { type: "reconnect" } | { type: "pong" } | { type: "signedOut"; reason: "replaced" | "revoked" };
@@ -369,24 +378,44 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
 
   const ack = (id: number, res: Ack | Result) => send(socket, { type: "ack", id, ...res });
 
+  /**
+   * False, with the socket signed out and closed, once the account behind this connection logged out, was disabled or
+   * changed its password. Rechecked at most every SESSION_RECHECK_MS on ANY message, so a client that stops sending
+   * pings still loses a revoked session. An account-store outage keeps the connection (logged).
+   */
+  const sessionStillValid = async (): Promise<boolean> => {
+    if (!conn.userId || !conn.session || now() - conn.authCheckedAt <= SESSION_RECHECK_MS) return true;
+    conn.authCheckedAt = now();
+    try {
+      const svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
+      const user = await withTimeout(svc.authenticate(conn.session), ACCOUNT_TIMEOUT_MS);
+      if (!user) {
+        send(socket, { type: "signedOut", reason: "revoked" });
+        cleanup();
+        socket.close(4001, "revoked");
+        return false;
+      }
+    } catch (err) {
+      console.error("[be_game] session recheck:", err instanceof Error ? err.message : "error");
+    }
+    return true;
+  };
+
+  /** Room-create limit per client IP; fails open (logged) when the limiter or the account service is down. */
+  const mayCreateRoom = async (): Promise<boolean> => {
+    try {
+      const limiter = opts.limiter ?? (await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS)).limiter;
+      return await limiter.hit(`room-create:${opts.ip || "unknown"}`, ROOM_CREATES_PER_IP, ROOM_CREATE_WINDOW_SEC);
+    } catch (err) {
+      console.error("[be_game] room-create limiter:", err instanceof Error ? err.message : "error");
+      return true;
+    }
+  };
+
   const handle = async (hub: RoomHub, msg: InMessage) => {
     const adapter = hub.adapter;
+    if (!(await sessionStillValid())) return;
     if (msg.type === "ping") {
-      if (conn.userId && conn.session && now() - conn.authCheckedAt > SESSION_RECHECK_MS) {
-        conn.authCheckedAt = now();
-        try {
-          const svc = await withTimeout(getAccountService(), ACCOUNT_TIMEOUT_MS);
-          const user = await withTimeout(svc.authenticate(conn.session), ACCOUNT_TIMEOUT_MS);
-          if (!user) {
-            send(socket, { type: "signedOut", reason: "revoked" });
-            hub.remove(conn);
-            socket.close(4001, "revoked");
-            return;
-          }
-        } catch (err) {
-          console.error("[be_game] session recheck:", err instanceof Error ? err.message : "error");
-        }
-      }
       send(socket, { type: "pong" });
       if (conn.code && conn.token) {
         const { token } = conn;
@@ -396,7 +425,10 @@ export function attachConnection(socket: HubSocket, opts: AttachOptions = {}) {
     }
 
     const id = Number(msg.id) || 0;
-    if (msg.type === "create") return ack(id, { ok: true, code: await hub.createRoom() });
+    if (msg.type === "create") {
+      if (!(await mayCreateRoom())) return ack(id, { ok: false, error: ROOM_CREATE_LIMITED });
+      return ack(id, { ok: true, code: await hub.createRoom() });
+    }
 
     if (msg.type === "join" || msg.type === "watch") {
       const code = cleanCode(msg.code);

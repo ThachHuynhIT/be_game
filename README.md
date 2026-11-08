@@ -19,7 +19,7 @@ src/local.ts trong Docker                (region sin1, Fluid compute)
 Redis trong compose (./data/redis)       Upstash Redis
 ```
 
-Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy như sơ đồ, và đó là trạng thái **hiện tại** (máy chính: `redisHost: "redis"`, `sharedStore: false`; máy dự phòng: Upstash). Việc chuyển máy chính sang Upstash chung (công cụ `src/tools/migrate-store.ts` và cấu hình `REDIS_URL` đã có trong repo) **chưa được thực hiện**, còn chờ buổi diễn tập. Khi đã chuyển, hai máy **dùng chung** một kho (phòng, sảnh, bảng điểm là một): xem mục "Frontend chọn backend thế nào" trong `docs/DEPLOYMENT.md` và "Chuyển sang / quay lại kho chung" trong `docs/SELF_HOSTING.md`. Môi trường, luồng phát hành và lưu ý vận hành: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy như sơ đồ, và đó là trạng thái **hiện tại** (máy chính: `sharedStore: false`; máy dự phòng: Upstash). Việc chuyển máy chính sang Upstash chung (công cụ `src/tools/migrate-store.ts` và cấu hình `REDIS_URL` đã có trong repo) **chưa được thực hiện**, còn chờ buổi diễn tập. Khi đã chuyển, hai máy **dùng chung** một kho (phòng, sảnh, bảng điểm là một): xem mục "Frontend chọn backend thế nào" trong `docs/DEPLOYMENT.md` và "Chuyển sang / quay lại kho chung" trong `docs/SELF_HOSTING.md`. Môi trường, luồng phát hành và lưu ý vận hành: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Game và endpoint
 
@@ -34,7 +34,7 @@ Hai backend chạy cùng code từ `main`. Redis: **riêng** mỗi máy như sơ
 | Ô Ăn Quan | `src/oanquan/` | 2–4 | `/api/oanquan/ws` | `/api/oanquan/rooms` | `/api/oanquan/leaderboard` |
 | Nối Chữ | `src/noichu/` | 2–8 | `/api/noichu/ws` | `/api/noichu/rooms` | `/api/noichu/leaderboard` |
 
-`/rooms` trả các phòng còn người (tối đa 30), `/leaderboard?limit=20` (1–100) trả điểm mọi thời đại. `GET /api/health` kiểm tra store (Redis/RAM, vòng pub/sub) và báo `commit` đang chạy, `redisHost`, `sharedStore`, `now` (chi tiết: `docs/GUIDE.md` → HTTP endpoints). Bảng route nằm ở `src/server/app.ts`.
+`/rooms` trả các phòng còn người (tối đa 30), `/leaderboard?limit=20` (1–100) trả điểm mọi thời đại. `GET /api/health` kiểm tra store (Redis/RAM, vòng pub/sub) và báo `commit` đang chạy, `redisId`, `sharedStore`, `now` (chi tiết: `docs/GUIDE.md` → HTTP endpoints). Bảng route nằm ở `src/server/app.ts`.
 
 **Tài khoản** (đăng nhập bắt buộc để vào bàn; chi tiết: `docs/GUIDE.md` → "Tài khoản và theo dõi"): `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET`/`PATCH /api/auth/me`, `GET`/`PATCH /api/auth/prefs` (cài đặt giao diện theo tài khoản, mỗi game một mục), `POST /api/track` (đếm lượt xem), và cho admin `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH /api/admin/users/<id>`. `/leaderboard` trả bảng mùa này (`{season:"current", rows}`) từ Postgres; `?season=old` trả bảng cũ. `/api/health` thêm `accounts: "postgres" | "memory" | "unconfigured" | "unavailable"`. Chưa có `DATABASE_URL` thì ở dev tài khoản nằm trong bộ nhớ (mất khi restart, mỗi máy một danh sách); ở production (`NODE_ENV=production` hoặc `VERCEL`) thì tài khoản **chưa cấu hình**: route auth/admin/track trả 503 và không vào bàn được, trừ khi đặt `ACCOUNTS_MEMORY=1`.
 

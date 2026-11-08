@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGameServer, deployedCommit, isSharedStoreHost } from "../src/server/app";
-import { GAME_KINDS, countCommands, keysFor } from "../src/server/store";
+import { createGameServer, deployedCommit, isSharedStoreHost, redisIdOf, resetHealthCache } from "../src/server/app";
+import { GAME_KINDS, countCommands, createMemoryRoomStore, getRoomStore, keysFor } from "../src/server/store";
 
 describe("shared store helpers", () => {
   afterEach(() => {
@@ -64,4 +64,50 @@ describe("GET /api/health", () => {
       await new Promise((resolve) => server.close(resolve));
     }
   }, 20_000);
+});
+
+describe("GET /api/health on a public endpoint", () => {
+  it("shares one store probe between calls, hides the Redis host and leaves no room behind", async () => {
+    resetHealthCache();
+    const store = await getRoomStore("tienlen");
+    const create = vi.spyOn(store, "create");
+    const server = createGameServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`;
+      const bodies = (await Promise.all([1, 2, 3].map(() => fetch(url).then((r) => r.json())))) as Record<string, unknown>[];
+      expect(create).toHaveBeenCalledTimes(1);
+      for (const b of bodies) {
+        expect(b.ok).toBe(true);
+        expect(b).not.toHaveProperty("redisHost");
+        expect(b).toHaveProperty("redisId");
+        expect(b).toHaveProperty("commit");
+      }
+      expect((await store.recentRooms(60)).some((r) => r.code.startsWith("HC"))).toBe(false);
+    } finally {
+      create.mockRestore();
+      resetHealthCache();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }, 20_000);
+
+  it("gives a Redis host a short stable id instead of its name", () => {
+    expect(redisIdOf("happy-osprey-296234.upstash.io")).toMatch(/^[0-9a-f]{12}$/);
+    expect(redisIdOf("happy-osprey-296234.upstash.io")).toBe(redisIdOf("happy-osprey-296234.upstash.io"));
+    expect(redisIdOf("redis")).not.toBe(redisIdOf("happy-osprey-296234.upstash.io"));
+    expect(redisIdOf(null)).toBeNull();
+  });
+});
+
+describe("new rooms (memory store)", () => {
+  it("stay out of the lobby until their first save, and remove deletes them", async () => {
+    const store = createMemoryRoomStore<{ code: string; by?: string }>();
+    expect(await store.create({ code: "NEW01" })).toBe(true);
+    expect(await store.recentRooms(10)).toEqual([]);
+    expect(await store.save({ code: "NEW01", by: "joined" }, 1)).toBe(true);
+    expect((await store.recentRooms(10)).map((r) => r.code)).toEqual(["NEW01"]);
+    await store.remove("NEW01");
+    expect(await store.load("NEW01")).toBeNull();
+    expect(await store.recentRooms(10)).toEqual([]);
+  });
 });

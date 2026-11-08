@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
+import { ROOM_CREATES_PER_IP, ROOM_CREATE_LIMITED, ROOM_CREATE_WINDOW_SEC, type RoomHub, attachConnection, createRoomHub } from "../src/server/hub";
 import { tienlenAdapter } from "../src/server/adapters";
 import { createMemoryRoomStore } from "../src/server/store";
 import { getAccountService } from "../src/accounts/service";
@@ -115,6 +115,59 @@ describe("RoomHub over WebSocket messages", () => {
     expect(await s.waitFor((m) => (m as { type: string }).type === "signedOut")).toMatchObject({ type: "signedOut", reason: "revoked" });
     expect(s.closed).toEqual({ code: 4001, reason: "revoked" });
     expect(JSON.stringify((await store.load(code))!.state)).toContain("token-revoked-xx");
+  });
+
+  it("rechecks a revoked session on any message, so a client that never pings is still signed out", async () => {
+    const session = await accountSession("RevokeNoPing");
+    const svc = await getAccountService();
+    const store = createMemoryRoomStore();
+    const hub = createRoomHub(store);
+    const code = await hub.createRoom();
+    let now = Date.now();
+    const s = new FakeSocket();
+    attachConnection(s, { hub, now: () => now });
+    await s.request({ type: "join", code, token: "token-noping-xxx", session });
+    await svc.logout((await svc.authenticate(session))!);
+    now += 30_001;
+    s.say({ type: "leave" });
+    expect(await s.waitFor((m) => (m as { type: string }).type === "signedOut")).toMatchObject({ type: "signedOut", reason: "revoked" });
+    expect(s.closed).toEqual({ code: 4001, reason: "revoked" });
+    // The command that triggered the check did not run: the seat is still there.
+    expect(JSON.stringify((await store.load(code))!.state)).toContain("token-noping-xxx");
+  });
+
+  it("limits room creation per client IP", async () => {
+    const hub = createRoomHub(createMemoryRoomStore());
+    const hits: [string, number, number][] = [];
+    let allow = true;
+    const limiter = {
+      hit: async (bucket: string, limit: number, windowSec: number) => {
+        hits.push([bucket, limit, windowSec]);
+        return allow;
+      },
+    };
+    const s = new FakeSocket();
+    attachConnection(s, { hub, ip: "203.0.113.7", limiter });
+    expect((await s.request({ type: "create" })).ok).toBe(true);
+    allow = false;
+    expect(await s.request({ type: "create" })).toMatchObject({ ok: false, error: ROOM_CREATE_LIMITED });
+    expect(hits).toEqual([
+      ["room-create:203.0.113.7", ROOM_CREATES_PER_IP, ROOM_CREATE_WINDOW_SEC],
+      ["room-create:203.0.113.7", ROOM_CREATES_PER_IP, ROOM_CREATE_WINDOW_SEC],
+    ]);
+  });
+
+  it("still creates rooms when the create limiter is down", async () => {
+    const hub = createRoomHub(createMemoryRoomStore());
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const s = new FakeSocket();
+      attachConnection(s, { hub, ip: "203.0.113.8", limiter: { hit: () => Promise.reject(new Error("redis down")) } });
+      expect((await s.request({ type: "create" })).ok).toBe(true);
+      expect(log).toHaveBeenCalledWith("[be_game] room-create limiter:", "redis down");
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("keeps the socket when session reauthentication fails", async () => {

@@ -45,10 +45,18 @@ export interface RoomStore<S extends CodedRoom = CodedRoom> {
   leaderboard(limit: number): Promise<LeaderboardEntry[]>;
   /** Most recently updated rooms, newest first. */
   recentRooms(limit: number): Promise<S[]>;
+  /** Deletes a room and its lobby entry (the health probe's throwaway room). */
+  remove(code: string): Promise<void>;
 }
 
 /** Rooms expire after this long without any change. */
 const ROOM_TTL_SECONDS = 12 * 60 * 60;
+/**
+ * A room nobody has joined yet expires after this long and stays out of the lobby index: the first save (the creator's
+ * join) gives it the full TTL and lists it. Rooms created and abandoned (or created in bulk) cost little and never push
+ * real rooms out of the lobby.
+ */
+export const NEW_ROOM_TTL_SECONDS = 15 * 60;
 /** Only rooms touched this recently show up in the lobby index. */
 const ROOM_INDEX_WINDOW_MS = 60 * 60 * 1000;
 /** How long a recorded game id is remembered (dedupes retries). */
@@ -124,15 +132,19 @@ class MemoryRoomStore<S extends CodedRoom> implements RoomStore<S> {
     return r;
   }
 
-  private put(state: S, version: number) {
+  private put(state: S, version: number, ttlSeconds = ROOM_TTL_SECONDS, listed = true) {
     const now = Date.now();
-    this.rooms.set(state.code, { json: JSON.stringify(state), version, expires: now + ROOM_TTL_SECONDS * 1000, touched: now });
+    this.rooms.set(state.code, { json: JSON.stringify(state), version, expires: now + ttlSeconds * 1000, touched: listed ? now : 0 });
   }
 
   async create(state: S) {
     if (this.live(state.code)) return false;
-    this.put(state, 1);
+    this.put(state, 1, NEW_ROOM_TTL_SECONDS, false);
     return true;
+  }
+
+  async remove(code: string) {
+    this.rooms.delete(code);
   }
 
   async load(code: string) {
@@ -187,11 +199,11 @@ class MemoryRoomStore<S extends CodedRoom> implements RoomStore<S> {
 }
 
 // Lua keeps check-and-set atomic. KEYS: room hash, room index. ARGV carries the pub/sub channel.
+// Create: short TTL and no index entry (NEW_ROOM_TTL_SECONDS); the first save lists the room.
 const CREATE_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
 redis.call('HSET', KEYS[1], 'state', ARGV[1], 'version', 1)
 redis.call('EXPIRE', KEYS[1], ARGV[2])
-redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
 return 1`;
 
 const SAVE_SCRIPT = `
@@ -237,8 +249,13 @@ class RedisRoomStore<S extends CodedRoom> implements RoomStore<S> {
   }
 
   async create(state: S) {
-    const res = await this.redis.eval(CREATE_SCRIPT, 2, this.k.room(state.code), this.k.index, JSON.stringify(state), ROOM_TTL_SECONDS, Date.now(), state.code);
+    const res = await this.redis.eval(CREATE_SCRIPT, 1, this.k.room(state.code), JSON.stringify(state), NEW_ROOM_TTL_SECONDS);
     return res === 1;
+  }
+
+  async remove(code: string) {
+    await this.redis.del(this.k.room(code));
+    await this.redis.zrem(this.k.index, code);
   }
 
   async load(code: string) {
