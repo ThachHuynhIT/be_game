@@ -1,9 +1,1 @@
-[
-  {
-    "id": "GHSA-g3hv-75wg-m249",
-    "package": "minimatch",
-    "owner": "ThachHuynhIT",
-    "reason": "Dev only, pulled in by eslint 10 and typescript-eslint 8 (they require minimatch ^10; the fix is 11.0.1). Only this repo's own config globs reach it.",
-    "expires": "2026-12-05"
-  }
-]
+[]
