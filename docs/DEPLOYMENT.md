@@ -14,7 +14,7 @@ Mục lục: [Môi trường](#các-môi-trường) · [Frontend chọn backend]
 | **Vercel production (dự phòng)** | `https://be-game-omega.vercel.app` | Vercel Functions, region `sin1`, Fluid compute | Upstash Redis (Singapore) | Vercel Git: **mỗi push vào `main`** | Frontend tự chuyển sang khi máy chính không trả lời; nơi quay về khi cần |
 | **Vercel preview** | `be-game-<hash>-thachs-projects-48e5eaf9.vercel.app` | Như trên | **Cùng Upstash Redis với production** (xem [Bài học](#bài-học-đã-gặp)) | Vercel Git: **mỗi push vào mọi nhánh khác** | Thử PR với frontend thật |
 | **Local** | `http://localhost:4000` | `npm run dev` | RAM (hoặc `REDIS_URL` nếu đặt) | Tay | Phát triển, test |
-| `docker-compose.yml` (Caddy) | — | Mẫu cho VPS có IP public | Redis volume | — | **Không dùng hiện tại**; giữ làm mẫu (README → "Tự host") |
+| `docker-compose.yml` (Caddy) | — | Mẫu cho VPS có IP public | Redis volume | — | **Không dùng hiện tại**; giữ làm mẫu (README → "Tự host"). Chuyển các biến tài khoản như `compose.selfhost.yml` |
 
 ```mermaid
 flowchart LR

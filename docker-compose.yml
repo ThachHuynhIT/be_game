@@ -1,5 +1,5 @@
 # be_game + Redis + Caddy (automatic HTTPS, WebSocket-aware reverse proxy).
-#   cp .env.example .env   # set GAME_DOMAIN and ALLOWED_ORIGIN
+#   cp .env.example .env   # set GAME_DOMAIN and ALLOWED_ORIGIN; for accounts also DATABASE_URL and SESSION_SECRET
 #   docker compose up -d --build
 # Only Caddy publishes ports (80/443); Redis and be_game stay on the internal network.
 services:
@@ -11,6 +11,14 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:?set ALLOWED_ORIGIN in .env (frontend origins, comma-separated)}
+      # Accounts, same as compose.selfhost.yml (docs/SELF_HOSTING.md). DATABASE_URL and SESSION_SECRET are secrets: only in .env (chmod 600).
+      # Listed one by one: a variable only in .env never reaches the container. Without DATABASE_URL accounts are
+      # "unconfigured" in production (sign-in and joins refused) unless ACCOUNTS_MEMORY=1 opts in to a RAM store.
+      DATABASE_URL: ${DATABASE_URL:-}
+      ACCOUNTS_MEMORY: ${ACCOUNTS_MEMORY:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
     depends_on:
       - redis
     expose:
