@@ -134,9 +134,9 @@ Region đã được đặt là `sin1` trong `vercel.json`.
 Mẫu này **không** phải cách máy chính đang chạy (máy chính dùng `compose.selfhost.yml` sau Traefik + Cloudflare Tunnel, xem mục kế tiếp). Dùng nó khi có một VPS mở được cổng 80/443: `docker-compose.yml` dựng ba service — `be_game` (`src/local.ts`), `redis` (bật AOF, volume `redis-data`) và `caddy` (HTTPS tự động, proxy cả WebSocket). Chỉ Caddy mở cổng 80/443; Redis và be_game nằm trong mạng nội bộ Docker.
 
 1. Trỏ DNS (A/AAAA) của một tên miền, ví dụ `game.example.com`, về IP server; mở firewall cổng 80, 443 (TCP) và 443 (UDP).
-2. Trên server: `git clone` repo, `cp .env.example .env`, rồi điền `GAME_DOMAIN=game.example.com` và `ALLOWED_ORIGIN=https://<domain-frontend>` (không để `*.vercel.app` nếu không cần).
+2. Trên server: `git clone` repo, `cp .env.example .env`, rồi điền `GAME_DOMAIN=game.example.com` và `ALLOWED_ORIGIN=https://<domain-frontend>` (không để `*.vercel.app` nếu không cần). Tài khoản (bắt buộc để đăng nhập và vào bàn): điền thêm `DATABASE_URL` và `SESSION_SECRET` (bí mật, `chmod 600 .env`, cách nhập ở `docs/SELF_HOSTING.md`); `docker-compose.yml` chuyển chúng vào container cùng `ACCOUNTS_MEMORY`, `ADMIN_USERNAMES`, `OWNER_USERNAME`.
 3. `docker compose up -d --build`.
-4. Kiểm tra `https://game.example.com/api/health` — mong đợi `"ok": true`, `"store": "redis"` (`region` hiển thị `local`).
+4. Kiểm tra `https://game.example.com/api/health` — mong đợi `"ok": true`, `"store": "redis"`, `"accounts": "postgres"` (`region` hiển thị `local`).
 5. Ở zonenop-game đặt `NEXT_PUBLIC_TIENLEN_SERVER_URL=https://game.example.com` rồi build lại (biến này gắn lúc build). Giữ bản Vercel chạy song song tới khi kiểm tra xong rồi mới tắt.
 
 Ghi chú vận hành:
